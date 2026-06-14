@@ -24,7 +24,7 @@ if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
 from dropsim import MLGInputs, SimError, default_mlg_inputs, run_simulation  # noqa: E402
-from dropsim.inputs import Point3, Rainure  # noqa: E402
+from dropsim.inputs import Point3, Rainure, compute_gas_oil_at_temperature, TEMP_REF_C  # noqa: E402
 from dropsim.metering import build_section_table  # noqa: E402
 from theme import apply_theme  # noqa: E402
 
@@ -116,6 +116,26 @@ def num_table(specs: list[tuple], key: str, *, height: int | None = None,
             st.session_state[f"f_{field}"] = float(row["Valeur"])
         except (TypeError, ValueError):
             st.session_state[f"f_{field}"] = float(spec[2])
+
+
+def value_table(rows: list[tuple[str, float]], *, height: int | None = None) -> None:
+    """Affiche un tableau en lecture seule (Paramètre / Valeur), même style que
+    ``num_table``. Utilisé pour montrer des valeurs *calculées* (non éditables)."""
+    df = pd.DataFrame([{"Paramètre": lbl, "Valeur": float(val)} for lbl, val in rows])
+    if height is None:
+        height = 38 + 35 * len(rows)
+    st.dataframe(
+        df,
+        column_config={
+            "Paramètre": st.column_config.TextColumn("Paramètre", alignment="right"),
+            "Valeur": st.column_config.NumberColumn(
+                "Valeur", width="small", alignment="center", format="%.4g"
+            ),
+        },
+        hide_index=True,
+        width="content",
+        height=height,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -343,6 +363,24 @@ with col_gaz:
         ("Volume gaz init. HP (cc)", "Vghp", inp.Vghp),
         ("Coefficient polytropique γ", "gamma", inp.gamma),
     ], "gaz_editor")
+    _temp = float(st.session_state.get("f_temperature", inp.temperature))
+    _adj = compute_gas_oil_at_temperature(
+        Pinitbp=float(st.session_state.get("f_Pinitbp", inp.Pinitbp)),
+        Vgbp=float(st.session_state.get("f_Vgbp", inp.Vgbp)),
+        Vh=float(st.session_state.get("f_Vh", inp.Vh)),
+        Pinithp=float(st.session_state.get("f_Pinithp", inp.Pinithp)),
+        Vghp=float(st.session_state.get("f_Vghp", inp.Vghp)),
+        visc=float(st.session_state.get("f_visc", inp.visc)),
+        temperature=_temp,
+    )
+    st.markdown(f"**Calculé à {_temp:g} °C** (référence {TEMP_REF_C:g} °C)")
+    value_table([
+        ("Pression init. BP (bar)", _adj["Pinitbp"]),
+        ("Volume gaz init. BP (cc)", _adj["Vgbp"]),
+        ("Volume d'huile (cc)", _adj["Vh"]),
+        ("Pression init. HP (bar)", _adj["Pinithp"]),
+        ("Volume gaz init. HP (cc)", _adj["Vghp"]),
+    ])
 with col_huile:
     st.subheader("Huile")
     num_table([
@@ -350,6 +388,20 @@ with col_huile:
         ("Module de compressibilité (MPa)", "bulk", inp.bulk),
         ("Masse volumique ρ (kg/m³)", "rho", inp.rho),
     ], "huile_editor")
+    _visc_temp = float(st.session_state.get("f_temperature", inp.temperature))
+    _visc_adj = compute_gas_oil_at_temperature(
+        Pinitbp=float(st.session_state.get("f_Pinitbp", inp.Pinitbp)),
+        Vgbp=float(st.session_state.get("f_Vgbp", inp.Vgbp)),
+        Vh=float(st.session_state.get("f_Vh", inp.Vh)),
+        Pinithp=float(st.session_state.get("f_Pinithp", inp.Pinithp)),
+        Vghp=float(st.session_state.get("f_Vghp", inp.Vghp)),
+        visc=float(st.session_state.get("f_visc", inp.visc)),
+        temperature=_visc_temp,
+    )
+    st.markdown(f"**Calculé à {_visc_temp:g} °C** (référence {TEMP_REF_C:g} °C)")
+    value_table([
+        ("Viscosité cinématique (cSt)", _visc_adj["visc"]),
+    ])
 
 st.subheader("Rainures de la butée hydraulique")
 diam_col, _diam_pad = st.columns([2, 5])

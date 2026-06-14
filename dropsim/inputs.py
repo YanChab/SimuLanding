@@ -35,6 +35,65 @@ class Rainure:
 
 
 # --------------------------------------------------------------------------- #
+#  Dépendance à la température (gaz + huile)
+# --------------------------------------------------------------------------- #
+# Température de référence (ambiante) à laquelle sont saisies les valeurs de gaz
+# et d'huile. Au-dessus ou en dessous, ces valeurs sont recalculées comme dans
+# les onglets « MLG » / « NLG » du classeur Excel d'origine.
+TEMP_REF_C: float = 25.0
+
+
+def _oil_viscosity_abs(temp_c: float) -> float:
+    """Viscosité cinématique absolue (cSt) — loi de l'Excel (cellule O35)."""
+    if temp_c > 0.0:
+        return 20.0 * math.exp(-0.023 * temp_c)
+    return 20.0 * math.exp(-0.077 * temp_c)
+
+
+def compute_gas_oil_at_temperature(
+    *,
+    Pinitbp: float,
+    Vgbp: float,
+    Vh: float,
+    Pinithp: float,
+    Vghp: float,
+    visc: float,
+    temperature: float,
+    temp_ref: float = TEMP_REF_C,
+) -> dict[str, float]:
+    """Recalcule les paramètres de gaz et d'huile à ``temperature``.
+
+    Reproduit les formules des onglets « MLG » / « NLG » de l'Excel (cellules
+    G41–G45 et O35), où les valeurs saisies correspondent à la température
+    ambiante ``temp_ref`` (25 °C par défaut) :
+
+    * volume d'huile : dilatation thermique ``Vh·(1 + 7e-4·ΔT)`` (G43) ;
+    * volume gaz BP : compensé par la variation de volume d'huile (G42) ;
+    * pression BP : loi de Gay-Lussac × correction de Boyle (G41) ;
+    * pression HP : loi de Gay-Lussac (G44) ;
+    * volume gaz HP : inchangé (G45) ;
+    * viscosité : loi exponentielle en température (O35).
+
+    Les valeurs renvoyées sont en unités d'affichage (bar, cc, cSt). À
+    ``temp_ref``, elles sont identiques aux valeurs saisies.
+    """
+    ratio = (temperature + 273.15) / (temp_ref + 273.15)
+    vh_t = Vh * (1.0 + 0.0007 * (temperature - temp_ref))
+    vgbp_t = Vgbp + (Vh - vh_t)
+    pinitbp_t = Pinitbp * ratio * (Vgbp / vgbp_t) if vgbp_t else Pinitbp
+    visc_ref = _oil_viscosity_abs(temp_ref)
+    visc_t = visc * _oil_viscosity_abs(temperature) / visc_ref if visc_ref else visc
+    return {
+        "Pinitbp": pinitbp_t,
+        "Vgbp": vgbp_t,
+        "Vh": vh_t,
+        "Pinithp": Pinithp * ratio,
+        "Vghp": Vghp,
+        "visc": visc_t,
+    }
+
+
+# --------------------------------------------------------------------------- #
 #  Entrées en unités d'affichage
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -281,6 +340,23 @@ class MLGInputs:
         return c
 
     # ------------------------------------------------------------------ #
+    def gas_oil_at_temperature(self) -> dict[str, float]:
+        """Paramètres de gaz/huile recalculés à ``self.temperature`` (cf. Excel).
+
+        Les valeurs sont en unités d'affichage (bar, cc, cSt) ; à 25 °C elles
+        sont identiques aux valeurs saisies.
+        """
+        return compute_gas_oil_at_temperature(
+            Pinitbp=self.Pinitbp,
+            Vgbp=self.Vgbp,
+            Vh=self.Vh,
+            Pinithp=self.Pinithp,
+            Vghp=self.Vghp,
+            visc=self.visc,
+            temperature=self.temperature,
+        )
+
+    # ------------------------------------------------------------------ #
     def to_si(self) -> "MLGParamsSI":
         """Convertit toutes les entrées en unités SI pour le moteur."""
         import numpy as np
@@ -295,6 +371,9 @@ class MLGInputs:
         mu = sorted(self.mu_curve, key=lambda t: t[0])
         mu_x = np.array([s for s, _ in mu])
         mu_y = np.array([m for _, m in mu])
+
+        # Gaz et huile recalculés à la température de chute (cf. Excel MLG/NLG).
+        adj = self.gas_oil_at_temperature()
 
         return MLGParamsSI(
             masse=self.masse,
@@ -317,13 +396,13 @@ class MLGInputs:
             HauteurPisBh=self.HauteurPisBh * U.MM_TO_M,
             DTrouDiap=self.DTrouDiap * U.MM_TO_M,
             NbTrouDiap=self.NbTrouDiap,
-            Pinitbp=self.Pinitbp * U.BAR_TO_PA,
-            Vgbp=self.Vgbp * U.CC_TO_M3,
-            Vh=self.Vh * U.CC_TO_M3,
-            Pinithp=self.Pinithp * U.BAR_TO_PA,
-            Vghp=self.Vghp * U.CC_TO_M3,
+            Pinitbp=adj["Pinitbp"] * U.BAR_TO_PA,
+            Vgbp=adj["Vgbp"] * U.CC_TO_M3,
+            Vh=adj["Vh"] * U.CC_TO_M3,
+            Pinithp=adj["Pinithp"] * U.BAR_TO_PA,
+            Vghp=adj["Vghp"] * U.CC_TO_M3,
             gamma=self.gamma,
-            visc=self.visc * U.CST_TO_M2S,
+            visc=adj["visc"] * U.CST_TO_M2S,
             bulk=self.bulk * U.MPA_TO_PA,
             rho=self.rho,
             unsprung_mass=self.unsprung_mass,

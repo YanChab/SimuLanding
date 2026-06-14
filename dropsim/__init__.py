@@ -4,7 +4,12 @@ Le moteur est volontairement séparé de toute interface utilisateur : il ne
 dépend que de NumPy et reproduit la méthodologie décrite dans EtatDesLieux.md.
 """
 from .errors import SimError, ErrorCollector, ErrorLevel
-from .inputs import MLGInputs, default_mlg_inputs
+from .inputs import (
+    MLGInputs,
+    default_mlg_inputs,
+    compute_gas_oil_at_temperature,
+    TEMP_REF_C,
+)
 from .simulation import run_simulation, SimulationResult
 
 __all__ = [
@@ -13,6 +18,8 @@ __all__ = [
     "ErrorLevel",
     "MLGInputs",
     "default_mlg_inputs",
+    "compute_gas_oil_at_temperature",
+    "TEMP_REF_C",
     "run_simulation",
     "SimulationResult",
 ]
