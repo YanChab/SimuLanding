@@ -1,8 +1,11 @@
--> affichage des données saisi en tableau
--> intégration de la température
+-> affichage des données saisi en tableau -> OK à améliorer encore
+-> intégration de la température -> OK a voir pour le module de compressibilité
 -> intégration du calcul en train droit
 -> intégration du calcul avion complet
 -> créer un système de sauvegarde des configurations
 -> lui faire faire un fichier scientifique
 -> revoir interface résultats
+-> rajouter un graphe sur le quel on peut mettre les courbes que l'on veut
 -> rajouter la fuite entre le palbh et la BH
+-> remplacement de la méthode de calcul en RK
+-> calcul des efforts aux liaisons
