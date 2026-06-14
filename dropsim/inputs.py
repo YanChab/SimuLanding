@@ -1,0 +1,449 @@
+"""Modèle de données d'entrée du train à balancier (MLG) + valeurs par défaut.
+
+Les valeurs sont saisies dans les **unités d'affichage** de l'Excel d'origine
+(mm, bar, cc, cSt, MPa, °, °C). La méthode :meth:`MLGInputs.to_si` produit la
+structure :class:`MLGParamsSI` utilisée en interne par le moteur (tout en SI).
+
+Les valeurs par défaut reproduisent l'onglet « MLG » du classeur pour le cas
+nominal (m = 1250 kg, Vz = 3.05 m/s, Vx = 39 m/s).
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+from . import units as U
+from .errors import ErrorCollector, ErrorLevel
+
+
+@dataclass
+class Point3:
+    """Point défini dans le repère avion, en millimètres."""
+
+    x: float
+    y: float
+    z: float
+
+
+@dataclass
+class Rainure:
+    """Rainure usinée dans la bague hydraulique (cotes en mm de course)."""
+
+    debut: float
+    fin: float
+    profondeur: float
+
+
+# --------------------------------------------------------------------------- #
+#  Entrées en unités d'affichage
+# --------------------------------------------------------------------------- #
+@dataclass
+class MLGInputs:
+    # --- Conditions de chute ---------------------------------------------- #
+    masse: float = 1250.0          # kg  (masse supportée)
+    vz: float = 3.05               # m/s (vitesse verticale de chute)
+    vx: float = 39.0               # m/s (vitesse horizontale avion)
+    lift: float = 0.67             # -   (coefficient de portance, 0..1)
+    pitch: float = 0.0             # deg (assiette)
+    roll: float = 0.0              # deg (gîte / roll, alfar)
+    temps_simu: float = 0.5        # s   (durée simulée)
+    it: float = 0.0001             # s   (pas de temps)
+    temperature: float = 25.0      # °C
+
+    # --- Amortisseur (géométrie) ------------------------------------------ #
+    Dpis: float = 56.0             # mm  diamètre piston
+    Dbh: float = 34.0              # mm  diamètre bague hydraulique (BH)
+    Dt: float = 50.0               # mm  diamètre tige
+    Dp: float = 40.0               # mm  diamètre intérieur tige
+    DInsideBh: float = 28.0        # mm  diamètre intérieur BH
+    Lbh: float = 200.0             # mm  longueur du trou de BH
+    course: float = 185.0          # mm  course totale (SAT)
+    DTrouPis: float = 1.5          # mm  diamètre trou piston de détente
+    NbTrouPis: float = 10.0        # -   nombre de trous piston
+    HauteurPisBh: float = 10.0     # mm  hauteur du piston de BH
+    DTrouDiap: float = 1.5         # mm  diamètre trou du clapet (diaphragme)
+    NbTrouDiap: float = 1.0        # -   nombre de trous clapet
+
+    # --- Ressort gazeux --------------------------------------------------- #
+    Pinitbp: float = 10.0          # bar pression initiale basse pression
+    Vgbp: float = 308.7597         # cc  volume gaz initial BP
+    Vh: float = 373.9988           # cc  volume d'huile
+    Pinithp: float = 70.0          # bar pression initiale haute pression
+    Vghp: float = 79.7399          # cc  volume gaz initial HP
+    gamma: float = 1.4             # -   coefficient polytropique
+
+    # --- Huile ------------------------------------------------------------ #
+    visc: float = 11.2541          # cSt viscosité cinématique
+    bulk: float = 196.08           # MPa module de compressibilité
+    rho: float = 855.0             # kg/m³ masse volumique
+
+    # --- Pneu ------------------------------------------------------------- #
+    unsprung_mass: float = 20.0    # kg  masse non suspendue
+    wheel_inertia: float = 0.17015  # kg.m² inertie polaire roue (j)
+    unload_radius: float = 222.25  # mm  rayon libre
+    kx: float = 1_000_000.0        # N/m raideur spring-back
+    cx: float = 1612.4515          # N.s/m amortissement spring-back
+    wheelmass: float = 10.4        # kg  masse roue (spring-back)
+
+    # --- Balancier -------------------------------------------------------- #
+    jyy: float = 1.0               # kg.m² inertie balancier autour de Y
+
+    # --- Points (mm, repère avion) ---------------------------------------- #
+    B: Point3 = field(default_factory=lambda: Point3(5540.0, -1190.0, 537.0))
+    A: Point3 = field(default_factory=lambda: Point3(5714.0, -1190.0, 222.0))
+    C: Point3 = field(default_factory=lambda: Point3(5860.0, -1190.0, 789.0))
+    R: Point3 = field(default_factory=lambda: Point3(5675.0, -1350.0, 292.0))
+    S: Point3 = field(default_factory=lambda: Point3(5675.0, -1350.0, 69.75))
+
+    # --- Tables ----------------------------------------------------------- #
+    # Pneu : (déflexion mm, charge kN)
+    tyre_curve: list[tuple[float, float]] = field(
+        default_factory=lambda: [
+            (0.0, 0.0),
+            (12.9, 3.162),
+            (25.8, 9.485),
+            (38.7, 16.7),
+            (55.567, 26.133),
+            (72.433, 35.567),
+            (89.3, 45.0),
+            (94.0, 50.0),
+        ]
+    )
+    # μ / taux de glissement : (slip, mu)
+    mu_curve: list[tuple[float, float]] = field(
+        default_factory=lambda: [
+            (0.0, 0.0),
+            (0.05, 0.53),
+            (0.08, 0.8),
+            (0.1, 0.89),
+            (0.15, 1.0),
+            (0.2, 0.98),
+            (0.25, 0.94),
+            (0.3, 0.89),
+            (0.4, 0.82),
+            (0.5, 0.77),
+            (0.6, 0.72),
+            (0.7, 0.65),
+            (0.8, 0.6),
+            (0.9, 0.53),
+            (1.0, 0.49),
+        ]
+    )
+    # Rainures de la bague hydraulique
+    diametre_rainure: float = 20.0  # mm
+    rainures: list[Rainure] = field(
+        default_factory=lambda: [
+            Rainure(0.0, 200.0, 16.5),
+            Rainure(0.0, 200.0, 17.0),
+            Rainure(0.0, 200.0, 17.0),
+            Rainure(20.0, 140.0, 15.5),
+            Rainure(60.0, 200.0, 15.5),
+            Rainure(0.0, 200.0, 17.0),
+            Rainure(0.0, 200.0, 16.0),
+            Rainure(0.0, 200.0, 17.0),
+        ]
+    )
+
+    # ------------------------------------------------------------------ #
+    def validate(self, collector: ErrorCollector | None = None) -> ErrorCollector:
+        """Valide les entrées (niveau SAISIE). Retourne le collecteur d'erreurs."""
+        c = collector or ErrorCollector()
+
+        def positive(value: float, field_name: str, label: str) -> None:
+            c.check(
+                not (value > 0),
+                code="VALEUR_NON_POSITIVE",
+                message=f"{label} doit être strictement positif (valeur reçue : {value}).",
+                field=field_name,
+                hint=f"Saisir une valeur > 0 pour {label}.",
+            )
+
+        # Conditions de chute
+        positive(self.masse, "masse", "La masse")
+        positive(self.it, "it", "Le pas de temps")
+        positive(self.temps_simu, "temps_simu", "La durée de simulation")
+        c.check(
+            self.it >= self.temps_simu,
+            code="PAS_TROP_GRAND",
+            message="Le pas de temps doit être nettement inférieur à la durée simulée.",
+            field="it",
+            hint="Diminuer le pas de temps (typiquement 1e-4 s).",
+        )
+        c.check(
+            not (0.0 <= self.lift <= 1.0),
+            code="LIFT_HORS_PLAGE",
+            message=f"Le coefficient de portance doit être compris entre 0 et 1 (reçu : {self.lift}).",
+            field="lift",
+            hint="Saisir un coefficient de portance entre 0 et 1.",
+        )
+        c.check(
+            self.vz <= 0,
+            code="VZ_NON_POSITIVE",
+            message="La vitesse verticale de chute doit être positive.",
+            field="vz",
+            hint="Saisir Vz > 0 (sens de chute).",
+        )
+
+        # Géométrie amortisseur
+        for name, label in [
+            ("Dpis", "Le diamètre piston"),
+            ("Dbh", "Le diamètre de bague hydraulique"),
+            ("Dt", "Le diamètre de tige"),
+            ("course", "La course"),
+            ("HauteurPisBh", "La hauteur de piston BH"),
+            ("DTrouPis", "Le diamètre trou piston"),
+            ("DTrouDiap", "Le diamètre trou clapet"),
+            ("NbTrouPis", "Le nombre de trous piston"),
+            ("NbTrouDiap", "Le nombre de trous clapet"),
+        ]:
+            positive(getattr(self, name), name, label)
+
+        c.check(
+            self.Dpis <= self.Dbh,
+            code="GEOMETRIE_SECTION_C",
+            message="Le diamètre piston doit être supérieur au diamètre de bague hydraulique "
+            "(sinon la section de compression est nulle ou négative).",
+            field="Dpis",
+            hint="Augmenter Dpis ou diminuer Dbh.",
+        )
+        c.check(
+            self.Dpis <= self.Dt,
+            code="GEOMETRIE_SECTION_D",
+            message="Le diamètre piston doit être supérieur au diamètre de tige "
+            "(sinon la section de détente est nulle ou négative).",
+            field="Dpis",
+            hint="Augmenter Dpis ou diminuer Dt.",
+        )
+
+        # Gaz
+        positive(self.Pinitbp, "Pinitbp", "La pression initiale BP")
+        positive(self.Vgbp, "Vgbp", "Le volume gaz BP")
+        positive(self.Pinithp, "Pinithp", "La pression initiale HP")
+        positive(self.Vghp, "Vghp", "Le volume gaz HP")
+        positive(self.gamma, "gamma", "Le coefficient polytropique")
+        c.check(
+            self.Pinithp < self.Pinitbp,
+            code="HP_INFERIEUR_BP",
+            message="La pression haute pression doit être supérieure à la basse pression.",
+            field="Pinithp",
+            hint="Vérifier l'ordre des chambres BP/HP.",
+        )
+
+        # Huile
+        positive(self.visc, "visc", "La viscosité")
+        positive(self.bulk, "bulk", "Le module de compressibilité")
+        positive(self.rho, "rho", "La masse volumique de l'huile")
+
+        # Pneu
+        positive(self.unload_radius, "unload_radius", "Le rayon libre du pneu")
+        positive(self.wheel_inertia, "wheel_inertia", "L'inertie de la roue")
+        positive(self.wheelmass, "wheelmass", "La masse de la roue")
+        positive(self.jyy, "jyy", "L'inertie du balancier")
+        c.check(
+            len(self.tyre_curve) < 2,
+            code="COURBE_PNEU_INSUFFISANTE",
+            message="La courbe de déflexion du pneu doit comporter au moins deux points.",
+            field="tyre_curve",
+            hint="Renseigner la table déflexion / charge.",
+        )
+        c.check(
+            len(self.mu_curve) < 2,
+            code="COURBE_MU_INSUFFISANTE",
+            message="La courbe μ / glissement doit comporter au moins deux points.",
+            field="mu_curve",
+            hint="Renseigner la table μ / slip.",
+        )
+
+        # Rainures
+        c.check(
+            len(self.rainures) < 1,
+            code="AUCUNE_RAINURE",
+            message="Au moins une rainure de bague hydraulique est nécessaire.",
+            field="rainures",
+            hint="Définir les rainures de la bague hydraulique.",
+        )
+        for i, r in enumerate(self.rainures):
+            c.check(
+                r.fin <= r.debut,
+                code="RAINURE_INVALIDE",
+                message=f"Rainure {i + 1} : la fin ({r.fin}) doit être supérieure au début ({r.debut}).",
+                field="rainures",
+                hint="Vérifier les cotes début/fin de la rainure.",
+            )
+            c.check(
+                r.profondeur > self.Dbh / 2.0,
+                code="RAINURE_TROP_PROFONDE",
+                message=f"Rainure {i + 1} : la profondeur ({r.profondeur} mm) ne peut pas dépasser "
+                f"le rayon de la bague hydraulique ({self.Dbh / 2.0} mm).",
+                field="rainures",
+                hint="Réduire la profondeur de la rainure.",
+            )
+        return c
+
+    # ------------------------------------------------------------------ #
+    def to_si(self) -> "MLGParamsSI":
+        """Convertit toutes les entrées en unités SI pour le moteur."""
+        import numpy as np
+
+        def pt(p: Point3) -> np.ndarray:
+            return np.array([p.x * U.MM_TO_M, p.y * U.MM_TO_M, p.z * U.MM_TO_M])
+
+        tyre = sorted(self.tyre_curve, key=lambda t: t[0])
+        tyre_defl = np.array([d * U.MM_TO_M for d, _ in tyre])
+        tyre_load = np.array([l * 1000.0 for _, l in tyre])  # kN -> N
+
+        mu = sorted(self.mu_curve, key=lambda t: t[0])
+        mu_x = np.array([s for s, _ in mu])
+        mu_y = np.array([m for _, m in mu])
+
+        return MLGParamsSI(
+            masse=self.masse,
+            vz=self.vz,
+            vx=self.vx,
+            lift=self.lift,
+            pitch=self.pitch * U.DEG_TO_RAD,
+            roll=self.roll * U.DEG_TO_RAD,
+            temps_simu=self.temps_simu,
+            it=self.it,
+            Dpis=self.Dpis * U.MM_TO_M,
+            Dbh=self.Dbh * U.MM_TO_M,
+            Dt=self.Dt * U.MM_TO_M,
+            Dp=self.Dp * U.MM_TO_M,
+            DInsideBh=self.DInsideBh * U.MM_TO_M,
+            Lbh=self.Lbh * U.MM_TO_M,
+            course=self.course * U.MM_TO_M,
+            DTrouPis=self.DTrouPis * U.MM_TO_M,
+            NbTrouPis=self.NbTrouPis,
+            HauteurPisBh=self.HauteurPisBh * U.MM_TO_M,
+            DTrouDiap=self.DTrouDiap * U.MM_TO_M,
+            NbTrouDiap=self.NbTrouDiap,
+            Pinitbp=self.Pinitbp * U.BAR_TO_PA,
+            Vgbp=self.Vgbp * U.CC_TO_M3,
+            Vh=self.Vh * U.CC_TO_M3,
+            Pinithp=self.Pinithp * U.BAR_TO_PA,
+            Vghp=self.Vghp * U.CC_TO_M3,
+            gamma=self.gamma,
+            visc=self.visc * U.CST_TO_M2S,
+            bulk=self.bulk * U.MPA_TO_PA,
+            rho=self.rho,
+            unsprung_mass=self.unsprung_mass,
+            wheel_inertia=self.wheel_inertia,
+            unload_radius=self.unload_radius * U.MM_TO_M,
+            kx=self.kx,
+            cx=self.cx,
+            wheelmass=self.wheelmass,
+            jyy=self.jyy,
+            B=pt(self.B),
+            A=pt(self.A),
+            C=pt(self.C),
+            R=pt(self.R),
+            S=pt(self.S),
+            tyre_defl=tyre_defl,
+            tyre_load=tyre_load,
+            mu_x=mu_x,
+            mu_y=mu_y,
+            diametre_rainure=self.diametre_rainure,  # gardé en mm (cf. metering)
+            rainures_debut=np.array([r.debut for r in self.rainures]),
+            rainures_fin=np.array([r.fin for r in self.rainures]),
+            rainures_profondeur=np.array([r.profondeur for r in self.rainures]),
+        )
+
+
+@dataclass
+class MLGParamsSI:
+    """Paramètres du modèle MLG, intégralement en unités SI (sauf rainures en mm).
+
+    Les rainures restent décrites en millimètres car la loi de metering
+    (``CalculBH``) est tabulée millimètre par millimètre, comme dans le VBA.
+    """
+
+    masse: float
+    vz: float
+    vx: float
+    lift: float
+    pitch: float
+    roll: float
+    temps_simu: float
+    it: float
+
+    Dpis: float
+    Dbh: float
+    Dt: float
+    Dp: float
+    DInsideBh: float
+    Lbh: float
+    course: float
+    DTrouPis: float
+    NbTrouPis: float
+    HauteurPisBh: float
+    DTrouDiap: float
+    NbTrouDiap: float
+
+    Pinitbp: float
+    Vgbp: float
+    Vh: float
+    Pinithp: float
+    Vghp: float
+    gamma: float
+
+    visc: float
+    bulk: float
+    rho: float
+
+    unsprung_mass: float
+    wheel_inertia: float
+    unload_radius: float
+    kx: float
+    cx: float
+    wheelmass: float
+
+    jyy: float
+
+    B: "object"
+    A: "object"
+    C: "object"
+    R: "object"
+    S: "object"
+
+    tyre_defl: "object"
+    tyre_load: "object"
+    mu_x: "object"
+    mu_y: "object"
+
+    diametre_rainure: float
+    rainures_debut: "object"
+    rainures_fin: "object"
+    rainures_profondeur: "object"
+
+    # --- Sections dérivées (m²) ------------------------------------------ #
+    @property
+    def Sc(self) -> float:
+        return (self.Dpis ** 2 - self.Dbh ** 2) * math.pi / 4.0
+
+    @property
+    def Sd(self) -> float:
+        return (self.Dpis ** 2 - self.Dt ** 2) * math.pi / 4.0
+
+    @property
+    def Sbh(self) -> float:
+        return self.Dbh ** 2 * math.pi / 4.0
+
+    @property
+    def St(self) -> float:
+        return self.Dt ** 2 * math.pi / 4.0
+
+    @property
+    def STrouPis(self) -> float:
+        return self.NbTrouPis * self.DTrouPis ** 2 * math.pi / 4.0
+
+    @property
+    def STrouDiap(self) -> float:
+        return self.NbTrouDiap * self.DTrouDiap ** 2 * math.pi / 4.0
+
+
+def default_mlg_inputs() -> MLGInputs:
+    """Retourne les entrées par défaut (cas nominal de l'onglet « MLG »)."""
+    return MLGInputs()
+
+
+__all__ = ["Point3", "Rainure", "MLGInputs", "MLGParamsSI", "default_mlg_inputs"]
