@@ -27,6 +27,9 @@ apply_theme()
 
 st.title("📈 Résultats de la simulation")
 
+# Hauteur fixe (en pixels) allouée à chaque graphe : fiable avec Streamlit/Plotly.
+GRAPH_HEIGHT = 640
+
 result = st.session_state.get("result")
 if result is None:
     st.info(
@@ -44,20 +47,42 @@ course_mm = df[COL["mlg_d"]] * 1000.0
 
 
 # --------------------------------------------------------------------------- #
-#  Synthèse
+#  Synthèse + graphes (côte à côte)
 # --------------------------------------------------------------------------- #
-st.subheader("Synthèse")
-s = result.summary
-m = st.columns(4)
-m[0].metric("Course max", f"{s['Course max (mm)']:.2f} mm")
-m[1].metric("Effort vertical max Fz", f"{s['Effort vertical max Fz (N)']:.0f} N")
-m[2].metric("Effort horizontal max Fx", f"{s['Effort horizontal max Fx (N)']:.0f} N")
-m[3].metric("Effort amortisseur max", f"{s['Effort amortisseur max (N)']:.0f} N")
-m = st.columns(4)
-m[0].metric("Pression gaz max", f"{s['Pression gaz max (bar)']:.1f} bar")
-m[1].metric("Pression compression max", f"{s['Pression compression max (bar)']:.1f} bar")
-m[2].metric("Accélération max", f"{s['Accélération max (g)']:.2f} g")
-m[3].metric("Nombre de pas", f"{s['Nombre de pas']:,}".replace(",", " "))
+col_summary, _col_spacer, col_graphs = st.columns([1, 0.1, 2], gap="large")
+
+with col_summary:
+    st.subheader("Synthèse")
+    rows = getattr(result, "summary_rows", None)
+    if rows:
+        import pandas as pd
+
+        summary_df = pd.DataFrame(
+            [
+                {
+                    "Paramètre": f"{lbl} ({unit})" if unit and unit != "-" else lbl,
+                    "Valeur": val,
+                }
+                for lbl, val, unit in rows
+            ]
+        )
+        st.dataframe(
+            summary_df,
+            column_config={
+                "Paramètre": st.column_config.TextColumn("Paramètre"),
+                "Valeur": st.column_config.NumberColumn("Valeur", format="%.4g", alignment="right"),
+            },
+            hide_index=True,
+            width="stretch",
+            height=38 + 35 * len(rows),
+        )
+    else:
+        s = result.summary
+        m = st.columns(2)
+        m[0].metric("Course max", f"{s['Course max (mm)']:.2f} mm")
+        m[1].metric("Effort vertical max Fz", f"{s['Effort vertical max Fz (N)']:.0f} N")
+        m[0].metric("Effort horizontal max Fx", f"{s['Effort horizontal max Fx (N)']:.0f} N")
+        m[1].metric("Effort amortisseur max", f"{s['Effort amortisseur max (N)']:.0f} N")
 
 
 # Style « papier millimétré » : fond crème, quadrillage principal + sous-quadrillage fin.
@@ -109,10 +134,10 @@ def line(x, ys: list[tuple[str, "object"]], title: str, xlab: str, ylab: str):
     for name, y in ys:
         fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name))
     fig.update_layout(
-        title=title,
-        margin=dict(l=10, r=10, t=40, b=10),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        height=380,
+        title=dict(text=title, y=0.98, yanchor="top"),
+        margin=dict(l=10, r=10, t=80, b=55),
+        legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
+        height=GRAPH_HEIGHT,
     )
     _apply_graph_paper(fig, xlab, ylab)
     return fig
@@ -121,13 +146,23 @@ def line(x, ys: list[tuple[str, "object"]], title: str, xlab: str, ylab: str):
 t = df[COL["temps"]]
 
 # --------------------------------------------------------------------------- #
-#  Courbes
+#  Courbes — un seul graphe par onglet
 # --------------------------------------------------------------------------- #
-tab1, tab2, tab3, tab4 = st.tabs(["Efforts", "Pressions", "Cinématique", "Animation"])
+with col_graphs:
+    tab_eff_t, tab_eff_c, tab_press, tab_cine, tab_acc, tab_perso, tab_anim = st.tabs(
+        [
+            "Efforts (temps)",
+            "Effort / course",
+            "Pressions",
+            "Course & déflexion",
+            "Accél. & vitesse",
+            "Personnalisé",
+            "Animation",
+        ]
+    )
 
-with tab1:
-    c = st.columns(2)
-    c[0].plotly_chart(
+with tab_eff_t:
+    st.plotly_chart(
         line(
             t,
             [
@@ -140,8 +175,11 @@ with tab1:
             "Effort (N)",
         ),
         use_container_width=True,
+        config={"responsive": True},
     )
-    c[1].plotly_chart(
+
+with tab_eff_c:
+    st.plotly_chart(
         line(
             course_mm,
             [("Fz (pneu/sol)", df[COL["tyre_ftyre"]])],
@@ -150,9 +188,10 @@ with tab1:
             "Fz (N)",
         ),
         use_container_width=True,
+        config={"responsive": True},
     )
 
-with tab2:
+with tab_press:
     st.plotly_chart(
         line(
             t,
@@ -166,11 +205,11 @@ with tab2:
             "Pression (bar)",
         ),
         use_container_width=True,
+        config={"responsive": True},
     )
 
-with tab3:
-    c = st.columns(2)
-    c[0].plotly_chart(
+with tab_cine:
+    st.plotly_chart(
         line(
             t,
             [
@@ -182,8 +221,11 @@ with tab3:
             "Déplacement (mm)",
         ),
         use_container_width=True,
+        config={"responsive": True},
     )
-    c[1].plotly_chart(
+
+with tab_acc:
+    st.plotly_chart(
         line(
             t,
             [
@@ -195,9 +237,89 @@ with tab3:
             "g  /  m·s⁻¹",
         ),
         use_container_width=True,
+        config={"responsive": True},
     )
 
-with tab4:
+with tab_perso:
+    st.caption(
+        "Choisissez l'abscisse et jusqu'à 5 grandeurs en ordonnée. Chaque courbe "
+        "peut être tracée sur l'axe Y de gauche ou de droite (second axe)."
+    )
+    options = list(df.columns)
+    none_label = "— aucune —"
+    x_label = st.selectbox("Abscisse (X)", options, index=0, key="perso_x")
+
+    y_default = COL["tyre_ftyre"] if COL["tyre_ftyre"] in options else options[1]
+    defaults = [y_default] + [none_label] * 4
+    selections: list[tuple[str, bool]] = []
+    for i in range(5):
+        c_curve, c_axis = st.columns([3, 1])
+        opts = ([none_label] + options) if i > 0 else options
+        idx = opts.index(defaults[i]) if defaults[i] in opts else 0
+        y_sel = c_curve.selectbox(f"Courbe {i + 1}", opts, index=idx, key=f"perso_y{i}")
+        on_right = c_axis.checkbox("Axe droit", key=f"perso_axis{i}")
+        if y_sel != none_label:
+            selections.append((y_sel, on_right))
+
+    if not selections:
+        st.info("Sélectionnez au moins une grandeur en ordonnée.", icon="ℹ️")
+    else:
+        any_right = any(right for _, right in selections)
+        left_labels = [lbl for lbl, right in selections if not right]
+        right_labels = [lbl for lbl, right in selections if right]
+
+        def _nice_range(labels: list[str], ndiv: int) -> tuple[float, float, float]:
+            """Plage [min, max] arrondie et pas pour ``ndiv`` intervalles."""
+            vals = np.concatenate([df[lbl].to_numpy(dtype=float) for lbl in labels])
+            vals = vals[np.isfinite(vals)]
+            lo, hi = float(np.min(vals)), float(np.max(vals))
+            if lo == hi:
+                lo, hi = lo - 1.0, hi + 1.0
+            span = hi - lo
+            raw = span / ndiv
+            mag = 10.0 ** np.floor(np.log10(raw))
+            step = mag * min(m for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+            lo = np.floor(lo / step) * step
+            hi = lo + step * ndiv
+            return lo, hi, step
+
+        NDIV = 8
+        fig = go.Figure()
+        for lbl, right in selections:
+            fig.add_trace(
+                go.Scatter(
+                    x=df[x_label], y=df[lbl], mode="lines", name=lbl,
+                    yaxis="y2" if right else "y",
+                )
+            )
+        title = f"Courbes en fonction de {x_label}"
+        yaxis = _grid_axis(" / ".join(left_labels) if left_labels else "")
+        if left_labels:
+            lo, hi, step = _nice_range(left_labels, NDIV)
+            yaxis.update(range=[lo, hi], tick0=lo, dtick=step)
+        fig.update_layout(
+            title=dict(text=title, y=0.98, yanchor="top"),
+            margin=dict(l=10, r=10, t=80, b=55),
+            legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
+            height=GRAPH_HEIGHT,
+            plot_bgcolor=GRAPH_PAPER_BG,
+            paper_bgcolor="white",
+            xaxis=_grid_axis(x_label),
+            yaxis=yaxis,
+        )
+        if any_right:
+            right_axis = _grid_axis(" / ".join(right_labels))
+            lo, hi, step = _nice_range(right_labels, NDIV)
+            right_axis.update(
+                overlaying="y", side="right",
+                showgrid=False, zeroline=False,
+                minor=dict(showgrid=False),
+                range=[lo, hi], tick0=lo, dtick=step,
+            )
+            fig.update_layout(yaxis2=right_axis)
+        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
+
+with tab_anim:
     geom = getattr(st.session_state.result, "geometry", None)
     if geom is None or geom.empty:
         st.info(

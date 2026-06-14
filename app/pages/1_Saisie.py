@@ -352,6 +352,9 @@ with col_amort:
         ("Hauteur piston BH (mm)", "HauteurPisBh", inp.HauteurPisBh),
         ("Ø trou clapet (mm)", "DTrouDiap", inp.DTrouDiap),
         ("Nb trous clapet", "NbTrouDiap", inp.NbTrouDiap),
+        ("Section tore joint (mm)", "tore", inp.tore),
+        ("Friction sèche joint fc (N/mm)", "fc", inp.fc),
+        ("Coeff. friction pression fh", "fh", inp.fh),
     ], "amort_editor")
 with col_gaz:
     st.subheader("Ressort gazeux")
@@ -485,6 +488,7 @@ def _build_inputs() -> MLGInputs:
         DTrouPis=g("DTrouPis"), NbTrouPis=g("NbTrouPis"),
         HauteurPisBh=g("HauteurPisBh"), DTrouDiap=g("DTrouDiap"),
         NbTrouDiap=g("NbTrouDiap"),
+        tore=g("tore"), fc=g("fc"), fh=g("fh"),
         Pinitbp=g("Pinitbp"), Vgbp=g("Vgbp"), Vh=g("Vh"),
         Pinithp=g("Pinithp"), Vghp=g("Vghp"), gamma=g("gamma"),
         visc=g("visc"), bulk=g("bulk"), rho=g("rho"),
@@ -506,7 +510,7 @@ def _build_inputs() -> MLGInputs:
 #  Actions
 # --------------------------------------------------------------------------- #
 st.divider()
-col_run, col_reset, _ = st.columns([1, 1, 4])
+col_run, col_reset, col_msg = st.columns([1, 1, 4])
 launch = col_run.button("▶️ Lancer le calcul", type="primary", use_container_width=True)
 reset = col_reset.button("↺ Réinitialiser", use_container_width=True)
 
@@ -538,7 +542,7 @@ if launch:
             with st.spinner("Calcul en cours…"):
                 result = run_simulation(new_inputs)
             st.session_state.result = result
-            st.success(
+            col_msg.success(
                 "Calcul terminé. Consultez la page **Résultats**.", icon="✅"
             )
             if result.warnings:
@@ -552,7 +556,7 @@ if launch:
                 st.session_state.field_errors = {
                     exc.field: str(exc.message) + (f" — {exc.hint}" if exc.hint else "")
                 }
-            st.error(
+            col_msg.error(
                 f"**[{exc.level.value}] {exc.code}** "
                 f"{'(champ : ' + exc.field + ') ' if exc.field else ''}: "
                 f"{exc.message}"

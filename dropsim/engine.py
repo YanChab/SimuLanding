@@ -272,7 +272,13 @@ def run_mlg(
             fgas = p.St * pg
             if v != 0.0:
                 coeff_atte = 1.0 / math.sqrt(0.95 + 0.28 * math.sqrt(1.0 / (90.0 * abs(v))))
-                ffrijoi = _sign(v) * 100.0 * coeff_atte
+                # Friction du joint : terme de friction sèche (proportionnel au
+                # périmètre de tige) + terme dû à la pression (proportionnel à
+                # l'aire annulaire du joint), cf. module de classe MLG de l'Excel.
+                s_seal = math.pi / 4.0 * (p.ASeal ** 2 - p.Dt ** 2)
+                ffrijoi = _sign(v) * coeff_atte * (
+                    p.fc * p.Dt * math.pi + p.fh * pd * s_seal
+                )
             else:
                 ffrijoi = 0.0
             ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + _endstop(d, p.course)

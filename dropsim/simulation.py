@@ -26,6 +26,8 @@ class SimulationResult:
     n_steps: int
     warnings: list[SimError] = field(default_factory=list)
     geometry: pd.DataFrame | None = None  # positions des points (mm) pour l'animation
+    summary_rows: list[tuple[str, float, str]] = field(default_factory=list)
+    # (libellé, valeur, unité) — reproduit la zone B46:C61 de « Summary MLG ».
 
 
 def _subsample(data: dict[str, np.ndarray], max_points: int = 1000) -> dict[str, np.ndarray]:
@@ -96,13 +98,77 @@ def run_simulation(inputs: MLGInputs, max_points: int = 1000) -> SimulationResul
         "Nombre de pas": int(engine_out.n_steps),
     }
 
+    summary_rows = _build_summary_rows(full, inputs)
+
     return SimulationResult(
         df=df,
         summary=summary,
         n_steps=engine_out.n_steps,
         warnings=engine_out.warnings,
         geometry=geom_df,
+        summary_rows=summary_rows,
     )
+
+
+def _build_summary_rows(
+    full: dict[str, np.ndarray], inputs: MLGInputs
+) -> list[tuple[str, float, str]]:
+    """Reproduit la synthèse B46:C61 de l'onglet « Summary MLG ».
+
+    Les efforts sont en N, les courses en mm, les vitesses en m/s, les pressions
+    en bar et l'accélération en g. ``Load factor`` et ``Ground load factor`` sont
+    sans dimension.
+    """
+    fz = full["tyre_ftyre"]          # Tyre.FTyre (N)
+    fx = full["tr_x"]                # TR.RsolX (N) — effort horizontal
+    stroke = full["mlg_d"]           # MLG.d (m)
+    vel = full["mlg_v"]              # MLG.v (m/s)
+    pg = full["pg"]                  # MLG.Pg (bar)
+    pc = full["pc"]                  # MLG.Pc (bar)
+    pd_ = full["pd"]                 # MLG.Pd (bar)
+    acc = full["accms"]             # AccMs.RsolZ (m/s²)
+
+    # Spin up : maximum de l'effort horizontal.
+    i_spin = int(np.argmax(fx))
+    fx_spin = float(fx[i_spin])
+    fz_spin = float(fz[i_spin])
+    stroke_spin_m = float(stroke[i_spin])
+
+    # Spring back : instant où l'effort horizontal Fx est minimal.
+    i_sb = int(np.argmin(fx))
+    fx_springback = float(fx[i_sb])
+    fz_springback = float(fz[i_sb])
+    stroke_springback_m = float(stroke[i_sb])
+
+    # Fz max.
+    i_fzmax = int(np.argmax(fz))
+    fz_max = float(fz[i_fzmax])
+    stroke_fzmax_m = float(stroke[i_fzmax])
+
+    masse = inputs.masse
+    lift = inputs.lift
+    ground_load_factor = fz_max / 9.81 / masse if masse else 0.0
+    load_factor = ground_load_factor + lift
+
+    return [
+        ("Fx Spin up", fx_spin, "N"),
+        ("Fz Spin up", fz_spin, "N"),
+        ("Stroke spin up", stroke_spin_m * 1000.0, "mm"),
+        ("Fx Spring back", fx_springback, "N"),
+        ("Fz Spring back", fz_springback, "N"),
+        ("Stroke Spring back", stroke_springback_m * 1000.0, "mm"),
+        ("Fz Max", fz_max, "N"),
+        ("Stroke Fzmax", stroke_fzmax_m * 1000.0, "mm"),
+        ("Max damper stroke", float(np.max(stroke)) * 1000.0, "mm"),
+        ("Max damper velocity", float(np.max(vel)), "m/s"),
+        ("Max gas pressure", float(np.max(pg)), "bar"),
+        ("Max comp pressure", float(np.max(pc)), "bar"),
+        ("Max rebound pressure", float(np.max(pd_)), "bar"),
+        ("Max Vertical acc", float(np.max(np.abs(acc))) / 9.81, "g"),
+        ("Load factor", load_factor, "-"),
+        ("Ground load factor", ground_load_factor, "-"),
+    ]
+
 
 
 __all__ = ["run_simulation", "SimulationResult"]

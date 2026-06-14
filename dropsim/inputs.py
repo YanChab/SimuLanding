@@ -123,6 +123,15 @@ class MLGInputs:
     DTrouDiap: float = 1.5         # mm  diamètre trou du clapet (diaphragme)
     NbTrouDiap: float = 1.0        # -   nombre de trous clapet
 
+    # --- Joint d'étanchéité (friction) ------------------------------------ #
+    # Friction du joint dépendant de la pression et de la taille du joint
+    # (formule du module de classe MLG du classeur Excel). Le diamètre effectif
+    # du joint est déduit du diamètre de tige et de la section du tore :
+    # ASeal = Dt + 2·tore.
+    tore: float = 2.78            # mm  section du joint torique (MLG!O40)
+    fc: float = 0.3064566929133859  # N/mm  coefficient de friction sèche (MLG!O43)
+    fh: float = 0.0207             # -   coefficient de friction lié à la pression
+
     # --- Ressort gazeux --------------------------------------------------- #
     Pinitbp: float = 10.0          # bar pression initiale basse pression
     Vgbp: float = 308.7597         # cc  volume gaz initial BP
@@ -396,6 +405,9 @@ class MLGInputs:
             HauteurPisBh=self.HauteurPisBh * U.MM_TO_M,
             DTrouDiap=self.DTrouDiap * U.MM_TO_M,
             NbTrouDiap=self.NbTrouDiap,
+            ASeal=(self.Dt + 2.0 * self.tore) * U.MM_TO_M,  # Ø joint = Dt + 2·tore
+            fc=self.fc * 1000.0,  # N/mm -> N/m
+            fh=self.fh,
             Pinitbp=adj["Pinitbp"] * U.BAR_TO_PA,
             Vgbp=adj["Vgbp"] * U.CC_TO_M3,
             Vh=adj["Vh"] * U.CC_TO_M3,
@@ -457,6 +469,10 @@ class MLGParamsSI:
     HauteurPisBh: float
     DTrouDiap: float
     NbTrouDiap: float
+
+    ASeal: float
+    fc: float
+    fh: float
 
     Pinitbp: float
     Vgbp: float
