@@ -14,7 +14,7 @@ import numpy as np
 
 from .errors import ErrorCollector, ErrorLevel, SimError
 from .gas import GasSpring
-from .geometry import chgt_rep, deter_pos_bal_a, deter_pos_bal_r
+from .geometry import chgt_rep, deter_pos_bal_a, deter_pos_bal_r, rotate_about
 from .hydraulic import _sign, calcul_hydrau
 from .inputs import MLGParamsSI
 from .metering import build_section_table, section_bh
@@ -67,6 +67,13 @@ class EngineOutput:
     data: dict[str, np.ndarray]
     n_steps: int
     warnings: list[SimError] = field(default_factory=list)
+    geometry: dict[str, np.ndarray] = field(default_factory=dict)
+
+
+# Positions géométriques enregistrées pour l'animation (repère train, en mm).
+GEOMETRY_KEYS: tuple[str, ...] = (
+    "ax", "az", "bx", "bz", "cx", "cz", "rx", "rz", "ground_z", "wheel_radius",
+)
 
 
 def _endstop(d: float, course: float) -> float:
@@ -106,18 +113,28 @@ def run_mlg(
     R = p.R.astype(float).copy()
 
     entraxe_init = float(np.linalg.norm(C - A))
-    lg_ab = float(np.linalg.norm(B - A))
+    lg_ab = math.hypot(B[0] - A[0], B[2] - A[2])  # rayon planaire (X-Z) du bras B-A
     lg_rb = math.hypot(B[0] - R[0], B[2] - R[2])
     lg_ra = math.hypot(A[0] - R[0], A[2] - R[2])
 
-    # Changement de repère (pitch/roll) appliqué à A, C, R ; B reste inchangé.
-    A = chgt_rep(A, p.pitch, p.roll)
-    C = chgt_rep(C, p.pitch, p.roll)
-    R = chgt_rep(R, p.pitch, p.roll)
+    # Attitude (pitch/roll) : rotation RIGIDE de tout le train autour du point
+    # de contact au sol S (et non autour de l'origine du repère avion, très
+    # éloignée, ce qui déformait la géométrie). Le train pivote ainsi sur place.
+    # Avec pitch = roll = 0, cette transformation est l'identité (cas validé).
     S = R.copy()
-    S[2] = R[2] - p.unload_radius  # point de contact sol, dérivé de R
-
+    S[2] = R[2] - p.unload_radius  # point de contact initial (sous la roue)
+    A = rotate_about(A, S, p.pitch, p.roll)
+    B = rotate_about(B, S, p.pitch, p.roll)
+    C = rotate_about(C, S, p.pitch, p.roll)
+    R = rotate_about(R, S, p.pitch, p.roll)
+    S = R.copy()
+    S[2] = R[2] - p.unload_radius  # contact recalculé sous la roue pivotée
     pms_rlg_z = float(chgt_rep(np.array([0.0, 0.0, p.masse * G * (1.0 - p.lift)]), p.pitch, p.roll)[2])
+
+    # Écart en Y entre C (sur la masse suspendue) et A (sur le balancier). Constant
+    # pendant la simulation : il rend l'amortisseur oblique et réduit la part de son
+    # effort qui entraîne le balancier (projection 3D sur le plan X-Z).
+    dy_ca = float(C[1] - A[1])
 
     Ms = p.masse
     Jyy = p.jyy
@@ -131,6 +148,16 @@ def run_mlg(
         message="L'entraxe initial de l'amortisseur est nul (points A et C confondus).",
         level=ErrorLevel.PRECALCUL,
         hint="Vérifier les coordonnées des points A et C.",
+    ):
+        c.raise_if_any()
+
+    if c.check(
+        not (entraxe_init > abs(dy_ca)),
+        code="AMORTISSEUR_TROP_COURT",
+        message="La longueur d'amortisseur est inférieure à l'écart en Y entre A et C "
+        "(amortisseur géométriquement impossible).",
+        level=ErrorLevel.PRECALCUL,
+        hint="Augmenter la distance A-C ou réduire l'écart en Y entre A et C.",
     ):
         c.raise_if_any()
 
@@ -166,6 +193,8 @@ def run_mlg(
     n_out = n_it + 1
 
     out = {k: np.zeros(n_out) for k in OUTPUT_COLUMNS}
+    geom = {k: np.zeros(n_out) for k in GEOMETRY_KEYS}
+    ground_z = float(S[2])  # niveau du sol (fixe dans le repère train)
 
     accms = 0.0
     vitms = -Vitesse
@@ -250,9 +279,11 @@ def run_mlg(
             fhyd = p.Sc * (pc - pg) - p.Sd * (pd - pg)
             pg_prev = pg
 
-            # Efforts dans l'amortisseur et le balancier (pour le pas suivant)
+            # Efforts dans l'amortisseur et le balancier (pour le pas suivant).
+            # La projection 3D (division par l'entraxe réel) réduit naturellement
+            # les composantes X-Z lorsque l'amortisseur est oblique en Y.
             ta_z = -ftot * ((C[2] - A[2]) / entraxe)
-            ta_y = 0.0
+            ta_y = -ftot * ((C[1] - A[1]) / entraxe)
             ta_x = -ftot * ((C[0] - A[0]) / entraxe)
             tb_x = -ta_x - tr_x
             tb_y = -ta_y - tr_y
@@ -307,14 +338,28 @@ def run_mlg(
         out["reaction_v"][i] = ftyre
         out["reaction_h"][i] = tr_x
 
+        # Positions géométriques (mm) pour l'animation
+        geom["ax"][i] = A[0]
+        geom["az"][i] = A[2]
+        geom["bx"][i] = B[0]
+        geom["bz"][i] = B[2]
+        geom["cx"][i] = C[0]
+        geom["cz"][i] = C[2]
+        geom["rx"][i] = R[0]
+        geom["rz"][i] = R[2]
+        geom["ground_z"][i] = ground_z
+        geom["wheel_radius"][i] = R[2] - ground_z
+
         # Arrêt anticipé (cf. VBA : remontée de l'amortisseur en fin de course)
         if v < 0.0 and i > 900000:
             n_steps = i
             for k in out:
                 out[k] = out[k][: i + 1]
+            for k in geom:
+                geom[k] = geom[k][: i + 1]
             break
 
-    return EngineOutput(data=out, n_steps=n_steps, warnings=c.warnings)
+    return EngineOutput(data=out, n_steps=n_steps, warnings=c.warnings, geometry=geom)
 
 
-__all__ = ["run_mlg", "EngineOutput", "OUTPUT_COLUMNS"]
+__all__ = ["run_mlg", "EngineOutput", "OUTPUT_COLUMNS", "GEOMETRY_KEYS"]

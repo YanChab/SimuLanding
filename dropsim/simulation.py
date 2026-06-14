@@ -25,6 +25,7 @@ class SimulationResult:
     summary: dict[str, float]            # grandeurs synthétiques
     n_steps: int
     warnings: list[SimError] = field(default_factory=list)
+    geometry: pd.DataFrame | None = None  # positions des points (mm) pour l'animation
 
 
 def _subsample(data: dict[str, np.ndarray], max_points: int = 1000) -> dict[str, np.ndarray]:
@@ -79,7 +80,10 @@ def run_simulation(inputs: MLGInputs, max_points: int = 1000) -> SimulationResul
 
     data = _subsample(engine_out.data, max_points=max_points)
     df = pd.DataFrame({OUTPUT_COLUMNS[k]: v for k, v in data.items()})
-
+    geom = _subsample(engine_out.geometry, max_points=max_points) if engine_out.geometry else {}
+    geom_df = pd.DataFrame(geom) if geom else None
+    if geom_df is not None:
+        geom_df.insert(0, "temps", data["temps"])
     full = engine_out.data
     summary = {
         "Course max (mm)": float(np.max(full["mlg_d"]) * 1000.0),
@@ -97,6 +101,7 @@ def run_simulation(inputs: MLGInputs, max_points: int = 1000) -> SimulationResul
         summary=summary,
         n_steps=engine_out.n_steps,
         warnings=engine_out.warnings,
+        geometry=geom_df,
     )
 
 

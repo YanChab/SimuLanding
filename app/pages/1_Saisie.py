@@ -8,9 +8,12 @@ message clair et d'un conseil de correction.
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
@@ -19,8 +22,7 @@ if str(_ROOT) not in sys.path:
 
 from dropsim import MLGInputs, SimError, default_mlg_inputs, run_simulation  # noqa: E402
 from dropsim.inputs import Point3, Rainure  # noqa: E402
-
-st.set_page_config(page_title="Saisie — SimuLanding", page_icon="📝", layout="wide")
+from dropsim.metering import build_section_table  # noqa: E402
 
 if "inputs" not in st.session_state:
     st.session_state.inputs = default_mlg_inputs()
@@ -56,106 +58,167 @@ def num(label: str, field: str, default: float, *, step: float = 1.0,
         )
 
 
+def num_grid(specs: list[tuple], ncols: int) -> None:
+    """Dispose une liste de champs ``(label, field, default, kwargs)`` sur ``ncols`` colonnes."""
+    cols = st.columns(ncols)
+    for i, spec in enumerate(specs):
+        label, field, default = spec[0], spec[1], spec[2]
+        kw = spec[3] if len(spec) > 3 else {}
+        with cols[i % ncols]:
+            num(label, field, default, **kw)
+
+
+# --------------------------------------------------------------------------- #
+#  Mini-graphe « papier millimétré » associé à un tableau
+# --------------------------------------------------------------------------- #
+_PAPER_BG = "#fbfbf2"
+_GRID_MAJOR = "#e08e7b"
+_GRID_MINOR = "#f3c9bf"
+
+
+def _mini_axis(title: str) -> dict:
+    return dict(
+        title=title, showgrid=True, gridcolor=_GRID_MAJOR, gridwidth=1,
+        zeroline=True, zerolinecolor=_GRID_MAJOR, showline=True, linecolor=_GRID_MAJOR,
+        mirror=True, ticks="outside",
+        minor=dict(showgrid=True, gridcolor=_GRID_MINOR, gridwidth=0.5),
+    )
+
+
+def mini_chart(x, y, xlab: str, ylab: str, *, mode: str = "lines+markers",
+               equal: bool = False, color: str = "#1f77b4") -> go.Figure:
+    """Petit graphe stylé papier millimétré pour accompagner un tableau de saisie."""
+    fig = go.Figure(go.Scatter(x=x, y=y, mode=mode, line=dict(color=color, width=2),
+                               marker=dict(size=5, color=color)))
+    yaxis = _mini_axis(ylab)
+    if equal:
+        yaxis.update(scaleanchor="x", scaleratio=1.0)
+    fig.update_layout(
+        height=210, margin=dict(l=8, r=8, t=8, b=8),
+        plot_bgcolor=_PAPER_BG, paper_bgcolor="white",
+        xaxis=_mini_axis(xlab), yaxis=yaxis, showlegend=False,
+    )
+    return fig
+
+
+def _safe_xy(df_table: pd.DataFrame):
+    """Extrait deux colonnes numériques d'un éditeur en ignorant les lignes vides."""
+    d = df_table.dropna()
+    if d.empty:
+        return [], []
+    return d.iloc[:, 0].to_numpy(), d.iloc[:, 1].to_numpy()
+
+
 inp: MLGInputs = st.session_state.inputs
 
 # --------------------------------------------------------------------------- #
 #  Conditions de chute
 # --------------------------------------------------------------------------- #
 st.header("Conditions de chute")
-c = st.columns(4)
-with c[0]:
-    num("Masse supportée (kg)", "masse", inp.masse, step=10.0, min_value=0.0)
-    num("Vitesse verticale Vz (m/s)", "vz", inp.vz, step=0.1, min_value=0.0)
-with c[1]:
-    num("Vitesse horizontale Vx (m/s)", "vx", inp.vx, step=1.0, min_value=0.0)
-    num("Coefficient de portance (0..1)", "lift", inp.lift, step=0.01)
-with c[2]:
-    num("Assiette / pitch (°)", "pitch", inp.pitch, step=0.5)
-    num("Gîte / roll (°)", "roll", inp.roll, step=0.5)
-with c[3]:
-    num("Durée simulée (s)", "temps_simu", inp.temps_simu, step=0.05, fmt="%.4f")
-    num("Pas de temps It (s)", "it", inp.it, step=0.0001, fmt="%.5f")
-    num("Température (°C)", "temperature", inp.temperature, step=1.0)
+num_grid([
+    ("Masse supportée (kg)", "masse", inp.masse, dict(step=10.0, min_value=0.0)),
+    ("Vitesse verticale Vz (m/s)", "vz", inp.vz, dict(step=0.1, min_value=0.0)),
+    ("Vitesse horizontale Vx (m/s)", "vx", inp.vx, dict(step=1.0, min_value=0.0)),
+    ("Coefficient de portance (0..1)", "lift", inp.lift, dict(step=0.01)),
+    ("Assiette / pitch (°)", "pitch", inp.pitch, dict(step=0.5)),
+    ("Gîte / roll (°)", "roll", inp.roll, dict(step=0.5)),
+    ("Durée simulée (s)", "temps_simu", inp.temps_simu, dict(step=0.05, fmt="%.4f")),
+    ("Pas de temps It (s)", "it", inp.it, dict(step=0.0001, fmt="%.5f")),
+    ("Température (°C)", "temperature", inp.temperature, dict(step=1.0)),
+], 5)
 
 # --------------------------------------------------------------------------- #
 #  Amortisseur
 # --------------------------------------------------------------------------- #
 st.header("Amortisseur (géométrie)")
-c = st.columns(4)
-with c[0]:
-    num("Ø piston Dpis (mm)", "Dpis", inp.Dpis, step=0.5)
-    num("Ø bague hydraulique Dbh (mm)", "Dbh", inp.Dbh, step=0.5)
-    num("Ø tige Dt (mm)", "Dt", inp.Dt, step=0.5)
-with c[1]:
-    num("Ø intérieur tige Dp (mm)", "Dp", inp.Dp, step=0.5)
-    num("Ø intérieur BH (mm)", "DInsideBh", inp.DInsideBh, step=0.5)
-    num("Longueur trou BH (mm)", "Lbh", inp.Lbh, step=1.0)
-with c[2]:
-    num("Course totale SAT (mm)", "course", inp.course, step=1.0)
-    num("Ø trou piston détente (mm)", "DTrouPis", inp.DTrouPis, step=0.1, fmt="%.2f")
-    num("Nb trous piston", "NbTrouPis", inp.NbTrouPis, step=1.0)
-with c[3]:
-    num("Hauteur piston BH (mm)", "HauteurPisBh", inp.HauteurPisBh, step=0.5)
-    num("Ø trou clapet (mm)", "DTrouDiap", inp.DTrouDiap, step=0.1, fmt="%.2f")
-    num("Nb trous clapet", "NbTrouDiap", inp.NbTrouDiap, step=1.0)
+num_grid([
+    ("Ø piston Dpis (mm)", "Dpis", inp.Dpis, dict(step=0.5)),
+    ("Ø bague hydraulique Dbh (mm)", "Dbh", inp.Dbh, dict(step=0.5)),
+    ("Ø tige Dt (mm)", "Dt", inp.Dt, dict(step=0.5)),
+    ("Ø intérieur tige Dp (mm)", "Dp", inp.Dp, dict(step=0.5)),
+    ("Ø intérieur BH (mm)", "DInsideBh", inp.DInsideBh, dict(step=0.5)),
+    ("Longueur trou BH (mm)", "Lbh", inp.Lbh, dict(step=1.0)),
+    ("Course totale SAT (mm)", "course", inp.course, dict(step=1.0)),
+    ("Ø trou piston détente (mm)", "DTrouPis", inp.DTrouPis, dict(step=0.1, fmt="%.2f")),
+    ("Nb trous piston", "NbTrouPis", inp.NbTrouPis, dict(step=1.0)),
+    ("Hauteur piston BH (mm)", "HauteurPisBh", inp.HauteurPisBh, dict(step=0.5)),
+    ("Ø trou clapet (mm)", "DTrouDiap", inp.DTrouDiap, dict(step=0.1, fmt="%.2f")),
+    ("Nb trous clapet", "NbTrouDiap", inp.NbTrouDiap, dict(step=1.0)),
+], 6)
 
 # --------------------------------------------------------------------------- #
 #  Ressort gazeux
 # --------------------------------------------------------------------------- #
 st.header("Ressort gazeux (double chambre)")
-c = st.columns(3)
-with c[0]:
-    num("Pression init. BP (bar)", "Pinitbp", inp.Pinitbp, step=1.0)
-    num("Volume gaz init. BP (cc)", "Vgbp", inp.Vgbp, step=1.0, fmt="%.4f")
-with c[1]:
-    num("Volume d'huile (cc)", "Vh", inp.Vh, step=1.0, fmt="%.4f")
-    num("Pression init. HP (bar)", "Pinithp", inp.Pinithp, step=1.0)
-with c[2]:
-    num("Volume gaz init. HP (cc)", "Vghp", inp.Vghp, step=1.0, fmt="%.4f")
-    num("Coefficient polytropique γ", "gamma", inp.gamma, step=0.01, fmt="%.2f")
+num_grid([
+    ("Pression init. BP (bar)", "Pinitbp", inp.Pinitbp, dict(step=1.0)),
+    ("Volume gaz init. BP (cc)", "Vgbp", inp.Vgbp, dict(step=1.0, fmt="%.4f")),
+    ("Volume d'huile (cc)", "Vh", inp.Vh, dict(step=1.0, fmt="%.4f")),
+    ("Pression init. HP (bar)", "Pinithp", inp.Pinithp, dict(step=1.0)),
+    ("Volume gaz init. HP (cc)", "Vghp", inp.Vghp, dict(step=1.0, fmt="%.4f")),
+    ("Coefficient polytropique γ", "gamma", inp.gamma, dict(step=0.01, fmt="%.2f")),
+], 6)
 
 # --------------------------------------------------------------------------- #
 #  Huile
 # --------------------------------------------------------------------------- #
 st.header("Huile")
-c = st.columns(3)
-with c[0]:
-    num("Viscosité cinématique (cSt)", "visc", inp.visc, step=0.1, fmt="%.4f")
-with c[1]:
-    num("Module de compressibilité (MPa)", "bulk", inp.bulk, step=1.0, fmt="%.2f")
-with c[2]:
-    num("Masse volumique ρ (kg/m³)", "rho", inp.rho, step=1.0)
+num_grid([
+    ("Viscosité cinématique (cSt)", "visc", inp.visc, dict(step=0.1, fmt="%.4f")),
+    ("Module de compressibilité (MPa)", "bulk", inp.bulk, dict(step=1.0, fmt="%.2f")),
+    ("Masse volumique ρ (kg/m³)", "rho", inp.rho, dict(step=1.0)),
+], 6)
 
 # --------------------------------------------------------------------------- #
 #  Pneu
 # --------------------------------------------------------------------------- #
 st.header("Pneu et spring-back")
-c = st.columns(3)
-with c[0]:
-    num("Masse non suspendue (kg)", "unsprung_mass", inp.unsprung_mass, step=0.5)
-    num("Inertie polaire roue (kg·m²)", "wheel_inertia", inp.wheel_inertia, step=0.01, fmt="%.5f")
-with c[1]:
-    num("Rayon libre (mm)", "unload_radius", inp.unload_radius, step=1.0, fmt="%.2f")
-    num("Raideur spring-back Kx (N/m)", "kx", inp.kx, step=10000.0)
-with c[2]:
-    num("Amortissement spring-back Cx (N·s/m)", "cx", inp.cx, step=10.0, fmt="%.4f")
-    num("Masse roue spring-back (kg)", "wheelmass", inp.wheelmass, step=0.5)
+num_grid([
+    ("Masse non suspendue (kg)", "unsprung_mass", inp.unsprung_mass, dict(step=0.5)),
+    ("Inertie polaire roue (kg·m²)", "wheel_inertia", inp.wheel_inertia, dict(step=0.01, fmt="%.5f")),
+    ("Rayon libre (mm)", "unload_radius", inp.unload_radius, dict(step=1.0, fmt="%.2f")),
+    ("Raideur spring-back Kx (N/m)", "kx", inp.kx, dict(step=10000.0)),
+    ("Amortissement spring-back Cx (N·s/m)", "cx", inp.cx, dict(step=10.0, fmt="%.4f")),
+    ("Masse roue spring-back (kg)", "wheelmass", inp.wheelmass, dict(step=0.5)),
+], 6)
 
-st.markdown("**Courbe pneu** — déflexion (mm) → charge (kN)")
-tyre_df = st.data_editor(
-    pd.DataFrame(inp.tyre_curve, columns=["Déflexion (mm)", "Charge (kN)"]),
-    num_rows="dynamic",
-    use_container_width=True,
-    key="tyre_curve_editor",
-)
 
-st.markdown("**Courbe d'adhérence** — taux de glissement → μ")
-mu_df = st.data_editor(
-    pd.DataFrame(inp.mu_curve, columns=["Slip", "μ"]),
-    num_rows="dynamic",
-    use_container_width=True,
-    key="mu_curve_editor",
-)
+tyre_col, mu_col = st.columns(2)
+with tyre_col:
+    st.markdown("**Courbe pneu** — déflexion (mm) → charge (kN)")
+    te, tg = st.columns([1, 1])
+    with te:
+        tyre_df = st.data_editor(
+            pd.DataFrame(inp.tyre_curve, columns=["Déflexion (mm)", "Charge (kN)"]),
+            num_rows="dynamic",
+            use_container_width=True,
+            height=210,
+            key="tyre_curve_editor",
+        )
+    with tg:
+        tx, ty = _safe_xy(tyre_df)
+        st.plotly_chart(
+            mini_chart(tx, ty, "Déflexion (mm)", "Charge (kN)", color="#1f77b4"),
+            use_container_width=True,
+        )
+
+with mu_col:
+    st.markdown("**Courbe d'adhérence** — taux de glissement → μ")
+    me, mg = st.columns([1, 1])
+    with me:
+        mu_df = st.data_editor(
+            pd.DataFrame(inp.mu_curve, columns=["Slip", "μ"]),
+            num_rows="dynamic",
+            use_container_width=True,
+            height=210,
+            key="mu_curve_editor",
+        )
+    with mg:
+        mx, my = _safe_xy(mu_df)
+        st.plotly_chart(
+            mini_chart(mx, my, "Slip", "μ", color="#2ca02c"),
+            use_container_width=True,
+        )
 
 # --------------------------------------------------------------------------- #
 #  Balancier et géométrie
@@ -164,20 +227,73 @@ st.header("Balancier et géométrie")
 num("Inertie balancier Jyy (kg·m²)", "jyy", inp.jyy, step=0.1, fmt="%.4f")
 
 st.markdown("**Points (mm, repère avion)**")
-points_df = st.data_editor(
-    pd.DataFrame(
-        {
-            "Point": ["B", "A", "C", "R", "S"],
-            "X": [inp.B.x, inp.A.x, inp.C.x, inp.R.x, inp.S.x],
-            "Y": [inp.B.y, inp.A.y, inp.C.y, inp.R.y, inp.S.y],
-            "Z": [inp.B.z, inp.A.z, inp.C.z, inp.R.z, inp.S.z],
-        }
-    ),
-    use_container_width=True,
-    hide_index=True,
-    disabled=["Point"],
-    key="points_editor",
-)
+pe, pg_col, pg_yz = st.columns([1, 1, 1])
+with pe:
+    points_df = st.data_editor(
+        pd.DataFrame(
+            {
+                "Point": ["B", "A", "C", "R", "S"],
+                "X": [inp.B.x, inp.A.x, inp.C.x, inp.R.x, inp.S.x],
+                "Y": [inp.B.y, inp.A.y, inp.C.y, inp.R.y, inp.S.y],
+                "Z": [inp.B.z, inp.A.z, inp.C.z, inp.R.z, inp.S.z],
+            }
+        ),
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Point"],
+        height=210,
+        key="points_editor",
+    )
+with pg_col:
+    try:
+        pdict = {r["Point"]: (float(r["X"]), float(r["Z"])) for _, r in points_df.iterrows()}
+        # Amortisseur C-A, bras balancier A-B-R, liaison roue R-S.
+        seg_x = [pdict["C"][0], pdict["A"][0], None, pdict["A"][0], pdict["B"][0],
+                 pdict["R"][0], None, pdict["R"][0], pdict["S"][0]]
+        seg_z = [pdict["C"][1], pdict["A"][1], None, pdict["A"][1], pdict["B"][1],
+                 pdict["R"][1], None, pdict["R"][1], pdict["S"][1]]
+        fig_pts = go.Figure()
+        fig_pts.add_trace(go.Scatter(x=seg_x, y=seg_z, mode="lines",
+                                     line=dict(color="#2c3e50", width=3), name="Liaisons"))
+        fig_pts.add_trace(go.Scatter(
+            x=[v[0] for v in pdict.values()], y=[v[1] for v in pdict.values()],
+            mode="markers+text", text=list(pdict.keys()), textposition="top center",
+            marker=dict(size=9, color="#e74c3c"), name="Points"))
+        fig_pts.update_layout(
+            height=210, margin=dict(l=8, r=8, t=26, b=8),
+            plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
+            title=dict(text="Vue X-Z (profil)", x=0.5, font=dict(size=12)),
+            xaxis=_mini_axis("X (mm)"),
+            yaxis=_mini_axis("Z (mm)") | dict(scaleanchor="x", scaleratio=1.0),
+        )
+        st.plotly_chart(fig_pts, use_container_width=True)
+    except (KeyError, ValueError, TypeError):
+        st.caption("Géométrie incomplète — graphe indisponible.")
+with pg_yz:
+    try:
+        pyz = {r["Point"]: (float(r["Y"]), float(r["Z"])) for _, r in points_df.iterrows()}
+        # Amortisseur C-A, bras balancier A-B-R, liaison roue R-S (plan Y-Z).
+        seg_y = [pyz["C"][0], pyz["A"][0], None, pyz["A"][0], pyz["B"][0],
+                 pyz["R"][0], None, pyz["R"][0], pyz["S"][0]]
+        seg_z2 = [pyz["C"][1], pyz["A"][1], None, pyz["A"][1], pyz["B"][1],
+                  pyz["R"][1], None, pyz["R"][1], pyz["S"][1]]
+        fig_yz = go.Figure()
+        fig_yz.add_trace(go.Scatter(x=seg_y, y=seg_z2, mode="lines",
+                                    line=dict(color="#2c3e50", width=3), name="Liaisons"))
+        fig_yz.add_trace(go.Scatter(
+            x=[v[0] for v in pyz.values()], y=[v[1] for v in pyz.values()],
+            mode="markers+text", text=list(pyz.keys()), textposition="top center",
+            marker=dict(size=9, color="#e74c3c"), name="Points"))
+        fig_yz.update_layout(
+            title=dict(text="Vue Y-Z (face)", x=0.5, font=dict(size=12)),
+            height=210, margin=dict(l=8, r=8, t=26, b=8),
+            plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
+            xaxis=_mini_axis("Y (mm)"),
+            yaxis=_mini_axis("Z (mm)") | dict(scaleanchor="x", scaleratio=1.0),
+        )
+        st.plotly_chart(fig_yz, use_container_width=True)
+    except (KeyError, ValueError, TypeError):
+        st.caption("Géométrie incomplète — graphe indisponible.")
 
 # --------------------------------------------------------------------------- #
 #  Rainures de la bague hydraulique
@@ -185,15 +301,65 @@ points_df = st.data_editor(
 st.header("Rainures de la bague hydraulique")
 num("Ø rainure (mm)", "diametre_rainure", inp.diametre_rainure, step=1.0)
 st.markdown("**Cotes des rainures** — début / fin / profondeur (mm)")
-rainures_df = st.data_editor(
-    pd.DataFrame(
-        [(r.debut, r.fin, r.profondeur) for r in inp.rainures],
-        columns=["Début (mm)", "Fin (mm)", "Profondeur (mm)"],
-    ),
-    num_rows="dynamic",
-    use_container_width=True,
-    key="rainures_editor",
-)
+re_col, rg_col, rs_col = st.columns([1, 1, 1])
+with re_col:
+    rainures_df = st.data_editor(
+        pd.DataFrame(
+            [(r.debut, r.fin, r.profondeur) for r in inp.rainures],
+            columns=["Début (mm)", "Fin (mm)", "Profondeur (mm)"],
+        ),
+        num_rows="dynamic",
+        use_container_width=True,
+        height=210,
+        key="rainures_editor",
+    )
+with rg_col:
+    try:
+        rfig = go.Figure()
+        for k, row in enumerate(rainures_df.dropna().itertuples(index=False), start=1):
+            debut, fin, prof = float(row[0]), float(row[1]), float(row[2])
+            rfig.add_trace(go.Scatter(
+                x=[debut, fin], y=[prof, prof], mode="lines+markers",
+                line=dict(width=3), marker=dict(size=5), name=f"Rainure {k}"))
+        rfig.update_layout(
+            title=dict(text="Profil des rainures", x=0.5, font=dict(size=12)),
+            height=210, margin=dict(l=8, r=8, t=26, b=8),
+            plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
+            xaxis=_mini_axis("Course (mm)"), yaxis=_mini_axis("Profondeur (mm)"),
+        )
+        st.plotly_chart(rfig, use_container_width=True)
+    except (ValueError, TypeError):
+        st.caption("Cotes incomplètes — graphe indisponible.")
+with rs_col:
+    # Section cumulée de la butée hydraulique (somme des aires ouvertes par les rainures)
+    try:
+        _rd = rainures_df.dropna()
+        shim = types.SimpleNamespace(
+            Dbh=float(st.session_state["f_Dbh"]) / 1000.0,
+            diametre_rainure=float(st.session_state["f_diametre_rainure"]),
+            course=float(st.session_state["f_course"]) / 1000.0,
+            rainures_debut=np.array([float(r[0]) for r in _rd.itertuples(index=False)]),
+            rainures_fin=np.array([float(r[1]) for r in _rd.itertuples(index=False)]),
+            rainures_profondeur=np.array([float(r[2]) for r in _rd.itertuples(index=False)]),
+        )
+        tab_pos, tab_sec = build_section_table(shim)
+        course_mm = np.arange(len(tab_sec), dtype=float)
+        sec_mm2 = tab_sec * 1.0e6
+        sfig = go.Figure()
+        sfig.add_trace(go.Scatter(
+            x=course_mm, y=sec_mm2, mode="lines",
+            line=dict(width=2.5, color="#9467bd"), name="Section cumulée"))
+        sfig.update_layout(
+            title=dict(text="Section cumulée butée hydraulique", x=0.5,
+                       font=dict(size=12)),
+            height=210, margin=dict(l=8, r=8, t=26, b=8),
+            plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
+            xaxis=_mini_axis("Course (mm)"), yaxis=_mini_axis("Section (mm²)"),
+        )
+        st.plotly_chart(sfig, use_container_width=True)
+    except (ValueError, TypeError, KeyError, ZeroDivisionError):
+        st.caption("Section cumulée indisponible — vérifier les cotes et Dbh.")
+
 
 
 # --------------------------------------------------------------------------- #
