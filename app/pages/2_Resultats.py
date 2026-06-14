@@ -16,8 +16,14 @@ import streamlit as st
 _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+_APP = Path(__file__).resolve().parent.parent
+if str(_APP) not in sys.path:
+    sys.path.insert(0, str(_APP))
 
 from dropsim.engine import OUTPUT_COLUMNS  # noqa: E402
+from theme import apply_theme  # noqa: E402
+
+apply_theme()
 
 st.title("📈 Résultats de la simulation")
 

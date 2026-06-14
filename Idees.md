@@ -1,0 +1,8 @@
+-> affichage des données saisi en tableau
+-> intégration de la température
+-> intégration du calcul en train droit
+-> intégration du calcul avion complet
+-> créer un système de sauvegarde des configurations
+-> lui faire faire un fichier scientifique
+-> revoir interface résultats
+-> rajouter la fuite entre le palbh et la BH

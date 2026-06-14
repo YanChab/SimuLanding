@@ -1,0 +1,36 @@
+[server]
+# Permet de servir les polices auto-hébergées depuis app/static/.
+enableStaticServing = true
+
+[theme]
+# --- Palette SuiviProcess ------------------------------------------------- #
+primaryColor = "#8A1A1D"            # Bordeaux foncé : navbar, boutons, liens actifs
+backgroundColor = "#FFFFFF"         # Fond principal
+secondaryBackgroundColor = "#F3F1F1" # Fond clair des cartes/widgets (teinte gris clair)
+textColor = "#4A4949"               # Texte principal, titres
+linkColor = "#8A1A1D"               # Liens
+borderColor = "#B7B7B6"             # Bordures subtiles
+
+# --- Polices auto-hébergées ---------------------------------------------- #
+# Seule la police de corps est pilotable via le thème natif ;
+# la police des titres (Eurostile) et du logo (Freshbot) est appliquée par CSS
+# (voir app/theme.py).
+font = "Roboto"
+
+[[theme.fontFaces]]
+family = "Eurostile"
+url = "app/static/fonts/Eurostile-bold.woff2"
+weight = 700
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Roboto"
+url = "app/static/fonts/Roboto-Regular.woff2"
+weight = 400
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Freshbot"
+url = "app/static/fonts/Freshbot.woff2"
+weight = 400
+style = "normal"

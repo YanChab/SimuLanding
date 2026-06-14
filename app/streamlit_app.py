@@ -27,6 +27,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from dropsim import default_mlg_inputs  # noqa: E402
+from theme import apply_theme  # noqa: E402
 
 st.set_page_config(
     page_title="SimuLanding — Drop test MLG",
@@ -34,6 +35,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# Charte graphique (palette SuiviProcess + polices auto-hébergées).
+apply_theme()
 
 # --------------------------------------------------------------------------- #
 #  Style global : interface dense + champs sans boutons +/- + pleine largeur
@@ -45,8 +49,8 @@ st.markdown(
     .block-container { padding-top: 2.2rem; padding-bottom: 0.6rem;
                        padding-left: 1.2rem; padding-right: 1.2rem; max-width: 100%; }
     /* Densité : espacements verticaux et horizontaux resserrés */
-    [data-testid="stVerticalBlock"] { gap: 0.12rem; }
-    [data-testid="stHorizontalBlock"] { gap: 0.35rem; }
+    [data-testid="stVerticalBlock"] { gap: 0.35rem; }
+    [data-testid="stHorizontalBlock"] { gap: 0rem; }
     /* Champs numériques : masquer les boutons + / - (steppers) */
     button[data-testid="stNumberInputStepUp"],
     button[data-testid="stNumberInputStepDown"] { display: none !important; }
@@ -63,9 +67,13 @@ st.markdown(
     h3 { margin-top: 0.1rem; margin-bottom: 0.02rem; font-size: 0.9rem; }
     /* Captions/markdown de tableaux resserrés mais visibles */
     div[data-testid="stMarkdownContainer"] p { margin-bottom: 0.05rem; font-size: 0.82rem; }
-    /* Espace au-dessus des tableaux pour ne pas masquer leur titre */
+    /* Titre en gras juste avant un tableau : marge haute pour ne pas chevaucher l'élément précédent */
+    div[data-testid="stMarkdownContainer"] p:has(strong) { margin-top: 0.7rem; }
+    /* Espace autour des tableaux pour ne pas masquer leur titre ni chevaucher le suivant */
     div[data-testid="stDataFrame"], div[data-testid="stDataEditor"] {
-        margin-top: 0.5rem; overflow: visible; }
+        margin-top: 0.4rem; margin-bottom: 0.6rem; }
+    /* Graphes Plotly : marge basse pour éviter le chevauchement avec l'élément suivant */
+    div[data-testid="stPlotlyChart"] { margin-top: 0.3rem; margin-bottom: 0.6rem; }
     /* Le titre (markdown) juste avant un tableau garde son espace */
     div[data-testid="stMarkdownContainer"] { overflow: visible; }
     hr { margin: 0.25rem 0; }
@@ -83,6 +91,10 @@ if "inputs" not in st.session_state:
 #  Page d'accueil
 # --------------------------------------------------------------------------- #
 def accueil() -> None:
+    st.markdown(
+        "<div class='sp-logo'>SIMULANDING</div>",
+        unsafe_allow_html=True,
+    )
     st.title("🛬 SimuLanding — Simulation de drop test")
     st.subheader("Train d'atterrissage à balancier (MLG)")
 
