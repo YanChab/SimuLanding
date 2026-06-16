@@ -143,6 +143,7 @@ pages = [
     st.Page(accueil, title="Accueil", icon="🏠", default=True),
     st.Page("pages/1_Saisie.py", title="Saisie", icon="📝"),
     st.Page("pages/2_Resultats.py", title="Résultats", icon="📈"),
+    st.Page("pages/3_Comparaison.py", title="Comparaison", icon="⚖️"),
 ]
 nav = st.navigation(pages, position="top")
 nav.run()

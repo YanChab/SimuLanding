@@ -21,6 +21,12 @@ if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
 from dropsim.engine import OUTPUT_COLUMNS  # noqa: E402
+from dropsim import (  # noqa: E402
+    save_simulation,
+    load_simulation,
+    list_saved,
+    delete_saved,
+)
 from theme import apply_theme  # noqa: E402
 
 apply_theme()
@@ -31,10 +37,59 @@ st.title("📈 Résultats de la simulation")
 GRAPH_HEIGHT = 640
 
 result = st.session_state.get("result")
+
+# --------------------------------------------------------------------------- #
+#  Sauvegarde / chargement des simulations
+# --------------------------------------------------------------------------- #
+with st.expander("💾 Sauvegarder / charger une simulation", expanded=result is None):
+    col_save, col_load = st.columns(2)
+
+    with col_save:
+        st.markdown("**Sauvegarder la simulation courante**")
+        if result is None:
+            st.caption("Aucun résultat à sauvegarder pour l'instant.")
+        else:
+            default_name = st.session_state.get(
+                "result_name", f"Simulation {len(list_saved()) + 1}"
+            )
+            save_name = st.text_input(
+                "Nom de la sauvegarde", value=default_name, key="save_name_input"
+            )
+            if st.button("💾 Enregistrer", use_container_width=True):
+                inputs = st.session_state.get("inputs")
+                if inputs is None:
+                    st.error("Entrées introuvables — relancez le calcul.")
+                else:
+                    path = save_simulation(inputs, result, name=save_name)
+                    st.session_state.result_name = save_name
+                    st.success(f"Sauvegardé : {path.name}", icon="✅")
+
+    with col_load:
+        st.markdown("**Charger une simulation enregistrée**")
+        saved = list_saved()
+        if not saved:
+            st.caption("Aucune simulation enregistrée.")
+        else:
+            labels = {
+                f"{e['name']}  ·  {e['saved_at'][:16].replace('T', ' ')}": e["path"]
+                for e in saved
+            }
+            choice = st.selectbox("Sauvegardes disponibles", list(labels.keys()), key="load_choice")
+            c_load, c_del = st.columns(2)
+            if c_load.button("📂 Charger", use_container_width=True):
+                inputs, loaded, meta = load_simulation(labels[choice])
+                st.session_state.inputs = inputs
+                st.session_state.result = loaded
+                st.session_state.result_name = meta["name"]
+                st.rerun()
+            if c_del.button("🗑️ Supprimer", use_container_width=True):
+                delete_saved(labels[choice])
+                st.rerun()
+
 if result is None:
     st.info(
         "Aucun résultat disponible. Renseignez les données dans la page **Saisie** "
-        "puis lancez le calcul.",
+        "puis lancez le calcul, ou chargez une simulation enregistrée ci-dessus.",
         icon="ℹ️",
     )
     st.stop()
@@ -149,13 +204,14 @@ t = df[COL["temps"]]
 #  Courbes — un seul graphe par onglet
 # --------------------------------------------------------------------------- #
 with col_graphs:
-    tab_eff_t, tab_eff_c, tab_press, tab_cine, tab_acc, tab_perso, tab_anim = st.tabs(
+    tab_eff_t, tab_eff_c, tab_press, tab_cine, tab_acc, tab_torseur, tab_perso, tab_anim = st.tabs(
         [
             "Efforts (temps)",
             "Effort / course",
             "Pressions",
             "Course & déflexion",
             "Accél. & vitesse",
+            "Torseur B & C",
             "Personnalisé",
             "Animation",
         ]
@@ -235,6 +291,52 @@ with tab_acc:
             "Accélération et vitesse en fonction du temps",
             "Temps (s)",
             "g  /  m·s⁻¹",
+        ),
+        use_container_width=True,
+        config={"responsive": True},
+    )
+
+with tab_torseur:
+    st.caption(
+        "Torseur d'effort transmis par le train à la masse suspendue via ses "
+        "deux attaches : **C** (tête d'amortisseur) est une **rotule** — elle ne "
+        "transmet qu'un **effort**, sans moment ; **B** (pivot du balancier) est "
+        "un **pivot** — il reprend l'**effort et le moment** de liaison. La "
+        "résultante (somme des deux efforts) est égale à la réaction sol."
+    )
+
+    def _amax(key: str) -> float:
+        return float(np.abs(df[COL[key]]).max())
+
+    m1, m2 = st.columns(2)
+    m1.metric("‖Résultante‖ max", f"{_amax('tors_res_norm'):.0f} N")
+    m2.metric("|Moment Y au pivot B| max", f"{_amax('torsB_my'):.0f} N·m")
+
+    st.plotly_chart(
+        line(
+            t,
+            [
+                ("Effort rotule C — X", df[COL["torsC_fx"]]),
+                ("Effort rotule C — Z", df[COL["torsC_fz"]]),
+                ("Effort pivot B — X", df[COL["torsB_fx"]]),
+                ("Effort pivot B — Z", df[COL["torsB_fz"]]),
+            ],
+            "Efforts de liaison aux attaches C (rotule) et B (pivot)",
+            "Temps (s)",
+            "Effort (N)",
+        ),
+        use_container_width=True,
+        config={"responsive": True},
+    )
+    st.plotly_chart(
+        line(
+            t,
+            [
+                ("Moment Y au pivot B", df[COL["torsB_my"]]),
+            ],
+            "Moment de liaison (axe Y) repris par le pivot B",
+            "Temps (s)",
+            "Moment (N·m)",
         ),
         use_container_width=True,
         config={"responsive": True},
