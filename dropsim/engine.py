@@ -57,6 +57,21 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "delta_pd": "MLG.DeltaPd (bar)",
     "reaction_v": "Reaction sol verticale (N)",
     "reaction_h": "Reaction sol horizontale (N)",
+    # Torseur d'effort transmis par le train à la masse suspendue via ses deux
+    # attaches : C (tête d'amortisseur) est une ROTULE → effort seul, aucun
+    # moment ; B (pivot du balancier) est un PIVOT → effort + moment de liaison.
+    # La résultante (somme des deux efforts) est égale à la réaction sol.
+    "tors_res_x": "Torseur.Resultante X (N)",
+    "tors_res_y": "Torseur.Resultante Y (N)",
+    "tors_res_z": "Torseur.Resultante Z (N)",
+    "tors_res_norm": "Torseur.Resultante norme (N)",
+    "torsC_fx": "Torseur@C (rotule).Effort X (N)",
+    "torsC_fy": "Torseur@C (rotule).Effort Y (N)",
+    "torsC_fz": "Torseur@C (rotule).Effort Z (N)",
+    "torsB_fx": "Torseur@B (pivot).Effort X (N)",
+    "torsB_fy": "Torseur@B (pivot).Effort Y (N)",
+    "torsB_fz": "Torseur@B (pivot).Effort Z (N)",
+    "torsB_my": "Torseur@B (pivot).Moment Y (N·m)",
 }
 
 
@@ -295,6 +310,26 @@ def run_mlg(
             tb_y = -ta_y - tr_y
             tb_z = -ta_z - tr_z
 
+            # --- Torseur d'effort transmis à la masse suspendue --------------
+            # Efforts de liaison appliqués PAR le train SUR la masse suspendue
+            # (réactions, 3ᵉ loi de Newton) :
+            #   - en C (tête d'amortisseur, ROTULE) : FC = -TA, effort pur sans
+            #     moment (une rotule ne transmet aucun couple) ;
+            #   - en B (pivot du balancier, PIVOT)  : FB = -TB, effort + moment.
+            fc_x, fc_y, fc_z = -ta_x, -ta_y, -ta_z
+            fb_x, fb_y, fb_z = -tb_x, -tb_y, -tb_z
+            # Résultante du torseur (somme des deux efforts) ; vaut la réaction
+            # sol TR.
+            res_x = fb_x + fc_x
+            res_y = fb_y + fc_y
+            res_z = fb_z + fc_z
+            res_norm = math.sqrt(res_x * res_x + res_y * res_y + res_z * res_z)
+            # Moment réacté par le pivot B : la rotule C n'oppose aucun moment,
+            # donc le pivot reprend le moment du torseur transmis, réduit en B.
+            # Seul FC (appliqué en C) a un bras de levier non nul ; bras BC = C-B.
+            cbx, cby, cbz = C[0] - B[0], C[1] - B[1], C[2] - B[2]
+            mb_y = cbz * fc_x - cbx * fc_z
+
         except SimError as err:
             err.context.setdefault("iteration", i)
             err.context.setdefault("temps_s", i * It)
@@ -343,6 +378,19 @@ def run_mlg(
         out["delta_pd"][i] = delta_pd * 1.0e-5
         out["reaction_v"][i] = ftyre
         out["reaction_h"][i] = tr_x
+
+        # Torseur d'effort transmis à la masse suspendue (réduit en B et en C)
+        out["tors_res_x"][i] = res_x
+        out["tors_res_y"][i] = res_y
+        out["tors_res_z"][i] = res_z
+        out["tors_res_norm"][i] = res_norm
+        out["torsC_fx"][i] = fc_x
+        out["torsC_fy"][i] = fc_y
+        out["torsC_fz"][i] = fc_z
+        out["torsB_fx"][i] = fb_x
+        out["torsB_fy"][i] = fb_y
+        out["torsB_fz"][i] = fb_z
+        out["torsB_my"][i] = mb_y
 
         # Positions géométriques (mm) pour l'animation
         geom["ax"][i] = A[0]

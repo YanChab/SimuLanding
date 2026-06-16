@@ -71,6 +71,10 @@ sont en unités d'affichage (mm, bar, cc, cSt, MPa, °, °C) et converties par
 | $\theta_{rY}$ | Angle du bras $B\!-\!R$ autour de $Y$ | rad | rad |
 | $\delta$ | Déflexion (écrasement) du pneu | m | mm |
 | $\gamma$ | Exposant polytropique du gaz | – | – |
+| $\vec{T}_A,\ \vec{T}_B,\ \vec{T}_R$ | Efforts de liaison en $A$, $B$, $R$ (sur le balancier) | N | N |
+| $\vec{F}_B,\ \vec{F}_C$ | Efforts transmis à la masse suspendue en $B$ (pivot), $C$ (rotule) | N | N |
+| $\vec{\mathcal{R}}$ | Résultante du torseur d'effort transmis à la cellule | N | N |
+| $\vec{\mathcal{M}}_B$ | Moment de liaison repris par le pivot $B$ | N·m | N·m |
 
 ### 2.4 Géométrie de l'amortisseur
 
@@ -458,6 +462,67 @@ $$
 
 Les efforts au pivot $B$ se déduisent de l'équilibre :
 $T_{B,x} = -T_{A,x} - T_{R,x}$, etc.
+
+### 9.2 Torseur d'effort transmis à la masse suspendue (points $B$ et $C$)
+
+Le balancier et l'amortisseur (sous-système supposé de masse négligeable devant
+la masse suspendue) relient le sol à la **masse suspendue** par **deux liaisons**
+de natures différentes :
+
+- en $C$ : la **tête d'amortisseur** est une **rotule** (liaison sphérique).
+  Une rotule ne transmet **qu'un effort**, sans aucun moment ;
+- en $B$ : le **pivot du balancier** est une **liaison pivot** d'axe $Y$. Le
+  pivot reprend l'**effort de liaison et le moment** correspondant.
+
+Par le principe d'action–réaction (3ᵉ loi de Newton), les efforts appliqués
+**par le train sur la masse suspendue** sont les opposés des efforts de liaison
+calculés sur le balancier :
+
+$$
+\vec{F}_C = -\,\vec{T}_A \quad\text{(rotule en } C\text{)}, \qquad
+\vec{F}_B = -\,\vec{T}_B \quad\text{(pivot en } B\text{)}.
+$$
+
+#### Résultante
+
+La résultante du torseur est la somme des deux efforts de liaison :
+
+$$
+\vec{\mathcal{R}} = \vec{F}_B + \vec{F}_C
+= -(\vec{T}_B + \vec{T}_A) = \vec{T}_R,
+$$
+
+car $\vec{T}_B = -\vec{T}_A - \vec{T}_R$. Autrement dit, **la résultante
+transmise à la cellule est exactement la réaction sol** $\vec{T}_R$ (force au
+centre roue $R$ ramenée à la structure) — propriété utilisée comme contrôle de
+cohérence du modèle.
+
+#### Moment de liaison au pivot $B$
+
+La rotule $C$ n'oppose **aucun moment** ($\vec{\mathcal{M}}_C = \vec{0}$). Par
+équilibre du sous-système, **le pivot $B$ reprend donc l'intégralité du moment**
+du torseur transmis, réduit au point $B$. Seul l'effort de rotule $\vec{F}_C$
+(appliqué en $C$) possède un bras de levier non nul vis-à-vis de $B$, de sorte
+que :
+
+$$
+\vec{\mathcal{M}}_B = \vec{BC}\times\vec{F}_C
+= (C - B)\times\vec{F}_C .
+$$
+
+Le mécanisme étant plan (rotation autour de $Y$), la composante significative est
+celle d'axe $Y$. En notant $\vec{BC} = (b_x, b_y, b_z)$ :
+
+$$
+\mathcal{M}_{B,Y} = b_z\,F_{C,x} - b_x\,F_{C,z}.
+$$
+
+Ces grandeurs — résultante $\vec{\mathcal{R}}$, effort de rotule $\vec{F}_C$,
+effort de pivot $\vec{F}_B$ et moment de pivot $\mathcal{M}_{B,Y}$ — sont
+exportées par le moteur (préfixe `Torseur…`) et tracées dans l'onglet
+**Torseur B & C** de la page Résultats. Elles fournissent les **charges
+d'interface** servant au dimensionnement des attaches de l'atterrisseur sur la
+cellule.
 
 ---
 
