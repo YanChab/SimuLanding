@@ -14,3 +14,6 @@ venv/
 
 # Sorties de diagnostic temporaires
 _extract/*_out.txt
+
+# Simulations sauvegardées par l'utilisateur
+saved_simulations/

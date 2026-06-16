@@ -11,6 +11,13 @@ from .inputs import (
     TEMP_REF_C,
 )
 from .simulation import run_simulation, SimulationResult
+from .storage import (
+    save_simulation,
+    load_simulation,
+    list_saved,
+    delete_saved,
+    DEFAULT_SAVE_DIR,
+)
 
 __all__ = [
     "SimError",
@@ -22,4 +29,9 @@ __all__ = [
     "TEMP_REF_C",
     "run_simulation",
     "SimulationResult",
+    "save_simulation",
+    "load_simulation",
+    "list_saved",
+    "delete_saved",
+    "DEFAULT_SAVE_DIR",
 ]
