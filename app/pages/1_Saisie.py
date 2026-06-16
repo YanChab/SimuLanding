@@ -48,14 +48,19 @@ def num(label: str, field: str, default: float, *, step: float = 1.0,
     """Affiche un ``number_input`` lié à ``field`` et surligne l'erreur éventuelle."""
     err = field_errors.get(field)
     shown = f"⚠️ {label}" if err else label
+    skey = f"f_{field}"
+    # Semer la valeur une seule fois puis laisser le widget gérer son état via
+    # ``key`` : passer simultanément ``value`` et ``key`` désynchronise le widget
+    # de ``st.session_state`` (la valeur saisie n'est pas répercutée).
+    if skey not in st.session_state:
+        st.session_state[skey] = float(default)
     st.number_input(
         shown,
-        value=float(default),
         step=step,
         format=fmt,
         help=help,
         min_value=min_value,
-        key=f"f_{field}",
+        key=skey,
     )
     if err:
         st.markdown(
@@ -197,8 +202,15 @@ with col_chute:
         ("Gîte / roll (°)", "roll", inp.roll),
         ("Durée simulée (s)", "temps_simu", inp.temps_simu),
         ("Pas de temps It (s)", "it", inp.it),
-        ("Température (°C)", "temperature", inp.temperature),
     ], "chute_editor")
+    # Champ dédié pour la température : un number_input accepte nativement les
+    # valeurs négatives (température froide), contrairement à l'éditeur tabulaire.
+    num(
+        "Température (°C)", "temperature", inp.temperature,
+        step=1.0,
+        help="Température de l'huile et du gaz. Les valeurs négatives "
+             "(conditions froides) sont autorisées.",
+    )
 
 with col_balancier:
     st.header("Balancier et géométrie")
