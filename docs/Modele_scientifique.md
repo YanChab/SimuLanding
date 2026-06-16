@@ -300,7 +300,7 @@ des orifices, modélisée par la relation de **Bernoulli** (orifice en paroi
 mince) :
 
 $$
-\Delta P = \tfrac{1}{2}\,\rho\left(\frac{Q}{S\,C_d}\right)^2 \operatorname{sign}(Q)
+\Delta P = \tfrac{1}{2}\,\rho\left(\frac{Q}{S\,C_d}\right)^2 \mathrm{sign}(Q)
 $$
 
 où :
@@ -335,7 +335,7 @@ auto-référencé comme dans le VBA) :
 $$
 \begin{cases}
 f_0 = Q_c - S_c\,v + \kappa\,(P_c - P_c^{ref}) = 0 \\[4pt]
-f_1 = (P_c - P_g) - \tfrac{1}{2}\,\rho\,Q_c^{2}\left(\dfrac{1}{S_{bh}\,C_d}\right)^2 \operatorname{sign}(Q_c) = 0
+f_1 = (P_c - P_g) - \tfrac{1}{2}\,\rho\,Q_c^{2}\left(\dfrac{1}{S_{bh}\,C_d}\right)^2 \mathrm{sign}(Q_c) = 0
 \end{cases}
 $$
 
@@ -353,8 +353,8 @@ En **détente** ($Q_d = S_d\,v < 0$), l'huile traverse à la fois les trous du
 piston de détente et le clapet (diaphragme). Les pertes s'additionnent :
 
 $$
-\Delta P_d = \tfrac{1}{2}\rho\left(\frac{Q_d}{S_{diap}\,C_{d,diap}}\right)^2\!\operatorname{sign}(Q_d)
-+ \tfrac{1}{2}\rho\left(\frac{Q_d}{S_{pis}\,C_{d,pis}}\right)^2\!\operatorname{sign}(Q_d)
+\Delta P_d = \tfrac{1}{2}\rho\left(\frac{Q_d}{S_{diap}\,C_{d,diap}}\right)^2\!\mathrm{sign}(Q_d)
++ \tfrac{1}{2}\rho\left(\frac{Q_d}{S_{pis}\,C_{d,pis}}\right)^2\!\mathrm{sign}(Q_d)
 $$
 
 En compression du côté détente ($Q_d \ge 0$), seul le terme « piston » subsiste.
@@ -392,7 +392,7 @@ tige) et un terme **proportionnel à la pression** (la pression plaque la lèvre
 joint contre la tige) :
 
 $$
-F_{joint} = \operatorname{sign}(v)\;c_{atte}(v)\left[
+F_{joint} = \mathrm{sign}(v)\;c_{atte}(v)\left[
 f_c\,D_t\,\pi \;+\; f_h\,P_d\,\frac{\pi}{4}\big(A_{seal}^2 - D_t^2\big)
 \right]
 $$
@@ -506,7 +506,7 @@ $$
 L'**effort de spin-up** (friction longitudinale) vaut :
 
 $$
-F_{spin} = \mu(s)\,F_{tyre}\,\operatorname{sign}(s) \quad\text{[N]}
+F_{spin} = \mu(s)\,F_{tyre}\,\mathrm{sign}(s) \quad\text{[N]}
 $$
 
 et accélère la roue en rotation (théorème du moment cinétique, inertie polaire
