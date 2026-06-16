@@ -15,8 +15,10 @@ from .storage import (
     save_simulation,
     load_simulation,
     list_saved,
+    list_projects,
     delete_saved,
     DEFAULT_SAVE_DIR,
+    DEFAULT_PROJECT,
 )
 
 __all__ = [
@@ -32,6 +34,8 @@ __all__ = [
     "save_simulation",
     "load_simulation",
     "list_saved",
+    "list_projects",
     "delete_saved",
     "DEFAULT_SAVE_DIR",
+    "DEFAULT_PROJECT",
 ]

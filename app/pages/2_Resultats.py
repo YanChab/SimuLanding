@@ -25,7 +25,9 @@ from dropsim import (  # noqa: E402
     save_simulation,
     load_simulation,
     list_saved,
+    list_projects,
     delete_saved,
+    DEFAULT_PROJECT,
 )
 from theme import apply_theme  # noqa: E402
 
@@ -42,6 +44,9 @@ result = st.session_state.get("result")
 #  Sauvegarde / chargement des simulations
 # --------------------------------------------------------------------------- #
 with st.expander("💾 Sauvegarder / charger une simulation", expanded=result is None):
+    _NEW_PROJECT = "➕ Nouveau projet…"
+    existing_projects = list_projects()
+
     col_save, col_load = st.columns(2)
 
     with col_save:
@@ -49,8 +54,28 @@ with st.expander("💾 Sauvegarder / charger une simulation", expanded=result is
         if result is None:
             st.caption("Aucun résultat à sauvegarder pour l'instant.")
         else:
+            # Choix du projet : un projet existant ou un nouveau.
+            cur_proj = st.session_state.get("current_project", DEFAULT_PROJECT)
+            proj_options = existing_projects + [_NEW_PROJECT]
+            if cur_proj in existing_projects:
+                proj_index = existing_projects.index(cur_proj)
+            else:
+                proj_index = len(proj_options) - 1  # "Nouveau projet…"
+            proj_choice = st.selectbox(
+                "Projet", proj_options, index=proj_index, key="save_project_choice"
+            )
+            if proj_choice == _NEW_PROJECT:
+                project = st.text_input(
+                    "Nom du nouveau projet",
+                    value="" if cur_proj in existing_projects else cur_proj,
+                    key="save_project_new",
+                    placeholder=DEFAULT_PROJECT,
+                ).strip() or DEFAULT_PROJECT
+            else:
+                project = proj_choice
+
             default_name = st.session_state.get(
-                "result_name", f"Simulation {len(list_saved()) + 1}"
+                "result_name", f"Simulation {len(list_saved(project=project)) + 1}"
             )
             save_name = st.text_input(
                 "Nom de la sauvegarde", value=default_name, key="save_name_input"
@@ -60,31 +85,53 @@ with st.expander("💾 Sauvegarder / charger une simulation", expanded=result is
                 if inputs is None:
                     st.error("Entrées introuvables — relancez le calcul.")
                 else:
-                    path = save_simulation(inputs, result, name=save_name)
+                    path = save_simulation(
+                        inputs, result, name=save_name, project=project
+                    )
                     st.session_state.result_name = save_name
-                    st.success(f"Sauvegardé : {path.name}", icon="✅")
+                    st.session_state.current_project = project
+                    st.success(
+                        f"Sauvegardé dans « {project} » : {path.name}", icon="✅"
+                    )
 
     with col_load:
         st.markdown("**Charger une simulation enregistrée**")
-        saved = list_saved()
-        if not saved:
+        if not existing_projects:
             st.caption("Aucune simulation enregistrée.")
         else:
-            labels = {
-                f"{e['name']}  ·  {e['saved_at'][:16].replace('T', ' ')}": e["path"]
-                for e in saved
-            }
-            choice = st.selectbox("Sauvegardes disponibles", list(labels.keys()), key="load_choice")
-            c_load, c_del = st.columns(2)
-            if c_load.button("📂 Charger", use_container_width=True):
-                inputs, loaded, meta = load_simulation(labels[choice])
-                st.session_state.inputs = inputs
-                st.session_state.result = loaded
-                st.session_state.result_name = meta["name"]
-                st.rerun()
-            if c_del.button("🗑️ Supprimer", use_container_width=True):
-                delete_saved(labels[choice])
-                st.rerun()
+            sel_proj = st.session_state.get("current_project", existing_projects[0])
+            load_proj_index = (
+                existing_projects.index(sel_proj)
+                if sel_proj in existing_projects
+                else 0
+            )
+            load_project = st.selectbox(
+                "Projet", existing_projects, index=load_proj_index, key="load_project"
+            )
+            saved = list_saved(project=load_project)
+            if not saved:
+                st.caption("Aucune simulation dans ce projet.")
+            else:
+                labels = {
+                    f"{e['name']}  ·  {e['saved_at'][:16].replace('T', ' ')}": e["path"]
+                    for e in saved
+                }
+                choice = st.selectbox(
+                    "Sauvegardes disponibles", list(labels.keys()), key="load_choice"
+                )
+                c_load, c_del = st.columns(2)
+                if c_load.button("📂 Charger", use_container_width=True):
+                    inputs, loaded, meta = load_simulation(labels[choice])
+                    st.session_state.inputs = inputs
+                    st.session_state.result = loaded
+                    st.session_state.result_name = meta["name"]
+                    st.session_state.current_project = meta.get(
+                        "project", DEFAULT_PROJECT
+                    )
+                    st.rerun()
+                if c_del.button("🗑️ Supprimer", use_container_width=True):
+                    delete_saved(labels[choice])
+                    st.rerun()
 
 if result is None:
     st.info(

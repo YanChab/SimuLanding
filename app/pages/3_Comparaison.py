@@ -42,7 +42,7 @@ if current is not None:
     sources[f"🟢 {cur_name} (en mémoire)"] = {"kind": "current"}
 
 for e in list_saved():
-    label = f"{e['name']}  ·  {e['saved_at'][:16].replace('T', ' ')}"
+    label = f"[{e.get('project', '—')}] {e['name']}  ·  {e['saved_at'][:16].replace('T', ' ')}"
     sources[label] = {"kind": "file", "path": e["path"]}
 
 if len(sources) < 2:
@@ -74,8 +74,16 @@ with col_b:
 _, res_a = _load(sources[sel_a])
 _, res_b = _load(sources[sel_b])
 
-name_a = sel_a.lstrip("🟢 ").split("  ·  ")[0]
-name_b = sel_b.lstrip("🟢 ").split("  ·  ")[0]
+def _short_name(label: str) -> str:
+    """Extrait le nom de simulation d'un libellé de source."""
+    s = label.lstrip("🟢 ").split("  ·  ")[0]
+    if s.startswith("[") and "] " in s:  # retire le préfixe « [projet] »
+        s = s.split("] ", 1)[1]
+    return s
+
+
+name_a = _short_name(sel_a)
+name_b = _short_name(sel_b)
 if name_a == name_b:
     name_a, name_b = f"{name_a} (A)", f"{name_b} (B)"
 

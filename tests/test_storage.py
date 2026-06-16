@@ -5,8 +5,10 @@ import numpy as np
 
 from dropsim import default_mlg_inputs, run_simulation
 from dropsim.storage import (
+    DEFAULT_PROJECT,
     inputs_from_dict,
     inputs_to_dict,
+    list_projects,
     list_saved,
     load_simulation,
     save_simulation,
@@ -30,6 +32,7 @@ def test_save_load_roundtrip(tmp_path):
 
     assert loaded_inp == inp
     assert meta["name"] == "Cas nominal"
+    assert meta["project"] == DEFAULT_PROJECT
     assert loaded_res.n_steps == result.n_steps
     assert list(loaded_res.df.columns) == list(result.df.columns)
     np.testing.assert_allclose(
@@ -48,3 +51,24 @@ def test_list_saved(tmp_path):
     entries = list_saved(tmp_path)
     names = {e["name"] for e in entries}
     assert {"Premier", "Deuxieme"} <= names
+
+
+def test_projects(tmp_path):
+    inp = default_mlg_inputs()
+    result = run_simulation(inp)
+    save_simulation(inp, result, name="Essai 1", project="Avion A", directory=tmp_path)
+    save_simulation(inp, result, name="Essai 2", project="Avion A", directory=tmp_path)
+    save_simulation(inp, result, name="Essai 1", project="Avion B", directory=tmp_path)
+
+    assert list_projects(tmp_path) == ["Avion A", "Avion B"]
+
+    names_a = {e["name"] for e in list_saved(tmp_path, project="Avion A")}
+    assert names_a == {"Essai 1", "Essai 2"}
+
+    saved_b = list_saved(tmp_path, project="Avion B")
+    assert len(saved_b) == 1
+    assert saved_b[0]["project"] == "Avion B"
+
+    # Le filtrage par projet isole bien les sauvegardes homonymes.
+    _, _, meta = load_simulation(saved_b[0]["path"])
+    assert meta["project"] == "Avion B"

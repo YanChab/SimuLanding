@@ -32,6 +32,9 @@ SCHEMA = "simuland/1"
 # Dossier de sauvegarde par défaut (à la racine du dépôt).
 DEFAULT_SAVE_DIR = Path(__file__).resolve().parent.parent / "saved_simulations"
 
+# Projet par défaut (classe les sauvegardes sans projet explicite).
+DEFAULT_PROJECT = "Général"
+
 
 # --------------------------------------------------------------------------- #
 #  Sérialisation des entrées
@@ -102,11 +105,23 @@ def _slugify(name: str) -> str:
     return slug or "simulation"
 
 
-def bundle(inputs: MLGInputs, result: SimulationResult, *, name: str) -> dict:
+def _project_dir(directory: Path | str, project: str | None) -> Path:
+    """Sous-dossier physique d'un projet (un slug par projet)."""
+    return Path(directory) / _slugify(project or DEFAULT_PROJECT)
+
+
+def bundle(
+    inputs: MLGInputs,
+    result: SimulationResult,
+    *,
+    name: str,
+    project: str = DEFAULT_PROJECT,
+) -> dict:
     """Construit le dictionnaire complet (schéma + métadonnées + données)."""
     return {
         "schema": SCHEMA,
         "name": name,
+        "project": project or DEFAULT_PROJECT,
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "inputs": inputs_to_dict(inputs),
         "result": result_to_dict(result),
@@ -118,13 +133,19 @@ def save_simulation(
     result: SimulationResult,
     *,
     name: str,
+    project: str = DEFAULT_PROJECT,
     directory: Path | str = DEFAULT_SAVE_DIR,
 ) -> Path:
-    """Sauvegarde une simulation dans ``directory`` ; renvoie le chemin du fichier."""
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{_slugify(name)}.json"
-    data = bundle(inputs, result, name=name)
+    """Sauvegarde une simulation (classée par ``project``) ; renvoie le chemin.
+
+    Les simulations sont rangées dans un sous-dossier par projet
+    (``directory/<projet>/<nom>.json``) et le nom du projet est aussi inscrit
+    dans les métadonnées du fichier.
+    """
+    pdir = _project_dir(directory, project)
+    pdir.mkdir(parents=True, exist_ok=True)
+    path = pdir / f"{_slugify(name)}.json"
+    data = bundle(inputs, result, name=name, project=project)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
@@ -144,34 +165,67 @@ def load_simulation(path: Path | str) -> tuple[MLGInputs, SimulationResult, dict
         )
     inputs = inputs_from_dict(data["inputs"])
     result = result_from_dict(data["result"])
-    meta = {"name": data.get("name", path.stem), "saved_at": data.get("saved_at", "")}
+    meta = {
+        "name": data.get("name", path.stem),
+        "saved_at": data.get("saved_at", ""),
+        "project": data.get("project") or DEFAULT_PROJECT,
+    }
     return inputs, result, meta
 
 
-def list_saved(directory: Path | str = DEFAULT_SAVE_DIR) -> list[dict]:
+def _read_meta(path: Path) -> dict | None:
+    """Lit les métadonnées d'un fichier de sauvegarde (ou ``None`` si invalide)."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("schema") != SCHEMA:
+        return None
+    return {
+        "name": data.get("name", path.stem),
+        "saved_at": data.get("saved_at", ""),
+        "project": data.get("project") or DEFAULT_PROJECT,
+        "path": str(path),
+    }
+
+
+def list_projects(directory: Path | str = DEFAULT_SAVE_DIR) -> list[str]:
+    """Liste les noms de projets contenant au moins une sauvegarde (triés)."""
+    directory = Path(directory)
+    if not directory.exists():
+        return []
+    names: set[str] = set()
+    for p in directory.rglob("*.json"):
+        try:
+            meta = _read_meta(p)
+        except (json.JSONDecodeError, OSError):
+            continue
+        if meta:
+            names.add(meta["project"])
+    return sorted(names, key=str.casefold)
+
+
+def list_saved(
+    directory: Path | str = DEFAULT_SAVE_DIR,
+    project: str | None = None,
+) -> list[dict]:
     """Liste les simulations sauvegardées (les plus récentes d'abord).
 
-    Chaque entrée : ``{"name", "saved_at", "path"}``. Les fichiers illisibles
-    sont ignorés silencieusement.
+    Si ``project`` est fourni, seules les sauvegardes de ce projet sont
+    renvoyées. Chaque entrée : ``{"name", "saved_at", "project", "path"}``.
+    Les fichiers illisibles sont ignorés silencieusement.
     """
     directory = Path(directory)
     if not directory.exists():
         return []
     entries: list[dict] = []
-    for p in directory.glob("*.json"):
+    for p in directory.rglob("*.json"):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            if data.get("schema") != SCHEMA:
-                continue
-            entries.append(
-                {
-                    "name": data.get("name", p.stem),
-                    "saved_at": data.get("saved_at", ""),
-                    "path": str(p),
-                }
-            )
+            meta = _read_meta(p)
         except (json.JSONDecodeError, OSError):
             continue
+        if not meta:
+            continue
+        if project is not None and meta["project"] != project:
+            continue
+        entries.append(meta)
     entries.sort(key=lambda e: e["saved_at"], reverse=True)
     return entries
 
@@ -184,6 +238,7 @@ def delete_saved(path: Path | str) -> None:
 __all__ = [
     "SCHEMA",
     "DEFAULT_SAVE_DIR",
+    "DEFAULT_PROJECT",
     "inputs_to_dict",
     "inputs_from_dict",
     "result_to_dict",
@@ -191,6 +246,7 @@ __all__ = [
     "bundle",
     "save_simulation",
     "load_simulation",
+    "list_projects",
     "list_saved",
     "delete_saved",
 ]
