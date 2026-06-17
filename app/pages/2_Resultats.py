@@ -251,7 +251,7 @@ t = df[COL["temps"]]
 #  Courbes — un seul graphe par onglet
 # --------------------------------------------------------------------------- #
 with col_graphs:
-    tab_eff_t, tab_eff_c, tab_press, tab_cine, tab_acc, tab_torseur, tab_perso, tab_anim = st.tabs(
+    tab_eff_t, tab_eff_c, tab_press, tab_cine, tab_acc, tab_torseur, tab_energie, tab_perso, tab_anim = st.tabs(
         [
             "Efforts (temps)",
             "Effort / course",
@@ -259,6 +259,7 @@ with col_graphs:
             "Course & déflexion",
             "Accél. & vitesse",
             "Torseur B & C",
+            "Bilan énergétique",
             "Personnalisé",
             "Animation",
         ]
@@ -387,6 +388,78 @@ with tab_torseur:
             "Moments de liaison (axes X et Z) repris par le pivot B",
             "Temps (s)",
             "Moment (N·m)",
+        ),
+        use_container_width=True,
+        config={"responsive": True},
+    )
+
+with tab_energie:
+    st.caption(
+        "Bilan énergétique **diagnostic** : suit la transformation de l'énergie "
+        "cinétique d'impact (augmentée du travail de la gravité et de l'énergie "
+        "puisée dans l'avancement lors du spin-up de la roue) en énergie "
+        "**stockée** (gaz, butée, pneu) et **dissipée** (hydraulique, friction "
+        "joint, amortisseur horizontal, glissement pneu/sol). Tous les chemins "
+        "énergétiques étant comptabilisés, le **résidu** = apport − (cinétique "
+        "courante + stockée + dissipée) se réduit à la seule erreur "
+        "d'intégration d'Euler explicite : il reste faible (~0,3 % de l'apport "
+        "au pas par défaut) et décroît avec le pas de temps. Un résidu élevé "
+        "révélerait une dérive numérique ou un bug."
+    )
+
+    def _last(key: str) -> float:
+        return float(df[COL[key]].to_numpy()[-1])
+
+    def _amax_e(key: str) -> float:
+        return float(np.abs(df[COL[key]]).max())
+
+    e_input0 = float(df[COL["e_input"]].to_numpy()[0])
+    ref = abs(e_input0) if abs(e_input0) > 1e-9 else 1.0
+    e1, e2, e3, e4 = st.columns(4)
+    e1.metric("Énergie d'impact", f"{e_input0:.0f} J")
+    e2.metric(
+        "Dissipée amortisseur (hyd + fric)",
+        f"{_last('e_hyd') + _last('e_fric'):.0f} J",
+    )
+    e3.metric(
+        "Dissipée glissement pneu",
+        f"{_last('e_slip'):.0f} J",
+    )
+    e4.metric(
+        "|Résidu| max",
+        f"{_amax_e('e_residual'):.0f} J",
+        f"{100.0 * _amax_e('e_residual') / ref:.2f} % de l'apport",
+        delta_color="off",
+    )
+
+    st.plotly_chart(
+        line(
+            t,
+            [
+                ("Apport total", df[COL["e_input"]]),
+                ("Cinétique masse susp.", df[COL["e_kin"]]),
+                ("Cinétique rotation roue", df[COL["e_kin_spin"]]),
+                ("Stockée gaz", df[COL["e_gas"]]),
+                ("Dissipée hydraulique", df[COL["e_hyd"]]),
+                ("Dissipée friction joint", df[COL["e_fric"]]),
+                ("Dissipée glissement pneu", df[COL["e_slip"]]),
+            ],
+            "Répartition de l'énergie au cours de l'impact",
+            "Temps (s)",
+            "Énergie (J)",
+        ),
+        use_container_width=True,
+        config={"responsive": True},
+    )
+    st.plotly_chart(
+        line(
+            t,
+            [
+                ("Résidu de bilan", df[COL["e_residual"]]),
+            ],
+            "Résidu du bilan énergétique (indicateur de cohérence)",
+            "Temps (s)",
+            "Énergie (J)",
         ),
         use_container_width=True,
         config={"responsive": True},

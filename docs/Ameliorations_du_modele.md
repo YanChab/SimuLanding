@@ -11,7 +11,7 @@
 
 | # | Amélioration | Nature | Impact | Risque | Effort |
 |---|---|---|---|---|---|
-| 5.2 | Bilan énergétique en sortie | Diagnostic | Fort | Faible | Faible |
+| 5.2 | Bilan énergétique en sortie — ✅ **fait** | Diagnostic | Fort | Faible | Faible |
 | 5.1 | Tests de non-régression vs Excel | Validation | Fort | Faible | Moyen |
 | 2.1 | Butée de contact lissée | Robustesse | Moyen | Faible | Faible |
 | 1.1 | Intégrateur RK4 / adaptatif | Numérique | Fort | Moyen | Élevé |
@@ -165,17 +165,60 @@ propre** distincte.
 - figer des **snapshots** des grandeurs de synthèse (B46:C61) pour détecter toute
   dérive.
 
-### 5.2 Bilan énergétique en sortie — *impact fort, risque faible*
+### 5.2 Bilan énergétique en sortie — *impact fort, risque faible* — ✅ **implémenté**
 
-**Constat.** Aucun **bilan d'énergie** n'est calculé.
+**Constat.** Aucun **bilan d'énergie** n'était calculé.
 
-**Proposition.** Tracer et exposer en sortie :
-- énergie cinétique d'impact $E_{cin} = \tfrac{1}{2} m V_z^2$ ;
-- énergie stockée dans le gaz $E_{gaz}$ ;
-- énergie dissipée (hydraulique + friction) $E_{diss}$.
+**Réalisé.** Le moteur (`engine.py`) accumule désormais, à chaque pas, et expose
+en sortie (préfixe `Énergie…`) **tous** les chemins énergétiques du modèle :
 
-La cohérence $E_{cin} \approx E_{gaz} + E_{diss} + E_{butée}$ est un **excellent
-détecteur de bugs** et un test de conservation d'énergie automatisable.
+*Réservoirs cinétiques* (état courant) :
+- masse suspendue $E_{cin} = \tfrac{1}{2} M_s \dot z^2$ ;
+- rotation du balancier $E_{bal} = \tfrac{1}{2} J_{yy}\,\dot\theta_y^2$ ;
+- rotation de la roue (spin) $E_{rot} = \tfrac{1}{2} J_{roue}\,\omega^2$ ;
+- translation horizontale de la roue $E_{horiz} = \tfrac{1}{2} m_{roue}\,\dot x^2$.
+
+*Énergies stockées* (réversibles) :
+- gaz $E_{gaz} = \sum F_{gas}\,\mathrm{d}d$ ;
+- pneu vertical $E_{pneu} = \sum F_{tyre}\,\mathrm{d}\delta$ ;
+- ressort horizontal du pneu $E_{ress,x} = \tfrac{1}{2} k_x\,\Delta x^2$ ;
+- butée $E_{butée} = \sum F_{butée}\,\mathrm{d}d$.
+
+*Énergies dissipées* (travaux signés $F\,\mathrm{d}d$, qui se télescopent
+exactement avec le travail de la réaction d'amortisseur sur les corps) :
+- hydraulique $E_{hyd} = \sum F_{hyd}\,\mathrm{d}d$ ;
+- friction de joint $E_{fric} = \sum F_{frijoi}\,\mathrm{d}d$ ;
+- amortisseur horizontal $E_{amort,x} = \sum c_x\,\dot x^2\,\mathrm{d}t$ ;
+- **glissement au contact pneu/sol** $E_{glis}$ (chaleur du spin-up).
+
+*Apports* :
+$E_{in} = E_{cin}^{init} + W_{gravité} + E_{avancement}$, où $E_{avancement}$ est
+l'énergie puisée dans le mouvement d'avancement de l'aéronef par la friction de
+contact ($\sum F_{spin}\,V_x\,\mathrm{d}t$).
+
+**Fermeture du bilan d'avancement.** L'énergie d'avancement se répartit en quatre
+parts : (1) le gain d'énergie cinétique de rotation de la roue, évalué par sa
+**variation exacte** $\tfrac{1}{2} J_{roue}(\omega^2 - \omega_0^2)$ — nécessaire
+car le couple de spin-up est quasi-impulsionnel ($\alpha$ très grand), si bien
+qu'un produit $F_{spin}(R_0-\delta)\,\omega\,\Delta t$ laisserait une erreur
+$O(\Delta t^2)$ **constante** ; (2) le travail sur la translation propre de la
+roue $F_{spin}\,\dot x$ ; (3) le **travail de l'effort longitudinal $T_x$ sur le
+moyeu $R$ lorsque le balancier pivote** ($T_x\,\dot x_R$) — l'effort de contact
+pousse le moyeu horizontalement et injecte de l'énergie dans le mécanisme
+(balancier → amortisseur → masse suspendue) ; (4) le reste est la chaleur de
+glissement $E_{glis}$. Par construction, apport − glissement = énergie entrant
+réellement dans la roue et le mécanisme.
+
+La cohérence
+$E_{in} \approx E_{cin} + E_{bal} + E_{rot} + E_{horiz} + E_{gaz} + E_{pneu} + E_{ress,x} + E_{butée} + E_{hyd} + E_{fric} + E_{amort,x} + E_{glis}$
+est tracée dans l'onglet **Bilan énergétique** de la page Résultats et vérifiée
+par un **test de conservation** (`tests/test_energy.py`). **Tous les chemins
+énergétiques étant comptabilisés, le résidu se réduit à la seule erreur
+d'intégration d'Euler explicite** : il vaut **~0,3 % de l'énergie d'impact** au
+pas par défaut et **décroît linéairement avec le pas de temps** (vérifié par
+test : diviser $\Delta t$ par 2 réduit le résidu de moitié). Le seuil du test est
+fixé à 2 %. Ce bilan, **purement passif**, ne modifie pas la physique et sert de
+détecteur de bugs pour les évolutions futures.
 
 ### 5.3 Performance (vectorisation / JIT) — *impact faible*
 

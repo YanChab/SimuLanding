@@ -724,6 +724,27 @@ $$
 
 L'effort horizontal transmis au centre roue est $T_{R,x} = k_x\,\delta_x + c_x\,\dot\delta_x$.
 
+> **Bilan énergétique du spin-up (diagnostic).** L'énergie puisée dans
+> l'avancement par la friction de contact, $\sum F_{spin}\,V_x\,\Delta t$, se
+> répartit en quatre parts comptabilisées par le bilan énergétique
+> (cf. *Améliorations §5.2*) :
+> $$
+> \underbrace{F_{spin}\,V_x\,\Delta t}_{\text{apport avancement}}
+> = \underbrace{\tfrac{1}{2} J(\Omega^2 - \Omega_0^2)}_{\text{rotation roue}}
+> + \underbrace{F_{spin}\,\dot\delta_x\,\Delta t}_{\text{translation roue}}
+> + \underbrace{T_{R,x}\,\dot x_R\,\Delta t}_{\text{couplage balancier}}
+> + \underbrace{E_{glis}}_{\text{chaleur de glissement}}
+> $$
+> Le terme de **couplage balancier** $T_{R,x}\,\dot x_R$ traduit le travail de
+> l'effort longitudinal sur le moyeu $R$ lorsque le balancier pivote
+> ($\dot x_R = \mathrm{d}x_R/\mathrm{d}t$) : l'effort de contact pousse le moyeu
+> horizontalement et injecte de l'énergie dans le mécanisme. Le gain de rotation
+> est évalué par sa **variation exacte** $\tfrac{1}{2} J(\Omega^2 - \Omega_0^2)$
+> (et non $F_{spin}(R_0-\delta)\,\Omega\,\Delta t$) car le couple de spin-up est
+> quasi-impulsionnel. Avec cette comptabilité complète, le résidu de bilan se
+> réduit à l'erreur d'intégration d'Euler ($\sim 0{,}3\,\%$ de l'énergie
+> d'impact, décroissant avec $\Delta t$).
+
 ---
 
 ## 11. Initialisation : stabilisation statique

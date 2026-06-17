@@ -79,6 +79,29 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "torsB_fz": "Torseur@B (pivot).Effort Z (N)",
     "torsB_mx": "Torseur@B (pivot).Moment X (N·m)",
     "torsB_mz": "Torseur@B (pivot).Moment Z (N·m)",
+    # Bilan énergétique (diagnostic, purement passif) : bilan COMPLET du
+    # système (masse suspendue + balancier + roue + amortisseur). On suit les
+    # réservoirs cinétiques (translation verticale de la masse suspendue,
+    # rotation du balancier, spin-up et translation horizontale de la roue),
+    # les énergies stockées (gaz, pneu vertical, ressort horizontal, butée),
+    # les énergies dissipées (hydraulique, friction joint, amortisseur
+    # horizontal, glissement au contact) et les apports (cinétique d'impact,
+    # gravité, et travail puisé dans l'énergie d'avancement par le spin-up).
+    # Le résidu (apport − stocké − dissipé) doit rester ≈ 0 → détecteur de bugs.
+    "e_kin": "Énergie.Cinétique masse susp. (J)",
+    "e_kin_bal": "Énergie.Cinétique rotation balancier (J)",
+    "e_kin_spin": "Énergie.Cinétique rotation roue (J)",
+    "e_kin_horiz": "Énergie.Cinétique horizontale roue (J)",
+    "e_gas": "Énergie.Stockée gaz (J)",
+    "e_tyre": "Énergie.Stockée pneu vertical (J)",
+    "e_spring_x": "Énergie.Stockée ressort horizontal (J)",
+    "e_hyd": "Énergie.Dissipée hydraulique (J)",
+    "e_fric": "Énergie.Dissipée friction joint (J)",
+    "e_damp_x": "Énergie.Dissipée amortisseur horizontal (J)",
+    "e_slip": "Énergie.Dissipée glissement pneu (J)",
+    "e_endstop": "Énergie.Emmagasinée butée (J)",
+    "e_input": "Énergie.Apport total (J)",
+    "e_residual": "Énergie.Résidu de bilan (J)",
 }
 
 
@@ -232,6 +255,26 @@ def run_mlg(
     qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
     pg_prev = pg
 
+    # --- Accumulateurs du bilan énergétique (diagnostic) ------------------ #
+    # Énergie cinétique initiale d'impact de la masse suspendue ; sert de
+    # référence pour le résidu. La gravité et le spin-up ajoutent un travail au
+    # fil du temps.
+    e_kin_init = 0.5 * Ms * vitms * vitms
+    e_gas_acc = 0.0       # travail réversible du gaz (∑ Fgas·dd)
+    e_tyre_acc = 0.0      # énergie élastique stockée dans le pneu (∑ Ftyre·d(defl))
+    e_hyd_acc = 0.0       # dissipation hydraulique (∑ |Fhyd·v|·dt)
+    e_fric_acc = 0.0      # dissipation friction joint (∑ |Ffrijoi·v|·dt)
+    e_damp_x_acc = 0.0    # dissipation amortisseur horizontal (∑ cx·vitx²·dt)
+    e_endstop_acc = 0.0   # énergie emmagasinée en butée (∑ Fbutee·dd)
+    e_grav_acc = 0.0      # travail de la gravité sur la masse suspendue
+    e_fwd_acc = 0.0       # travail puisé dans l'énergie d'avancement (spin-up)
+    e_slip_acc = 0.0      # chaleur dissipée par glissement au contact pneu/sol
+    d_prev = 0.0          # course de l'amortisseur au pas précédent
+    defl_prev = 0.0       # déflexion du pneu au pas précédent
+    depms_prev = depms    # déplacement masse suspendue au pas précédent
+    omega_prev = 0.0      # vitesse de rotation roue au pas précédent
+    rx_prev = float(R[0])  # position horizontale du moyeu R au pas précédent
+
     n_steps = n_it
     for i in range(n_out):
         try:
@@ -369,6 +412,73 @@ def run_mlg(
                 context={"iteration": i, "temps_s": i * It},
             )
 
+        # --- Bilan énergétique (diagnostic, purement passif) -------------- #
+        # Bilan COMPLET du système, cohérent avec les ÉQUATIONS DISCRÈTES du
+        # modèle (théorème de l'énergie cinétique appliqué à chaque DDL), de
+        # sorte que le résidu ne reflète que l'erreur d'intégration (Euler).
+        # Travaux incrémentaux le long de la course (dd), de la déflexion et du
+        # temps (dt) :
+        #   - stockés : gaz, pneu vertical, ressort horizontal, butée ;
+        #   - dissipés : hydraulique, friction joint, amortisseur horizontal ;
+        #   - apports : gravité + travail de la friction de contact puisé dans
+        #     l'énergie d'avancement (qui lance la roue et la freine au sol).
+        dd = d - d_prev
+        e_gas_acc += fgas * dd
+        e_endstop_acc += _endstop(d, p.course) * dd
+        e_tyre_acc += ftyre * (defl - defl_prev)
+        # Dissipations de l'amortisseur : on utilise le travail SIGNÉ de chaque
+        # composante d'effort le long de la course (F·dd) et non |F·v|·dt. Comme
+        # l'effort total se décompose en Ftot = Fgas + Fhyd + Ffrijoi + Fbutée,
+        # la somme des travaux se télescope EXACTEMENT avec le travail de la
+        # réaction d'amortisseur sur les corps (→ résidu = simple erreur Euler).
+        # Le léger retard (lag) du calcul de ΔP rendrait |Fhyd·v|·dt ≠ −Fhyd·dd.
+        e_hyd_acc += fhyd * dd
+        e_fric_acc += ffrijoi * dd
+        # Amortisseur horizontal du pneu (spring-back) : Pdiss = cx·vitx².
+        e_damp_x_acc += p.cx * vitx * vitx * It
+        # Énergie d'avancement et glissement au contact pneu/sol.
+        #   • Apport : la friction de contact Fspin puise dans l'énergie
+        #     d'avancement de l'aéronef à la VITESSE SOL Vx (puissance Fspin·Vx).
+        #   • Cette énergie se répartit en quatre parts :
+        #       – gain d'énergie cinétique de rotation de la roue ΔEc_rot,
+        #       – travail sur la translation propre de la roue (Fspin·vitx),
+        #       – travail de l'effort longitudinal tr_x sur le moyeu R lorsque
+        #         le balancier pivote (tr_x·vR_x) : l'effort de contact pousse
+        #         le moyeu horizontalement et injecte ainsi de l'énergie dans le
+        #         mécanisme (balancier → amortisseur → masse suspendue),
+        #       – chaleur dissipée par glissement au contact (le reste).
+        # On évalue ΔEc_rot par sa variation EXACTE ½J(ω²−ω₀²) plutôt que par
+        # Fspin·(R0−δ)·ω·It : le couple de spin-up étant quasi-impulsionnel
+        # (α≫1), seule la variation exacte se referme avec le réservoir
+        # cinétique Ec_rot, sinon le résidu garde une erreur O(It²) constante.
+        # En définissant ainsi e_slip = Fspin·(Vx−vitx)·It − ΔEc_rot − tr_x·vR_x·It,
+        # le bilan du chemin d'avancement se ferme par construction.
+        vr_x = (R[0] - rx_prev) / It
+        dke_spin = 0.5 * p.wheel_inertia * (omega * omega - omega_prev * omega_prev)
+        e_fwd_acc += fspin * Vx * It
+        e_slip_acc += fspin * (Vx - vitx) * It - dke_spin - tr_x * vr_x * It
+        # Poids (le long de Z, dirigé vers le bas) × déplacement de la masse.
+        e_grav_acc += -pms_rlg_z * (depms - depms_prev)
+        d_prev = d
+        defl_prev = defl
+        depms_prev = depms
+        omega_prev = omega
+        rx_prev = float(R[0])
+
+        # Réservoirs cinétiques courants.
+        e_kin = 0.5 * Ms * vitms * vitms
+        e_kin_bal = 0.5 * Jyy * om_y * om_y
+        e_kin_spin = 0.5 * p.wheel_inertia * omega * omega
+        e_kin_horiz = 0.5 * p.wheelmass * vitx * vitx
+        e_spring_x = 0.5 * p.kx * depx * depx
+
+        e_input = e_kin_init + e_grav_acc + e_fwd_acc
+        e_residual = e_input - (
+            e_kin + e_kin_bal + e_kin_spin + e_kin_horiz
+            + e_gas_acc + e_tyre_acc + e_spring_x + e_endstop_acc
+            + e_hyd_acc + e_fric_acc + e_damp_x_acc + e_slip_acc
+        )
+
         # Enregistrement
         out["temps"][i] = i * It
         out["accms"][i] = accms
@@ -422,6 +532,22 @@ def run_mlg(
         out["torsB_fz"][i] = fb_z
         out["torsB_mx"][i] = mb_x
         out["torsB_mz"][i] = mb_z
+
+        # Bilan énergétique (diagnostic)
+        out["e_kin"][i] = e_kin
+        out["e_kin_bal"][i] = e_kin_bal
+        out["e_kin_spin"][i] = e_kin_spin
+        out["e_kin_horiz"][i] = e_kin_horiz
+        out["e_gas"][i] = e_gas_acc
+        out["e_tyre"][i] = e_tyre_acc
+        out["e_spring_x"][i] = e_spring_x
+        out["e_hyd"][i] = e_hyd_acc
+        out["e_fric"][i] = e_fric_acc
+        out["e_damp_x"][i] = e_damp_x_acc
+        out["e_slip"][i] = e_slip_acc
+        out["e_endstop"][i] = e_endstop_acc
+        out["e_input"][i] = e_input
+        out["e_residual"][i] = e_residual
 
         # Positions géométriques (mm) pour l'animation
         geom["ax"][i] = A[0]
