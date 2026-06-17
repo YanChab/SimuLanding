@@ -12,7 +12,7 @@
 | # | Amélioration | Nature | Impact | Risque | Effort |
 |---|---|---|---|---|---|
 | 5.2 | Bilan énergétique en sortie — ✅ **fait** | Diagnostic | Fort | Faible | Faible |
-| 5.1 | Tests de non-régression vs Excel | Validation | Fort | Faible | Moyen |
+| 5.1 | Tests de non-régression — ✅ **fait** | Validation | Fort | Faible | Moyen |
 | 2.1 | Butée de contact lissée | Robustesse | Moyen | Faible | Faible |
 | 1.1 | Intégrateur RK4 / adaptatif | Numérique | Fort | Moyen | Élevé |
 | 1.2 | Convergence réelle des solveurs | Numérique | Moyen | Moyen | Moyen |
@@ -20,8 +20,8 @@
 | 4.1 | Dynamique 3D / masse non suspendue | Physique | Moyen | Élevé | Élevé |
 
 **Ordre de démarrage recommandé** (gain rapide, risque faible) :
-1. Bilan énergétique en sortie (§5.2) — ne change pas la physique ;
-2. Tests de non-régression contre l'Excel (§5.1) — sécurise les évolutions ;
+1. Bilan énergétique en sortie (§5.2) — ✅ fait ;
+2. Tests de non-régression (§5.1) — ✅ fait ;
 3. Butée de contact lissée (§2.1) — stabilité ;
 4. puis expérimenter un intégrateur RK4/adaptatif (§1.1) en gardant Euler en option.
 
@@ -154,16 +154,33 @@ propre** distincte.
 
 ## 5. Validation et qualité logicielle
 
-### 5.1 Tests de non-régression contre l'Excel — *impact fort*
+### 5.1 Tests de non-régression contre l'Excel — *impact fort* — ✅ **implémenté**
 
 **Constat.** Couverture de tests **faible** (5 tests).
 
-**Proposition.** Ajouter une batterie de tests :
-- **non-régression numérique** contre les valeurs Excel de référence, à
-  plusieurs **températures**, **masses** et **vitesses** ;
-- tests aux **bornes** (course max, divergence attendue) ;
-- figer des **snapshots** des grandeurs de synthèse (B46:C61) pour détecter toute
-  dérive.
+**Réalisé.** Une batterie de tests de non-régression (`tests/test_regression.py`,
+21 tests) protège désormais les évolutions futures contre toute dérive
+involontaire des résultats. Trois familles :
+- **Golden tests de synthèse** — un *snapshot* des grandeurs de synthèse
+  (`summary` + `summary_rows`, équivalent du bloc B46:C61 « Summary MLG ») est
+  figé dans `tests/reference/golden_summary.json` pour **3 cas** (nominal,
+  froid/lourd, léger/lent) et comparé à tolérance serrée ($r=10^{-4}$). Toute
+  dérive sur n'importe quelle grandeur est détectée. Une fonction
+  `regenerate_golden()` permet de régénérer le *golden* après un changement de
+  physique **assumé**.
+- **Non-régression de courbe** — au-delà des seuls pics, l'**écart RMS** sur tout
+  l'historique temporel de $F_z(t)$ et de la course $d(t)$ est comparé au CSV de
+  référence Excel (`_extract/reference/Results_MLG.csv`, seuil 2 % du pic).
+- **Invariants physiques** — sur un balayage masse/vitesse/température : monotonies
+  ($F_z\nearrow$ avec la masse, course $\nearrow$ avec $V_z$, $F_x\nearrow$ avec
+  $V_x$), finitude/positivité des grandeurs clés, course bornée par la butée et
+  absence d'effort de spin-up à $V_x=0$.
+
+> **Limite.** La référence Excel ne couvre qu'**un seul** point de fonctionnement.
+> La non-régression *multi-cas contre l'Excel* n'est donc pas possible faute de
+> données ; elle est remplacée par des **golden tests Python** (régression contre
+> soi-même) + invariants physiques, ce qui couvre l'objectif réel (sécuriser les
+> évolutions). Élargir la référence Excel à plusieurs cas reste souhaitable.
 
 ### 5.2 Bilan énergétique en sortie — *impact fort, risque faible* — ✅ **implémenté**
 
