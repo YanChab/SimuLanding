@@ -348,8 +348,10 @@ with tab_torseur:
         "Torseur d'effort transmis par le train à la masse suspendue via ses "
         "deux attaches : **C** (tête d'amortisseur) est une **rotule** — elle ne "
         "transmet qu'un **effort**, sans moment ; **B** (pivot du balancier) est "
-        "un **pivot** — il reprend l'**effort et le moment** de liaison. La "
-        "résultante (somme des deux efforts) est égale à la réaction sol."
+        "un **pivot d'axe Y** — il reprend l'**effort** et les **moments autour "
+        "de X et Z** (l'axe Y étant libre en rotation, aucun moment n'y est "
+        "transmis). La résultante (somme des deux efforts) est égale à la "
+        "réaction sol."
     )
 
     def _amax(key: str) -> float:
@@ -357,7 +359,7 @@ with tab_torseur:
 
     m1, m2 = st.columns(2)
     m1.metric("‖Résultante‖ max", f"{_amax('tors_res_norm'):.0f} N")
-    m2.metric("|Moment Y au pivot B| max", f"{_amax('torsB_my'):.0f} N·m")
+    m2.metric("|Moment au pivot B| max", f"{max(_amax('torsB_mx'), _amax('torsB_mz')):.0f} N·m")
 
     st.plotly_chart(
         line(
@@ -379,9 +381,10 @@ with tab_torseur:
         line(
             t,
             [
-                ("Moment Y au pivot B", df[COL["torsB_my"]]),
+                ("Moment X au pivot B", df[COL["torsB_mx"]]),
+                ("Moment Z au pivot B", df[COL["torsB_mz"]]),
             ],
-            "Moment de liaison (axe Y) repris par le pivot B",
+            "Moments de liaison (axes X et Z) repris par le pivot B",
             "Temps (s)",
             "Moment (N·m)",
         ),

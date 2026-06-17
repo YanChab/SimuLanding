@@ -74,7 +74,7 @@ sont en unités d'affichage (mm, bar, cc, cSt, MPa, °, °C) et converties par
 | $\vec{T}_A,\ \vec{T}_B,\ \vec{T}_R$ | Efforts de liaison en $A$, $B$, $R$ (sur le balancier) | N | N |
 | $\vec{F}_B,\ \vec{F}_C$ | Efforts transmis à la masse suspendue en $B$ (pivot), $C$ (rotule) | N | N |
 | $\vec{\mathcal{R}}$ | Résultante du torseur d'effort transmis à la cellule | N | N |
-| $\vec{\mathcal{M}}_B$ | Moment de liaison repris par le pivot $B$ | N·m | N·m |
+| $\mathcal{M}_{B,X},\ \mathcal{M}_{B,Z}$ | Moments de liaison repris par le pivot $B$ (axes $X$ et $Z$) | N·m | N·m |
 
 ### 2.4 Géométrie de l'amortisseur
 
@@ -583,7 +583,9 @@ de natures différentes :
 - en $C$ : la **tête d'amortisseur** est une **rotule** (liaison sphérique).
   Une rotule ne transmet **qu'un effort**, sans aucun moment ;
 - en $B$ : le **pivot du balancier** est une **liaison pivot** d'axe $Y$. Le
-  pivot reprend l'**effort de liaison et le moment** correspondant.
+  pivot reprend l'**effort de liaison** et les **moments autour de $X$ et de
+  $Z$**. En revanche, l'axe $Y$ étant l'axe de rotation libre de la liaison, le
+  pivot **ne transmet aucun moment autour de $Y$**.
 
 Par le principe d'action–réaction (3ᵉ loi de Newton), les efforts appliqués
 **par le train sur la masse suspendue** sont les opposés des efforts de liaison
@@ -610,26 +612,37 @@ cohérence du modèle.
 
 #### Moment de liaison au pivot $B$
 
-La rotule $C$ n'oppose **aucun moment** ($\vec{\mathcal{M}}_C = \vec{0}$). Par
-équilibre du sous-système, **le pivot $B$ reprend donc l'intégralité du moment**
-du torseur transmis, réduit au point $B$. Seul l'effort de rotule $\vec{F}_C$
-(appliqué en $C$) possède un bras de levier non nul vis-à-vis de $B$, de sorte
-que :
+Le moment repris par le pivot se calcule par **équilibre du balancier**, à partir
+des efforts qui agissent **réellement sur ce corps** : l'effort d'amortisseur
+$\vec{T}_A$ appliqué en $A$ et la réaction sol $\vec{T}_R$ appliquée en $R$,
+réduits au point $B$ (bras $\vec{BA}$ et $\vec{BR}$). On **n'utilise pas**
+l'effort $\vec{F}_C$ en $C$, qui s'applique sur la cellule et non sur le
+balancier. Le moment des efforts du balancier réduit en $B$ vaut :
 
 $$
-\vec{\mathcal{M}}_B = \vec{BC}\times\vec{F}_C
-= (C - B)\times\vec{F}_C .
+\vec{\mathcal{M}}_B = \vec{BA}\times\vec{T}_A + \vec{BR}\times\vec{T}_R
+= (A - B)\times\vec{T}_A + (R - B)\times\vec{T}_R .
 $$
 
-Le mécanisme étant plan (rotation autour de $Y$), la composante significative est
-celle d'axe $Y$. En notant $\vec{BC} = (b_x, b_y, b_z)$ :
+Une **liaison pivot d'axe $Y$ ne peut transmettre aucun moment autour de $Y$** :
+cet axe est la direction de rotation libre du balancier. La composante selon $Y$
+de $\vec{\mathcal{M}}_B$ n'est donc **pas** reprise par la liaison ; elle est
+équilibrée par la **dynamique de rotation du balancier** (accélération angulaire
+$\alpha_Y$ et inertie $J_{YY}$, cf. §8). Le pivot ne réagit que les **moments
+autour de $X$ et de $Z$**. En notant $\vec{BA} = (a_x, a_y, a_z)$ et
+$\vec{BR} = (r_x, r_y, r_z)$ :
 
 $$
-\mathcal{M}_{B,Y} = b_z\,F_{C,x} - b_x\,F_{C,z}.
+\mathcal{M}_{B,X} = (a_y\,T_{A,z} - a_z\,T_{A,y}) + (r_y\,T_{R,z} - r_z\,T_{R,y}),
+$$
+
+$$
+\mathcal{M}_{B,Z} = (a_x\,T_{A,y} - a_y\,T_{A,x}) + (r_x\,T_{R,y} - r_y\,T_{R,x}).
 $$
 
 Ces grandeurs — résultante $\vec{\mathcal{R}}$, effort de rotule $\vec{F}_C$,
-effort de pivot $\vec{F}_B$ et moment de pivot $\mathcal{M}_{B,Y}$ — sont
+effort de pivot $\vec{F}_B$ et moments de pivot $\mathcal{M}_{B,X}$ et
+$\mathcal{M}_{B,Z}$ — sont
 exportées par le moteur (préfixe `Torseur…`) et tracées dans l'onglet
 **Torseur B & C** de la page Résultats. Elles fournissent les **charges
 d'interface** servant au dimensionnement des attaches de l'atterrisseur sur la

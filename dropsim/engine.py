@@ -64,7 +64,8 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "reaction_h": "Reaction sol horizontale (N)",
     # Torseur d'effort transmis par le train à la masse suspendue via ses deux
     # attaches : C (tête d'amortisseur) est une ROTULE → effort seul, aucun
-    # moment ; B (pivot du balancier) est un PIVOT → effort + moment de liaison.
+    # moment ; B (pivot du balancier) est un PIVOT d'axe Y → effort + moments
+    # de liaison autour de X et Z uniquement (axe Y libre en rotation).
     # La résultante (somme des deux efforts) est égale à la réaction sol.
     "tors_res_x": "Torseur.Resultante X (N)",
     "tors_res_y": "Torseur.Resultante Y (N)",
@@ -76,7 +77,8 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "torsB_fx": "Torseur@B (pivot).Effort X (N)",
     "torsB_fy": "Torseur@B (pivot).Effort Y (N)",
     "torsB_fz": "Torseur@B (pivot).Effort Z (N)",
-    "torsB_my": "Torseur@B (pivot).Moment Y (N·m)",
+    "torsB_mx": "Torseur@B (pivot).Moment X (N·m)",
+    "torsB_mz": "Torseur@B (pivot).Moment Z (N·m)",
 }
 
 
@@ -340,11 +342,18 @@ def run_mlg(
             res_y = fb_y + fc_y
             res_z = fb_z + fc_z
             res_norm = math.sqrt(res_x * res_x + res_y * res_y + res_z * res_z)
-            # Moment réacté par le pivot B : la rotule C n'oppose aucun moment,
-            # donc le pivot reprend le moment du torseur transmis, réduit en B.
-            # Seul FC (appliqué en C) a un bras de levier non nul ; bras BC = C-B.
-            cbx, cby, cbz = C[0] - B[0], C[1] - B[1], C[2] - B[2]
-            mb_y = cbz * fc_x - cbx * fc_z
+            # Moment réacté par le pivot B. B est un PIVOT d'axe Y : il ne peut
+            # transmettre AUCUN moment autour de Y (axe de rotation libre — ce
+            # moment alimente la dynamique de rotation du balancier, cf. al_y /
+            # Jyy) ; il ne réagit que les moments autour de X et de Z.
+            # Le moment se calcule à partir des efforts qui agissent RÉELLEMENT
+            # sur le balancier — l'effort amortisseur TA appliqué en A et la
+            # réaction sol TR appliquée en R — réduits au pivot B (bras BA, BR),
+            # et NON à partir de l'effort en C (qui s'applique sur la cellule).
+            bax, bay, baz = A[0] - B[0], A[1] - B[1], A[2] - B[2]
+            brx, bry, brz = R[0] - B[0], R[1] - B[1], R[2] - B[2]
+            mb_x = (bay * ta_z - baz * ta_y) + (bry * tr_z - brz * tr_y)
+            mb_z = (bax * ta_y - bay * ta_x) + (brx * tr_y - bry * tr_x)
 
         except SimError as err:
             err.context.setdefault("iteration", i)
@@ -411,7 +420,8 @@ def run_mlg(
         out["torsB_fx"][i] = fb_x
         out["torsB_fy"][i] = fb_y
         out["torsB_fz"][i] = fb_z
-        out["torsB_my"][i] = mb_y
+        out["torsB_mx"][i] = mb_x
+        out["torsB_mz"][i] = mb_z
 
         # Positions géométriques (mm) pour l'animation
         geom["ax"][i] = A[0]
