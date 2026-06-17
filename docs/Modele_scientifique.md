@@ -86,6 +86,7 @@ sont en unités d'affichage (mm, bar, cc, cSt, MPa, °, °C) et converties par
 | $D_{pal}$ | Diamètre intérieur du palier BH (limite de la fuite annulaire) | m (mm) |
 | $L_{bh}$ | Longueur du trou de la butée hydraulique | m (mm) |
 | $L_{pal}$ | Longueur du palier BH (longueur de fuite annulaire) | m (mm) |
+| $e_{exc}$ | Désaxage de la butée dans le palier BH (excentricité) | m (mm) |
 | $D_t$ | Diamètre de tige | m (mm) |
 | $\text{course}$ | Course totale (SAT, *Stroke At Tail*) | m (mm) |
 
@@ -407,39 +408,55 @@ $$
 
 La fuite n'existe que si $D_{pal} > D_{bh}$ (jeu positif).
 
-#### 7.5.2 Loi laminaire de Hagen-Poiseuille annulaire exacte
+#### 7.5.2 Loi laminaire de Hagen-Poiseuille annulaire avec correction de désaxage
 
 Pour un écoulement laminaire dans un anneau concentrique (solution exacte de Stokes) :
 
 $$
-Q_{fuite} = \frac{\pi\,\Delta P}{8\,\mu\,L_{pal}}
+Q_{conc} = \frac{\pi\,\Delta P}{8\,\mu\,L_{pal}}
 \left[
 r_2^4 - r_1^4 - \frac{(r_2^2 - r_1^2)^2}{\ln(r_2/r_1)}
 \right]
 $$
 
-où $\mu = \rho\,\nu$ est la viscosité dynamique de l'huile (Pa·s). Cette loi donne $Q_{fuite}$ **linéaire en $\Delta P$**.
+où $\mu = \rho\,\nu$ est la viscosité dynamique de l'huile (Pa·s). Cette loi donne $Q_{conc}$ **linéaire en $\Delta P$**.
 
 Approximation au jeu fin ($e \ll r_1$) :
 $$
-Q_{fuite} \approx \frac{\pi\,D_m\,e^3}{12\,\mu\,L_{pal}}\,\Delta P, \qquad D_m = \frac{D_{pal}+D_{bh}}{2}
+Q_{conc} \approx \frac{\pi\,D_m\,c^3}{12\,\mu\,L_{pal}}\,\Delta P, \qquad D_m = \frac{D_{pal}+D_{bh}}{2}, \quad c = r_2 - r_1
 $$
+
+**Correction de désaxage (Someya)** : si la butée est décentrée dans le palier d'une excentricité $e_{exc}$ (distance entre les axes), le débit réel est amplifié par un facteur analytique exact (solution de Stokes en anneau excentrique) :
+
+$$
+\varepsilon^* = \frac{e_{exc}}{c} \in [0, 1], \qquad f_{exc} = 1 + \frac{3}{2}\,\varepsilon^{*2}
+$$
+
+$$
+Q_{fuite,lam} = Q_{conc} \times f_{exc}
+$$
+
+Cas limites :
+- $\varepsilon^* = 0$ (concentrique) : $f_{exc} = 1$ (aucune correction, modèle actuel par défaut) ;
+- $\varepsilon^* = 1$ (contact d'un côté) : $f_{exc} = 2{,}5$ (débit maximal $\times\,2{,}5$).
+
+Le paramètre $e_{exc}$ se saisit en mm dans la page **Saisie** (valeur par défaut : 0, soit concentrique).
 
 #### 7.5.3 Extension turbulente (Darcy-Weisbach)
 
 Lorsque le nombre de Reynolds de la fuite dépasse le seuil laminaire, la loi de Hagen-Poiseuille surestime fortement le débit. On calcule d'abord le Reynolds laminaire :
 
 $$
-Re_{lam} = \frac{\rho\, V_{lam}\, D_h}{\mu}, \qquad V_{lam} = \frac{|Q_{lam}|}{A_{ann}}
+Re_{lam} = \frac{\rho\, V_{lam}\, D_h}{\mu}, \qquad V_{lam} = \frac{|Q_{fuite,lam}|}{A_{ann}}
 $$
 
-- Si $Re_{lam} \le 2\,000$ : régime **laminaire**, $Q_{fuite} = Q_{lam}$.
-- Si $Re_{lam} \ge 4\,000$ : régime **turbulent** — le débit est calculé par inversion de Darcy-Weisbach par itérations fixes sur Re :
+- Si $Re_{lam} \le 2\,000$ : régime **laminaire**, $Q_{fuite} = Q_{fuite,lam}$.
+- Si $Re_{lam} \ge 4\,000$ : régime **turbulent** — le débit est calculé par inversion de Darcy-Weisbach avec le même facteur d'excentricité $f_{exc}$ :
 
 $$
 \Delta P = f\,\frac{L_{pal}}{D_h}\,\frac{\rho\,V^2}{2}
 \implies
-Q_{turb} = A_{ann}\sqrt{\frac{2\,\Delta P\,D_h}{\rho\,f\,L_{pal}}}
+Q_{turb} = A_{ann}\sqrt{\frac{2\,\Delta P\,D_h}{\rho\,f\,L_{pal}}} \times f_{exc}
 $$
 
 Facteur de frottement de Blasius (conduite hydrauliquement lisse) :

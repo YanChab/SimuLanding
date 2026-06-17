@@ -38,8 +38,34 @@ def _flow_bh_from_dp(delta_p: float, rho: float, sec_bh: float, cd_bh: float) ->
     return _sign(delta_p) * sec_bh * cd_bh * math.sqrt(2.0 * abs(delta_p) / rho)
 
 
-def _flow_annular_hagen(delta_p: float, mu: float, length: float, d_outer: float, d_inner: float) -> float:
-    """Débit laminaire exact dans un anneau concentrique (Hagen-Poiseuille)."""
+def _eccentricity_factor(eccentricity: float, d_outer: float, d_inner: float) -> float:
+    """Facteur correctif de Someya pour l'excentricité d'un anneau.
+
+    Pour un jeu annulaire excentrique d'excentricité ``eccentricity`` (m),
+    le débit réel est multiplié par ``(1 + 1.5 * eps_star**2)`` où
+    ``eps_star = eccentricity / c_radial`` (rapport excentricité / jeu radial).
+    ``eps_star`` est saturé à 1 (contact physique).
+
+    - eps_star = 0 (concentrique) → facteur = 1 (aucune correction)
+    - eps_star = 1 (contact)       → facteur = 2.5 (débit × 2.5 max)
+    """
+    c_radial = (d_inner - d_outer) / 2.0
+    if c_radial <= 0.0 or eccentricity <= 0.0:
+        return 1.0
+    eps_star = min(eccentricity / c_radial, 1.0)
+    return 1.0 + 1.5 * eps_star ** 2
+
+
+def _flow_annular_hagen(
+    delta_p: float,
+    mu: float,
+    length: float,
+    d_outer: float,
+    d_inner: float,
+    eccentricity: float = 0.0,
+) -> float:
+    """Débit laminaire dans un anneau concentrique (Hagen-Poiseuille), avec
+    correction d'excentricité de Someya (``eccentricity`` en m, 0 = concentrique)."""
     if mu <= 0.0 or length <= 0.0 or d_inner <= d_outer:
         return 0.0
     r1 = 0.5 * d_outer
@@ -52,7 +78,8 @@ def _flow_annular_hagen(delta_p: float, mu: float, length: float, d_outer: float
     geom = r2**4 - r1**4 - ((r2**2 - r1**2) ** 2) / log_ratio
     if geom <= 0.0:
         return 0.0
-    return (math.pi * delta_p * geom) / (8.0 * mu * length)
+    q_conc = (math.pi * delta_p * geom) / (8.0 * mu * length)
+    return q_conc * _eccentricity_factor(eccentricity, d_outer, d_inner)
 
 
 def _flow_annular_with_turbulence(
@@ -62,9 +89,11 @@ def _flow_annular_with_turbulence(
     length: float,
     d_outer: float,
     d_inner: float,
+    eccentricity: float = 0.0,
     n_iter: int = 8,
 ) -> tuple[float, float]:
-    """Débit dans la fuite annulaire avec extension turbulente (Darcy-Weisbach).
+    """Débit dans la fuite annulaire avec extension turbulente (Darcy-Weisbach)
+    et correction d'excentricité.
 
     Retourne ``(q_leak, re_leak)`` où ``q_leak`` garde le signe de ``delta_p``.
     """
@@ -79,7 +108,8 @@ def _flow_annular_with_turbulence(
     if area <= 0.0 or dh <= 0.0:
         return 0.0, 0.0
 
-    q_lam = _flow_annular_hagen(delta_p, mu_dyn, length, d_outer, d_inner)
+    ecc_factor = _eccentricity_factor(eccentricity, d_outer, d_inner)
+    q_lam = _flow_annular_hagen(delta_p, mu_dyn, length, d_outer, d_inner, eccentricity)
     v_lam = abs(q_lam) / area if area > 0.0 else 0.0
     re_lam = rho * v_lam * dh / mu_dyn if mu_dyn > 0.0 else 0.0
 
@@ -87,7 +117,8 @@ def _flow_annular_with_turbulence(
     if re_lam <= 2000.0:
         return q_lam, re_lam
 
-    # Branche turbulente : inversion de Darcy-Weisbach par itération fixe sur Re.
+    # Branche turbulente : inversion de Darcy-Weisbach par itération fixe sur Re,
+    # puis application du facteur d'excentricité (valable aussi en turbulent).
     q_abs = max(abs(q_lam), 1.0e-12)
     for _ in range(n_iter):
         v = q_abs / area
@@ -97,7 +128,7 @@ def _flow_annular_with_turbulence(
         else:
             # Blasius pour conduite hydrauliquement lisse.
             f = 0.3164 * re ** (-0.25)
-        q_abs = area * math.sqrt(max(0.0, 2.0 * abs(delta_p) * dh / (rho * f * length)))
+        q_abs = area * math.sqrt(max(0.0, 2.0 * abs(delta_p) * dh / (rho * f * length))) * ecc_factor
 
     q_turb = _sign(delta_p) * q_abs
     v_turb = q_abs / area
@@ -210,6 +241,7 @@ def calcul_hydrau(
                     p.LPalierBh,
                     p.Dbh,
                     p.DInsidePalierBh,
+                    p.excentricite_palier_bh,
                 )
                 return qb + qf, qb, qf, ref
 

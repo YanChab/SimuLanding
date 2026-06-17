@@ -118,6 +118,7 @@ class MLGInputs:
     DInsidePalierBh: float = 34.0  # mm  diamètre intérieur palier BH (fuite annulaire)
     Lbh: float = 200.0             # mm  longueur du trou de BH
     LPalierBh: float = 200.0       # mm  longueur du palier BH (fuite annulaire)
+    excentricite_palier_bh: float = 0.0  # mm  désaxage BH/palier (0 = concentrique)
     course: float = 185.0          # mm  course totale (SAT)
     DTrouPis: float = 1.5          # mm  diamètre trou piston de détente
     NbTrouPis: float = 10.0        # -   nombre de trous piston
@@ -413,6 +414,7 @@ class MLGInputs:
             DInsidePalierBh=self.DInsidePalierBh * U.MM_TO_M,
             Lbh=self.Lbh * U.MM_TO_M,
             LPalierBh=self.LPalierBh * U.MM_TO_M,
+            excentricite_palier_bh=self.excentricite_palier_bh * U.MM_TO_M,
             course=self.course * U.MM_TO_M,
             DTrouPis=self.DTrouPis * U.MM_TO_M,
             NbTrouPis=self.NbTrouPis,
@@ -479,6 +481,7 @@ class MLGParamsSI:
     DInsidePalierBh: float
     Lbh: float
     LPalierBh: float
+    excentricite_palier_bh: float
     course: float
     DTrouPis: float
     NbTrouPis: float
