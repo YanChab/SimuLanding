@@ -55,6 +55,11 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "pg": "MLG.Pg (bar)",
     "delta_pc": "MLG.DeltaPc (bar)",
     "delta_pd": "MLG.DeltaPd (bar)",
+    "hyd_qc_total": "Hydrau.Qc total (m³/s)",
+    "hyd_qc_bh": "Hydrau.Qc rainures BH (m³/s)",
+    "hyd_qc_leak": "Hydrau.Qc fuite annulaire (m³/s)",
+    "hyd_leak_ratio": "Hydrau.Part fuite (-)",
+    "hyd_re_leak": "Hydrau.Re fuite annulaire (-)",
     "reaction_v": "Reaction sol verticale (N)",
     "reaction_h": "Reaction sol horizontale (N)",
     # Torseur d'effort transmis par le train à la masse suspendue via ses deux
@@ -222,6 +227,7 @@ def run_mlg(
     vitx = depx = 0.0
     defl = 0.0
     delta_pc = delta_pd = 0.0
+    qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
     pg_prev = pg
 
     n_steps = n_it
@@ -281,7 +287,17 @@ def run_mlg(
             pg = gas.pressure(d, pg_prev)
             sec = section_bh(d, tab_pos, tab_sec)
             if v != 0.0:
-                delta_pc, delta_pd, _qc = calcul_hydrau(p, v, d, delta_pc, pg, sec)
+                (
+                    delta_pc,
+                    delta_pd,
+                    qc_total,
+                    qc_bh,
+                    qc_leak,
+                    re_leak,
+                ) = calcul_hydrau(p, v, d, delta_pc, pg, sec)
+                leak_ratio = abs(qc_leak) / abs(qc_total) if abs(qc_total) > 1.0e-12 else 0.0
+            else:
+                qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
             pc = pg + delta_pc
             pd = pc - delta_pd
             fgas = p.St * pg
@@ -376,6 +392,11 @@ def run_mlg(
         out["pg"][i] = pg * 1.0e-5
         out["delta_pc"][i] = delta_pc * 1.0e-5
         out["delta_pd"][i] = delta_pd * 1.0e-5
+        out["hyd_qc_total"][i] = qc_total
+        out["hyd_qc_bh"][i] = qc_bh
+        out["hyd_qc_leak"][i] = qc_leak
+        out["hyd_leak_ratio"][i] = leak_ratio
+        out["hyd_re_leak"][i] = re_leak
         out["reaction_v"][i] = ftyre
         out["reaction_h"][i] = tr_x
 

@@ -31,6 +31,88 @@ def _cd(re_deq: float, s: float) -> float:
     return (1.5 + 13.74 * (s / re_deq) ** 0.5) ** (-0.5)
 
 
+def _flow_bh_from_dp(delta_p: float, rho: float, sec_bh: float, cd_bh: float) -> float:
+    """Débit de la branche rainures BH à partir de ΔP (relation orifice)."""
+    if sec_bh <= 0.0 or cd_bh <= 0.0 or rho <= 0.0:
+        return 0.0
+    return _sign(delta_p) * sec_bh * cd_bh * math.sqrt(2.0 * abs(delta_p) / rho)
+
+
+def _flow_annular_hagen(delta_p: float, mu: float, length: float, d_outer: float, d_inner: float) -> float:
+    """Débit laminaire exact dans un anneau concentrique (Hagen-Poiseuille)."""
+    if mu <= 0.0 or length <= 0.0 or d_inner <= d_outer:
+        return 0.0
+    r1 = 0.5 * d_outer
+    r2 = 0.5 * d_inner
+    if r1 <= 0.0 or r2 <= r1:
+        return 0.0
+    log_ratio = math.log(r2 / r1)
+    if log_ratio <= 0.0:
+        return 0.0
+    geom = r2**4 - r1**4 - ((r2**2 - r1**2) ** 2) / log_ratio
+    if geom <= 0.0:
+        return 0.0
+    return (math.pi * delta_p * geom) / (8.0 * mu * length)
+
+
+def _flow_annular_with_turbulence(
+    delta_p: float,
+    rho: float,
+    visc_kin: float,
+    length: float,
+    d_outer: float,
+    d_inner: float,
+    n_iter: int = 8,
+) -> tuple[float, float]:
+    """Débit dans la fuite annulaire avec extension turbulente (Darcy-Weisbach).
+
+    Retourne ``(q_leak, re_leak)`` où ``q_leak`` garde le signe de ``delta_p``.
+    """
+    if rho <= 0.0 or visc_kin <= 0.0:
+        return 0.0, 0.0
+    if length <= 0.0 or d_inner <= d_outer:
+        return 0.0, 0.0
+
+    mu_dyn = rho * visc_kin
+    area = math.pi * (d_inner * d_inner - d_outer * d_outer) / 4.0
+    dh = d_inner - d_outer
+    if area <= 0.0 or dh <= 0.0:
+        return 0.0, 0.0
+
+    q_lam = _flow_annular_hagen(delta_p, mu_dyn, length, d_outer, d_inner)
+    v_lam = abs(q_lam) / area if area > 0.0 else 0.0
+    re_lam = rho * v_lam * dh / mu_dyn if mu_dyn > 0.0 else 0.0
+
+    # Laminaire pur : on garde la loi analytique de Hagen-Poiseuille.
+    if re_lam <= 2000.0:
+        return q_lam, re_lam
+
+    # Branche turbulente : inversion de Darcy-Weisbach par itération fixe sur Re.
+    q_abs = max(abs(q_lam), 1.0e-12)
+    for _ in range(n_iter):
+        v = q_abs / area
+        re = rho * v * dh / mu_dyn
+        if re <= 1.0:
+            f = 64.0
+        else:
+            # Blasius pour conduite hydrauliquement lisse.
+            f = 0.3164 * re ** (-0.25)
+        q_abs = area * math.sqrt(max(0.0, 2.0 * abs(delta_p) * dh / (rho * f * length)))
+
+    q_turb = _sign(delta_p) * q_abs
+    v_turb = q_abs / area
+    re_turb = rho * v_turb * dh / mu_dyn if mu_dyn > 0.0 else 0.0
+
+    # Zone transitoire : interpolation continue entre laminaire et turbulent.
+    if re_lam < 4000.0:
+        w = (re_lam - 2000.0) / 2000.0
+        q_mix = (1.0 - w) * q_lam + w * q_turb
+        re_mix = (1.0 - w) * re_lam + w * re_turb
+        return q_mix, re_mix
+
+    return q_turb, re_turb
+
+
 def calcul_hydrau(
     p: MLGParamsSI,
     v: float,
@@ -39,8 +121,8 @@ def calcul_hydrau(
     pg: float,
     sec_bh: float,
     n_iter: int = 4,
-) -> tuple[float, float, float]:
-    """Calcule (ΔPc, ΔPd, Qc) pour une vitesse de tige ``v`` et une course ``d``.
+) -> tuple[float, float, float, float, float, float]:
+    """Calcule (ΔPc, ΔPd, Qc_total, Qc_rainures, Qc_fuite, Re_fuite).
 
     Parameters
     ----------
@@ -75,41 +157,97 @@ def calcul_hydrau(
             context={"course_m": d},
         )
 
-    qc = p.Sc * v
+    qc_total = p.Sc * v
     deq_bh = math.sqrt(math.pi * sec_bh / 4.0)
-    re_bh = (abs(qc) * deq_bh / sec_bh) / visc
+    re_bh = (abs(qc_total) * deq_bh / sec_bh) / visc
     cd_bh = _cd(re_bh * deq_bh, 0.003)
+    q_bh = qc_total
+    q_leak = 0.0
+    re_leak = 0.0
 
     # --- Compression : couplage avec la compressibilité de l'huile -------- #
-    if qc > 0.0:
+    if qc_total > 0.0:
         coupl = p.Sc * (p.course - d) / (p.bulk * p.it)
-        inv_scd2 = (1.0 / (sec_bh * cd_bh)) ** 2
         m_delta_pc = delta_pc_prev          # mDeltaPc persistant du pas précédent
         x0 = pg + m_delta_pc                 # xRes(0) = MLG.Pc à l'entrée
-        x1 = qc                              # xRes(1) = MLG.Qc = Sc·v
-        for _ in range(n_iter):
-            pc_ref = pg + m_delta_pc         # MLG.Pc (propriété, évolutive)
-            f0 = x1 - p.Sc * v + coupl * (x0 - pc_ref)
-            f1 = (x0 - pg) - 0.5 * rho * (x1 ** 2) * inv_scd2 * _sign(x1)
-            j11 = -x1 * rho * inv_scd2 * _sign(x1)
-            det = coupl * j11 - 1.0
-            if det == 0.0:
-                raise SimError(
-                    code="HYDRAU_JACOBIEN_SINGULIER",
-                    message="Le jacobien du solveur hydraulique est singulier (déterminant nul).",
-                    level=ErrorLevel.RUNTIME,
-                    hint="Réduire le pas de temps ou vérifier la section de bague hydraulique.",
+        x1 = qc_total                        # xRes(1) = MLG.Qc = Sc·v
+        leak_enabled = p.DInsidePalierBh > p.Dbh and p.LPalierBh > 0.0
+
+        if not leak_enabled:
+            # Mode historique : strictement identique au modèle existant.
+            inv_scd2 = (1.0 / (sec_bh * cd_bh)) ** 2
+            for _ in range(n_iter):
+                pc_ref = pg + m_delta_pc
+                f0 = x1 - p.Sc * v + coupl * (x0 - pc_ref)
+                f1 = (x0 - pg) - 0.5 * rho * (x1 ** 2) * inv_scd2 * _sign(x1)
+                j11 = -x1 * rho * inv_scd2 * _sign(x1)
+                det = coupl * j11 - 1.0
+                if det == 0.0:
+                    raise SimError(
+                        code="HYDRAU_JACOBIEN_SINGULIER",
+                        message="Le jacobien du solveur hydraulique est singulier (déterminant nul).",
+                        level=ErrorLevel.RUNTIME,
+                        hint="Réduire le pas de temps ou vérifier la section de bague hydraulique.",
+                    )
+                dx0 = (j11 * f0 - 1.0 * f1) / det
+                dx1 = (coupl * f1 - 1.0 * f0) / det
+                x0 -= dx0
+                x1 -= dx1
+                m_delta_pc = x0 - pg
+
+            delta_pc = x0 - pg
+            qc_total = x1
+            q_bh = qc_total
+            q_leak = 0.0
+            re_leak = 0.0
+        else:
+            def q_network(delta_p: float) -> tuple[float, float, float, float]:
+                qb = _flow_bh_from_dp(delta_p, rho, sec_bh, cd_bh)
+                qf, ref = _flow_annular_with_turbulence(
+                    delta_p,
+                    rho,
+                    visc,
+                    p.LPalierBh,
+                    p.Dbh,
+                    p.DInsidePalierBh,
                 )
-            # Résolution 2x2 : [[coupl, 1], [1, j11]] · dx = [f0, f1]
-            dx0 = (j11 * f0 - 1.0 * f1) / det
-            dx1 = (coupl * f1 - 1.0 * f0) / det
-            x0 -= dx0
-            x1 -= dx1
-            m_delta_pc = x0 - pg             # MLG.DeltaPc = xRes(0) - Pg
-        delta_pc = x0 - pg
-        qc = x1
+                return qb + qf, qb, qf, ref
+
+            for _ in range(n_iter):
+                pc_ref = pg + m_delta_pc         # MLG.Pc (propriété, évolutive)
+                f0 = x1 - p.Sc * v + coupl * (x0 - pc_ref)
+                dp = x0 - pg
+                qnet, qb_i, qf_i, _ref_i = q_network(dp)
+                # Dérivée numérique dQ/dΔP du réseau parallèle (rainures + fuite).
+                eps = max(1.0, abs(dp) * 1.0e-6)
+                q_plus, _, _, _ = q_network(dp + eps)
+                q_minus, _, _, _ = q_network(dp - eps)
+                dqdp = (q_plus - q_minus) / (2.0 * eps)
+                f1 = x1 - qnet
+                det = coupl + dqdp
+                if det == 0.0:
+                    raise SimError(
+                        code="HYDRAU_JACOBIEN_SINGULIER",
+                        message="Le jacobien du solveur hydraulique est singulier (déterminant nul).",
+                        level=ErrorLevel.RUNTIME,
+                        hint="Réduire le pas de temps ou vérifier la section de bague hydraulique.",
+                    )
+                # Résolution 2x2 : [[coupl, 1], [-dqdp, 1]] · dx = [f0, f1]
+                dx0 = (f0 - f1) / det
+                dx1 = (coupl * f1 + dqdp * f0) / det
+                x0 -= dx0
+                x1 -= dx1
+                m_delta_pc = x0 - pg             # MLG.DeltaPc = xRes(0) - Pg
+                q_bh, q_leak = qb_i, qf_i
+                _, _, _, re_leak = q_network(dp)
+            _, q_bh, q_leak, re_leak = q_network(x0 - pg)
+            delta_pc = x0 - pg
+            qc_total = x1
     else:
-        delta_pc = 0.5 * rho * (qc / (sec_bh * cd_bh)) ** 2 * _sign(qc)
+        delta_pc = 0.5 * rho * (qc_total / (sec_bh * cd_bh)) ** 2 * _sign(qc_total)
+        q_bh = qc_total
+        q_leak = 0.0
+        re_leak = 0.0
 
     # --- Détente : trous piston + clapet ---------------------------------- #
     qd = p.Sd * v
@@ -126,7 +264,14 @@ def calcul_hydrau(
     else:
         delta_pd = 0.5 * rho * (qd / (p.STrouPis * cd_pis)) ** 2 * _sign(qd)
 
-    return float(delta_pc), float(delta_pd), float(qc)
+    return (
+        float(delta_pc),
+        float(delta_pd),
+        float(qc_total),
+        float(q_bh),
+        float(q_leak),
+        float(re_leak),
+    )
 
 
 __all__ = ["calcul_hydrau", "_sign"]

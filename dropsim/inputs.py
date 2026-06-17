@@ -114,8 +114,10 @@ class MLGInputs:
     Dbh: float = 34.0              # mm  diamètre bague hydraulique (BH)
     Dt: float = 50.0               # mm  diamètre tige
     Dp: float = 40.0               # mm  diamètre intérieur tige
-    DInsideBh: float = 28.0        # mm  diamètre intérieur BH
+    DInsideBh: float = 28.0        # mm  diamètre intérieur butée hydraulique BH
+    DInsidePalierBh: float = 34.0  # mm  diamètre intérieur palier BH (fuite annulaire)
     Lbh: float = 200.0             # mm  longueur du trou de BH
+    LPalierBh: float = 200.0       # mm  longueur du palier BH (fuite annulaire)
     course: float = 185.0          # mm  course totale (SAT)
     DTrouPis: float = 1.5          # mm  diamètre trou piston de détente
     NbTrouPis: float = 10.0        # -   nombre de trous piston
@@ -257,6 +259,8 @@ class MLGInputs:
             ("Dpis", "Le diamètre piston"),
             ("Dbh", "Le diamètre de bague hydraulique"),
             ("Dt", "Le diamètre de tige"),
+            ("DInsidePalierBh", "Le diamètre intérieur du palier BH"),
+            ("LPalierBh", "La longueur du palier BH"),
             ("course", "La course"),
             ("HauteurPisBh", "La hauteur de piston BH"),
             ("DTrouPis", "Le diamètre trou piston"),
@@ -281,6 +285,14 @@ class MLGInputs:
             "(sinon la section de détente est nulle ou négative).",
             field="Dpis",
             hint="Augmenter Dpis ou diminuer Dt.",
+        )
+        c.check(
+            self.DInsidePalierBh < self.Dbh,
+            code="GEOMETRIE_PALIER_BH",
+            message="Le diamètre intérieur du palier BH doit être supérieur ou égal "
+            "au diamètre extérieur de la bague BH.",
+            field="DInsidePalierBh",
+            hint="Augmenter le diamètre intérieur palier BH ou réduire Dbh.",
         )
 
         # Gaz
@@ -398,7 +410,9 @@ class MLGInputs:
             Dt=self.Dt * U.MM_TO_M,
             Dp=self.Dp * U.MM_TO_M,
             DInsideBh=self.DInsideBh * U.MM_TO_M,
+            DInsidePalierBh=self.DInsidePalierBh * U.MM_TO_M,
             Lbh=self.Lbh * U.MM_TO_M,
+            LPalierBh=self.LPalierBh * U.MM_TO_M,
             course=self.course * U.MM_TO_M,
             DTrouPis=self.DTrouPis * U.MM_TO_M,
             NbTrouPis=self.NbTrouPis,
@@ -462,7 +476,9 @@ class MLGParamsSI:
     Dt: float
     Dp: float
     DInsideBh: float
+    DInsidePalierBh: float
     Lbh: float
+    LPalierBh: float
     course: float
     DTrouPis: float
     NbTrouPis: float
