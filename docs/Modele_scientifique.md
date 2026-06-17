@@ -81,7 +81,11 @@ sont en unités d'affichage (mm, bar, cc, cSt, MPa, °, °C) et converties par
 | Symbole | Description | Unité |
 |---|---|---|
 | $D_{pis}$ | Diamètre du piston | m (mm) |
-| $D_{bh}$ | Diamètre de la bague hydraulique (BH) | m (mm) |
+| $D_{bh}$ | Diamètre extérieur de la bague hydraulique (BH) | m (mm) |
+| $D_{ins,BH}$ | Diamètre intérieur de la butée hydraulique BH | m (mm) |
+| $D_{pal}$ | Diamètre intérieur du palier BH (limite de la fuite annulaire) | m (mm) |
+| $L_{bh}$ | Longueur du trou de la butée hydraulique | m (mm) |
+| $L_{pal}$ | Longueur du palier BH (longueur de fuite annulaire) | m (mm) |
 | $D_t$ | Diamètre de tige | m (mm) |
 | $\text{course}$ | Course totale (SAT, *Stroke At Tail*) | m (mm) |
 
@@ -368,6 +372,8 @@ $S_{diap} = N_{diap}\,\frac{\pi}{4}D_{diap,trou}^2$.
 
 ### 7.4 Section variable de la bague hydraulique (metering)
 
+> *Cette section correspond au débit principal à travers les rainures de la bague hydraulique (branche 1 du réseau parallèle décrit en §7.5).*
+
 La section de passage $S_{bh}(d)$ varie le long de la course grâce à des
 **rainures** usinées dans la bague (module `metering.py`). Pour chaque rainure,
 l'aire ouverte est l'**aire d'intersection de deux disques** (« lentille ») de
@@ -385,6 +391,94 @@ $\Lambda = (-e + r_1 + r_2)(e + r_1 - r_2)(e - r_1 + r_2)(e + r_1 + r_2)$.
 Une progressivité **linéaire** est appliquée en entrée et en sortie de chaque
 rainure (sur une longueur entière $L_{prog}$), et les contributions de toutes les
 rainures sont sommées millimètre par millimètre puis interpolées.
+
+### 7.5 Fuite annulaire entre le palier BH et la butée hydraulique
+
+Une **fuite parasitaire** existe entre la surface extérieure de la butée hydraulique (diamètre $D_{bh}$) et l'alésage intérieur du palier BH (diamètre $D_{pal}$). Cette fuite forme un chemin **en parallèle** de la branche principale (rainures de la butée), sur une longueur $L_{pal}$.
+
+#### 7.5.1 Géométrie de la section annulaire
+
+$$
+r_1 = \frac{D_{bh}}{2}, \qquad r_2 = \frac{D_{pal}}{2}, \qquad e = r_2 - r_1 \quad\text{(jeu radial)}
+$$
+$$
+A_{ann} = \frac{\pi}{4}\left(D_{pal}^2 - D_{bh}^2\right), \qquad D_h = D_{pal} - D_{bh}
+$$
+
+La fuite n'existe que si $D_{pal} > D_{bh}$ (jeu positif).
+
+#### 7.5.2 Loi laminaire de Hagen-Poiseuille annulaire exacte
+
+Pour un écoulement laminaire dans un anneau concentrique (solution exacte de Stokes) :
+
+$$
+Q_{fuite} = \frac{\pi\,\Delta P}{8\,\mu\,L_{pal}}
+\left[
+r_2^4 - r_1^4 - \frac{(r_2^2 - r_1^2)^2}{\ln(r_2/r_1)}
+\right]
+$$
+
+où $\mu = \rho\,\nu$ est la viscosité dynamique de l'huile (Pa·s). Cette loi donne $Q_{fuite}$ **linéaire en $\Delta P$**.
+
+Approximation au jeu fin ($e \ll r_1$) :
+$$
+Q_{fuite} \approx \frac{\pi\,D_m\,e^3}{12\,\mu\,L_{pal}}\,\Delta P, \qquad D_m = \frac{D_{pal}+D_{bh}}{2}
+$$
+
+#### 7.5.3 Extension turbulente (Darcy-Weisbach)
+
+Lorsque le nombre de Reynolds de la fuite dépasse le seuil laminaire, la loi de Hagen-Poiseuille surestime fortement le débit. On calcule d'abord le Reynolds laminaire :
+
+$$
+Re_{lam} = \frac{\rho\, V_{lam}\, D_h}{\mu}, \qquad V_{lam} = \frac{|Q_{lam}|}{A_{ann}}
+$$
+
+- Si $Re_{lam} \le 2\,000$ : régime **laminaire**, $Q_{fuite} = Q_{lam}$.
+- Si $Re_{lam} \ge 4\,000$ : régime **turbulent** — le débit est calculé par inversion de Darcy-Weisbach par itérations fixes sur Re :
+
+$$
+\Delta P = f\,\frac{L_{pal}}{D_h}\,\frac{\rho\,V^2}{2}
+\implies
+Q_{turb} = A_{ann}\sqrt{\frac{2\,\Delta P\,D_h}{\rho\,f\,L_{pal}}}
+$$
+
+Facteur de frottement de Blasius (conduite hydrauliquement lisse) :
+$$
+f = 0{,}3164\,Re^{-0{,}25}
+$$
+
+- Si $2\,000 < Re_{lam} < 4\,000$ : **zone transitoire**, interpolation continue :
+$$
+Q_{fuite} = (1-w)\,Q_{lam} + w\,Q_{turb}, \qquad w = \frac{Re_{lam} - 2\,000}{2\,000}
+$$
+
+#### 7.5.4 Réseau hydraulique parallèle en compression
+
+Les deux branches sont soumises à la **même perte de charge** $\Delta P_c = P_c - P_g$ ; leurs débits s'additionnent :
+
+$$
+Q_c = Q_{rainures}(\Delta P_c) + Q_{fuite}(\Delta P_c)
+$$
+
+Le débit total $Q_c = S_c\,v$ est imposé par la cinématique de la tige. On définit la **conductance du réseau** :
+
+$$
+Q_{reseau}(\Delta P_c) = Q_{rainures}(\Delta P_c) + Q_{fuite}(\Delta P_c)
+$$
+
+Le solveur Newton-Raphson de la compression (§7.2) est modifié : la relation $f_1$ devient :
+$$
+f_1 = Q_c - Q_{reseau}(\Delta P_c) = 0
+$$
+et la jacobienne utilise la dérivée numérique :
+$$
+\frac{dQ_{reseau}}{d\Delta P_c} \approx \frac{Q_{reseau}(\Delta P_c + \varepsilon) - Q_{reseau}(\Delta P_c - \varepsilon)}{2\,\varepsilon}
+$$
+ce qui garantit la cohérence pour toute combinaison de régimes (laminaire/turbulent).
+
+Le partage des débits, le rapport $Q_{fuite}/Q_c$ et le Reynolds de fuite sont enregistrés par le moteur (colonnes `Hydrau.Qc rainures BH`, `Hydrau.Qc fuite annulaire`, `Hydrau.Part fuite`, `Hydrau.Re fuite annulaire`).
+
+> **Non-régression** : si $D_{pal} \le D_{bh}$ (jeu nul ou négatif), la branche fuite est supprimée et le calcul revient exactement au modèle historique (§7.2 sans modification).
 
 ---
 
@@ -678,6 +772,7 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
   $A_{seal} > D_t$.
 - **Compressibilité** : seule l'huile est traitée comme compressible (module
   $B$) ; les parois sont supposées rigides.
+- **Fuite annulaire** : l'écoulement annulaire est supposé **axisymétrique, établi et unidirectionnel** (pas d'effet d'entrée). En régime turbulent, la corrélation de Blasius est valable pour $Re < 10^5$ environ (conduite lisse) ; pour une rugosité significative du palier, la loi de Colebrook-White serait plus précise. La transition laminaire-turbulent est lissée mais reste une approximation.
 
 ---
 
