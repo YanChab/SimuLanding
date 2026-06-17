@@ -160,4 +160,4 @@ fig.update_layout(
     xaxis_title=x_col,
     yaxis_title=y_col,
 )
-st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
+st.plotly_chart(fig, width="stretch", config={"responsive": True})

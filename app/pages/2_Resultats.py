@@ -80,7 +80,7 @@ with st.expander("💾 Sauvegarder / charger une simulation", expanded=result is
             save_name = st.text_input(
                 "Nom de la sauvegarde", value=default_name, key="save_name_input"
             )
-            if st.button("💾 Enregistrer", use_container_width=True):
+            if st.button("💾 Enregistrer", width="stretch"):
                 inputs = st.session_state.get("inputs")
                 if inputs is None:
                     st.error("Entrées introuvables — relancez le calcul.")
@@ -120,7 +120,7 @@ with st.expander("💾 Sauvegarder / charger une simulation", expanded=result is
                     "Sauvegardes disponibles", list(labels.keys()), key="load_choice"
                 )
                 c_load, c_del = st.columns(2)
-                if c_load.button("📂 Charger", use_container_width=True):
+                if c_load.button("📂 Charger", width="stretch"):
                     inputs, loaded, meta = load_simulation(labels[choice])
                     st.session_state.inputs = inputs
                     st.session_state.result = loaded
@@ -129,7 +129,7 @@ with st.expander("💾 Sauvegarder / charger une simulation", expanded=result is
                         "project", DEFAULT_PROJECT
                     )
                     st.rerun()
-                if c_del.button("🗑️ Supprimer", use_container_width=True):
+                if c_del.button("🗑️ Supprimer", width="stretch"):
                     delete_saved(labels[choice])
                     st.rerun()
 
@@ -278,7 +278,7 @@ with tab_eff_t:
             "Temps (s)",
             "Effort (N)",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
 
@@ -291,7 +291,7 @@ with tab_eff_c:
             "Course amortisseur (mm)",
             "Fz (N)",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
 
@@ -308,7 +308,7 @@ with tab_press:
             "Temps (s)",
             "Pression (bar)",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
 
@@ -324,7 +324,7 @@ with tab_cine:
             "Temps (s)",
             "Déplacement (mm)",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
 
@@ -340,7 +340,7 @@ with tab_acc:
             "Temps (s)",
             "g  /  m·s⁻¹",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
 
@@ -375,7 +375,7 @@ with tab_torseur:
             "Temps (s)",
             "Effort (N)",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
     st.plotly_chart(
@@ -389,7 +389,7 @@ with tab_torseur:
             "Temps (s)",
             "Moment (N·m)",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
 
@@ -448,7 +448,7 @@ with tab_energie:
             "Temps (s)",
             "Énergie (J)",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
     st.plotly_chart(
@@ -461,7 +461,7 @@ with tab_energie:
             "Temps (s)",
             "Énergie (J)",
         ),
-        use_container_width=True,
+        width="stretch",
         config={"responsive": True},
     )
 
@@ -542,7 +542,7 @@ with tab_perso:
                 range=[lo, hi], tick0=lo, dtick=step,
             )
             fig.update_layout(yaxis2=right_axis)
-        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
+        st.plotly_chart(fig, width="stretch", config={"responsive": True})
 
 with tab_anim:
     geom = getattr(st.session_state.result, "geometry", None)
@@ -656,14 +656,14 @@ with tab_anim:
                        for i in idx],
             )],
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 # --------------------------------------------------------------------------- #
 #  Données et export
 # --------------------------------------------------------------------------- #
 st.divider()
 with st.expander("Séries temporelles (tableau)"):
-    st.dataframe(df, use_container_width=True, height=320)
+    st.dataframe(df, width="stretch", height=320)
 
 st.download_button(
     "⬇️ Exporter les résultats (CSV)",

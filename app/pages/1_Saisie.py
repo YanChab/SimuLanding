@@ -233,7 +233,7 @@ with col_balancier:
             "Y": st.column_config.NumberColumn("Y", alignment="center"),
             "Z": st.column_config.NumberColumn("Z", alignment="center"),
         },
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         disabled=["Point"],
         height=222,
@@ -262,7 +262,7 @@ with col_balancier:
                 xaxis=_mini_axis("X (mm)"),
                 yaxis=_mini_axis("Z (mm)") | dict(scaleanchor="x", scaleratio=1.0),
             )
-            st.plotly_chart(fig_pts, use_container_width=True)
+            st.plotly_chart(fig_pts, width="stretch")
         except (KeyError, ValueError, TypeError):
             st.caption("Géométrie incomplète — graphe indisponible.")
     with pg_yz:
@@ -287,7 +287,7 @@ with col_balancier:
                 xaxis=_mini_axis("Y (mm)"),
                 yaxis=_mini_axis("Z (mm)") | dict(scaleanchor="x", scaleratio=1.0),
             )
-            st.plotly_chart(fig_yz, use_container_width=True)
+            st.plotly_chart(fig_yz, width="stretch")
         except (KeyError, ValueError, TypeError):
             st.caption("Géométrie incomplète — graphe indisponible.")
 
@@ -315,7 +315,7 @@ with tyre_chart_col:
     _tyre_t.columns = [f"P{i + 1}" for i in range(_tyre_t.shape[1])]
     tyre_t_edit = st.data_editor(
         _tyre_t,
-        use_container_width=True,
+        width="stretch",
         key="tyre_curve_editor",
     )
     tyre_df = tyre_t_edit.T.reset_index(drop=True)
@@ -323,7 +323,7 @@ with tyre_chart_col:
     tx, ty = _safe_xy(tyre_df)
     st.plotly_chart(
         mini_chart(tx, ty, "Déflexion (mm)", "Charge (kN)", color="#1f77b4"),
-        use_container_width=True,
+        width="stretch",
     )
 
 # Courbe d'adhérence : tableau en lignes (points en colonnes) + graphe juste en dessous.
@@ -332,7 +332,7 @@ _mu_t = pd.DataFrame(inp.mu_curve, columns=["Slip", "μ"]).T
 _mu_t.columns = [f"P{i + 1}" for i in range(_mu_t.shape[1])]
 mu_t_edit = st.data_editor(
     _mu_t,
-    use_container_width=True,
+    width="stretch",
     key="mu_curve_editor",
 )
 mu_df = mu_t_edit.T.reset_index(drop=True)
@@ -340,7 +340,7 @@ mu_df.columns = ["Slip", "μ"]
 mx, my = _safe_xy(mu_df)
 st.plotly_chart(
     mini_chart(mx, my, "Slip", "μ", color="#2ca02c"),
-    use_container_width=True,
+    width="stretch",
 )
 
 # --------------------------------------------------------------------------- #
@@ -444,7 +444,7 @@ with re_col:
     rain_t_edit = st.data_editor(
         _rain_t,
         column_config=_rain_cfg,
-        use_container_width=True,
+        width="stretch",
         height=150,
         key="rainures_editor",
     )
@@ -476,7 +476,7 @@ with rs_col:
             plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
             xaxis=_mini_axis("Course (mm)"), yaxis=_mini_axis("Section (mm²)"),
         )
-        st.plotly_chart(sfig, use_container_width=True)
+        st.plotly_chart(sfig, width="stretch")
     except (ValueError, TypeError, KeyError, ZeroDivisionError):
         st.caption("Section cumulée indisponible — vérifier les cotes et Dbh.")
 
@@ -531,8 +531,8 @@ def _build_inputs() -> MLGInputs:
 # --------------------------------------------------------------------------- #
 st.divider()
 col_run, col_reset, col_msg = st.columns([1, 1, 4])
-launch = col_run.button("▶️ Lancer le calcul", type="primary", use_container_width=True)
-reset = col_reset.button("↺ Réinitialiser", use_container_width=True)
+launch = col_run.button("▶️ Lancer le calcul", type="primary", width="stretch")
+reset = col_reset.button("↺ Réinitialiser", width="stretch")
 
 if reset:
     for key in list(st.session_state.keys()):
