@@ -144,6 +144,7 @@ pages = [
     st.Page("pages/1_Saisie.py", title="Saisie", icon="📝"),
     st.Page("pages/2_Resultats.py", title="Résultats", icon="📈"),
     st.Page("pages/3_Comparaison.py", title="Comparaison", icon="⚖️"),
+    st.Page("pages/4_Loi_hydraulique.py", title="Loi hydraulique", icon="🧮"),
 ]
 nav = st.navigation(pages, position="top")
 nav.run()

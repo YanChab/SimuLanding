@@ -130,6 +130,72 @@ def _endstop(d: float, course: float) -> float:
     return 0.0
 
 
+def damper_force_step(
+    p: MLGParamsSI,
+    gas: GasSpring,
+    tab_pos: np.ndarray,
+    tab_sec: np.ndarray,
+    d: float,
+    v: float,
+    delta_pc_prev: float,
+    delta_pd_prev: float,
+    pg_prev: float,
+) -> dict[str, float]:
+    """Calcule un pas local de loi d'amortisseur avec EXACTEMENT le modele moteur.
+
+    Cette fonction reprend le bloc de calcul utilise dans la boucle temporelle :
+    gaz, hydraulique, friction de joint et butees. Les etats ``delta_pc`` /
+    ``delta_pd`` / ``pg`` renvoyes doivent etre reinjectes au pas suivant pour
+    reproduire la meme dynamique numerique (memoire hydraulique et gaz).
+    """
+    pg = gas.pressure(d, pg_prev)
+    sec = section_bh(d, tab_pos, tab_sec)
+    delta_pc = delta_pc_prev
+    delta_pd = delta_pd_prev
+    if v != 0.0:
+        (
+            delta_pc,
+            delta_pd,
+            qc_total,
+            qc_bh,
+            qc_leak,
+            re_leak,
+        ) = calcul_hydrau(p, v, d, delta_pc_prev, pg, sec)
+        leak_ratio = abs(qc_leak) / abs(qc_total) if abs(qc_total) > 1.0e-12 else 0.0
+    else:
+        qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
+    pc = pg + delta_pc
+    pd = pc - delta_pd
+    fgas = p.St * pg
+    if v != 0.0:
+        coeff_atte = 1.0 / math.sqrt(0.95 + 0.28 * math.sqrt(1.0 / (90.0 * abs(v))))
+        s_seal = math.pi / 4.0 * (p.ASeal ** 2 - p.Dt ** 2)
+        ffrijoi = _sign(v) * coeff_atte * (
+            p.fc * p.Dt * math.pi + p.fh * pd * s_seal
+        )
+    else:
+        ffrijoi = 0.0
+    ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + _endstop(d, p.course)
+    fhyd = p.Sc * (pc - pg) - p.Sd * (pd - pg)
+    return {
+        "pg": pg,
+        "pc": pc,
+        "pd": pd,
+        "delta_pc": delta_pc,
+        "delta_pd": delta_pd,
+        "qc_total": qc_total,
+        "qc_bh": qc_bh,
+        "qc_leak": qc_leak,
+        "re_leak": re_leak,
+        "leak_ratio": leak_ratio,
+        "sec": sec,
+        "fgas": fgas,
+        "ffrijoi": ffrijoi,
+        "fhyd": fhyd,
+        "ftot": ftot,
+    }
+
+
 def run_mlg(
     p: MLGParamsSI,
     collector: ErrorCollector | None = None,
@@ -328,37 +394,33 @@ def run_mlg(
             entraxe = dist_ca
             d = entraxe_init - entraxe
 
-            # Ressort gazeux + hydraulique
-            pg = gas.pressure(d, pg_prev)
-            sec = section_bh(d, tab_pos, tab_sec)
-            if v != 0.0:
-                (
-                    delta_pc,
-                    delta_pd,
-                    qc_total,
-                    qc_bh,
-                    qc_leak,
-                    re_leak,
-                ) = calcul_hydrau(p, v, d, delta_pc, pg, sec)
-                leak_ratio = abs(qc_leak) / abs(qc_total) if abs(qc_total) > 1.0e-12 else 0.0
-            else:
-                qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
-            pc = pg + delta_pc
-            pd = pc - delta_pd
-            fgas = p.St * pg
-            if v != 0.0:
-                coeff_atte = 1.0 / math.sqrt(0.95 + 0.28 * math.sqrt(1.0 / (90.0 * abs(v))))
-                # Friction du joint : terme de friction sèche (proportionnel au
-                # périmètre de tige) + terme dû à la pression (proportionnel à
-                # l'aire annulaire du joint), cf. module de classe MLG de l'Excel.
-                s_seal = math.pi / 4.0 * (p.ASeal ** 2 - p.Dt ** 2)
-                ffrijoi = _sign(v) * coeff_atte * (
-                    p.fc * p.Dt * math.pi + p.fh * pd * s_seal
-                )
-            else:
-                ffrijoi = 0.0
-            ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + _endstop(d, p.course)
-            fhyd = p.Sc * (pc - pg) - p.Sd * (pd - pg)
+            # Ressort gazeux + hydraulique (meme loi que l'export "Loi hydraulique").
+            damp = damper_force_step(
+                p,
+                gas,
+                tab_pos,
+                tab_sec,
+                d,
+                v,
+                delta_pc,
+                delta_pd,
+                pg_prev,
+            )
+            pg = damp["pg"]
+            pc = damp["pc"]
+            pd = damp["pd"]
+            delta_pc = damp["delta_pc"]
+            delta_pd = damp["delta_pd"]
+            qc_total = damp["qc_total"]
+            qc_bh = damp["qc_bh"]
+            qc_leak = damp["qc_leak"]
+            re_leak = damp["re_leak"]
+            leak_ratio = damp["leak_ratio"]
+            sec = damp["sec"]
+            fgas = damp["fgas"]
+            ffrijoi = damp["ffrijoi"]
+            fhyd = damp["fhyd"]
+            ftot = damp["ftot"]
             pg_prev = pg
 
             # Efforts dans l'amortisseur et le balancier (pour le pas suivant).
