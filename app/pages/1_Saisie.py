@@ -253,6 +253,8 @@ def _safe_xy(df_table: pd.DataFrame):
 
 
 inp: MLGInputs = st.session_state.inputs
+if not hasattr(inp, "hydraulic_max_iter"):
+    inp.hydraulic_max_iter = 64
 
 # --------------------------------------------------------------------------- #
 #  1) Conditions de chute  +  2) Balancier et géométrie (côte à côte)
@@ -279,6 +281,24 @@ with col_chute:
         options=["auto_fast", "auto_precise"],
         key=_core_key,
         help="auto_fast: plus rapide; auto_precise: plus prudent sur les erreurs.",
+    )
+    num(
+        "Tolérance erreur hydraulique",
+        "hydraulic_error_tol",
+        inp.hydraulic_error_tol,
+        step=0.01,
+        help=(
+            "Cible absolue de convergence sur le noyau hydraulique (err <= tol)."
+        ),
+        min_value=1.0e-6,
+    )
+    num(
+        "Itérations max hydrauliques",
+        "hydraulic_max_iter",
+        float(getattr(inp, "hydraulic_max_iter", 64)),
+        step=1.0,
+        help="Plafond d'itérations Newton par pas (mode adaptatif).",
+        min_value=4.0,
     )
     # Champ dédié pour la température : un number_input accepte nativement les
     # valeurs négatives (température froide), contrairement à l'éditeur tabulaire.
@@ -623,6 +643,9 @@ def _build_inputs() -> MLGInputs:
     def g(field: str) -> float:
         return float(st.session_state[f"f_{field}"])
 
+    def gi(field: str) -> int:
+        return int(round(float(st.session_state[f"f_{field}"])))
+
     def pt(row) -> Point3:
         return Point3(float(row["X"]), float(row["Y"]), float(row["Z"]))
 
@@ -633,6 +656,8 @@ def _build_inputs() -> MLGInputs:
         pitch=g("pitch"), roll=g("roll"), temps_simu=g("temps_simu"),
         it=g("it"), integrator="rk4",
         damper_core_solver=str(st.session_state.get("f_damper_core_solver", inp.damper_core_solver)),
+        hydraulic_error_tol=g("hydraulic_error_tol"),
+        hydraulic_max_iter=gi("hydraulic_max_iter"),
         temperature=g("temperature"),
         Dpis=g("Dpis"), Dbh=g("Dbh"), Dt=g("Dt"), Dp=g("Dp"),
         DInsideBh=g("DInsideBh"),

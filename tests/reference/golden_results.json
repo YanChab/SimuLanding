@@ -1,0 +1,24 @@
+{
+  "inputs": {
+    "masse": 1250.0,
+    "vz": 3.05,
+    "vx": 39.0,
+    "lift": 0.67,
+    "pitch": 0.0,
+    "roll": 0.0,
+    "temperature": 25.0,
+    "hydraulic_error_tol": 1e-05,
+    "hydraulic_max_iter": 10000
+  },
+  "summary": {
+    "Course max (mm)": 173.29149505453162,
+    "Effort vertical max Fz (N)": 44537.83217312962,
+    "Effort horizontal max Fx (N)": 19145.757355308215,
+    "Effort amortisseur max (N)": 38423.20854147468,
+    "Pression gaz max (bar)": 167.9562926026026,
+    "Pression compression max (bar)": 336.9028152444218,
+    "Acc\u00e9l\u00e9ration max (g)": 3.3020352434764217,
+    "Nombre de pas": 2777
+  },
+  "n_steps": 2777
+}

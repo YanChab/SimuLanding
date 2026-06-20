@@ -174,8 +174,11 @@ class MLGInputs:
     roll: float = 0.0              # deg (gîte / roll, alfar)
     temps_simu: float = 0.5        # s   (durée simulée)
     it: float = 0.0001             # s   (pas de temps)
-    integrator: str = "euler"      # euler|rk4
+    integrator: str = "rk4"        # euler|rk4 (now rk4-only in UI)
     damper_core_solver: str = "auto_fast"  # auto_fast|auto_precise
+    hydraulic_adaptive_newton: bool = True  # solveur hydraulique convergent (définitif)
+    hydraulic_error_tol: float = 1.0e-5  # cible absolue sur l'erreur de convergence hydraulique
+    hydraulic_max_iter: int = 10000  # plafond d'itérations Newton par pas hydraulique
     temperature: float = 25.0      # °C
 
     # --- Amortisseur (géométrie) ------------------------------------------ #
@@ -221,7 +224,7 @@ class MLGInputs:
     # reproduire ~1418 MPa à 40 °C (RADCOLUBE FR257 TDS 2025, 27.6 MPa).
     k_huile: float = 1500.0        # MPa module de l'huile pure à 25 °C
     k_huile_temp_coeff: float = -0.00364  # 1/°C => Khuile(40 °C) ≈ 1418 MPa
-    bulk: float = 176.53           # MPa module effectif à 25 °C (aération 0.05 %)
+    bulk: float = 176.4809694687923  # MPa module effectif à 25 °C (aération 0.05 %)
     rho: float = 855.0             # kg/m³ masse volumique
 
     # --- Pneu ------------------------------------------------------------- #
@@ -287,7 +290,7 @@ class MLGInputs:
             Rainure(60.0, 200.0, 15.5),
             Rainure(0.0, 200.0, 17.0),
             Rainure(0.0, 200.0, 16.0),
-            Rainure(0.0, 200.0, 17.0),
+            Rainure(30.0, 70.0, 15.5),
         ]
     )
 
@@ -354,6 +357,21 @@ class MLGInputs:
             ),
             field="damper_core_solver",
             hint="Choisir 'auto_fast' ou 'auto_precise'.",
+        )
+        positive(
+            self.hydraulic_error_tol,
+            "hydraulic_error_tol",
+            "La tolérance d'erreur hydraulique",
+        )
+        c.check(
+            int(self.hydraulic_max_iter) < 4,
+            code="HYDRAULIC_MAX_ITER_TROP_FAIBLE",
+            message=(
+                "Le nombre maximal d'itérations hydrauliques doit être "
+                f"supérieur ou égal à 4 (reçu : {self.hydraulic_max_iter})."
+            ),
+            field="hydraulic_max_iter",
+            hint="Saisir une valeur entière >= 4.",
         )
 
         # Géométrie amortisseur
@@ -535,6 +553,9 @@ class MLGInputs:
             it=self.it,
             integrator=self.integrator,
             damper_core_solver=self.damper_core_solver,
+            hydraulic_adaptive_newton=self.hydraulic_adaptive_newton,
+            hydraulic_error_tol=self.hydraulic_error_tol,
+            hydraulic_max_iter=int(self.hydraulic_max_iter),
             Dpis=self.Dpis * U.MM_TO_M,
             Dbh=self.Dbh * U.MM_TO_M,
             Dt=self.Dt * U.MM_TO_M,
@@ -604,6 +625,9 @@ class MLGParamsSI:
     it: float
     integrator: str
     damper_core_solver: str
+    hydraulic_adaptive_newton: bool
+    hydraulic_error_tol: float
+    hydraulic_max_iter: int
 
     Dpis: float
     Dbh: float

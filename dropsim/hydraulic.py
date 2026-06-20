@@ -152,7 +152,9 @@ def calcul_hydrau(
     pg: float,
     sec_bh: float,
     dt: float | None = None,
-    n_iter: int = 4,
+    n_iter: int = 64,
+    adaptive_newton: bool = False,
+    metrics: dict[str, float] | None = None,
 ) -> tuple[float, float, float, float, float, float]:
     """Calcule (ΔPc, ΔPd, Qc_total, Qc_rainures, Qc_fuite, Re_fuite).
 
@@ -170,12 +172,8 @@ def calcul_hydrau(
 
     Notes
     -----
-    La boucle reproduit *exactement* la macro VBA ``CalculHydrau`` : 4 itérations
-    fixes (``For i = 0 To 3``), et la référence de pression ``MLG.Pc`` est
-    recalculée à chaque itération comme ``Pg + mDeltaPc`` où ``mDeltaPc`` vient
-    d'être réassigné à ``xRes(0) - Pg`` à l'itération précédente. Ce couplage
-    auto-référent (et non un Newton-Raphson convergé classique) est essentiel
-    pour retrouver les pressions de compression du classeur d'origine.
+    Le solveur applique un contrôle de convergence direct sur l'erreur
+    résiduelle ``err`` avec la cible absolue ``hydraulic_error_tol``.
     """
     rho = p.rho
     visc = p.visc
@@ -205,11 +203,25 @@ def calcul_hydrau(
         x0 = pg + m_delta_pc                 # xRes(0) = MLG.Pc à l'entrée
         x1 = qc_total                        # xRes(1) = MLG.Qc = Sc·v
         leak_enabled = p.DInsidePalierBh > p.Dbh and p.LPalierBh > 0.0
+        max_iter = max(4, int(n_iter)) if adaptive_newton else 4
+        min_iter = min(2, max_iter)
+        target_err = max(1.0e-14, float(getattr(p, "hydraulic_error_tol", 1.0e-1)))
+        iterations_used = 0
 
         if not leak_enabled:
             # Mode historique : strictement identique au modèle existant.
             inv_scd2 = (1.0 / (sec_bh * cd_bh)) ** 2
-            for _ in range(n_iter):
+            err_now = None
+
+            def _residual_error(x0_val: float, x1_val: float, m_delta_pc_val: float) -> float:
+                pc_ref_val = pg + m_delta_pc_val
+                f0_val = x1_val - p.Sc * v + coupl * (x0_val - pc_ref_val)
+                f1_val = (x0_val - pg) - 0.5 * rho * (x1_val ** 2) * inv_scd2 * _sign(x1_val)
+                err0 = abs(f0_val) / max(abs(p.Sc * v), 1.0e-12)
+                err1 = abs(f1_val) / max(abs(x0_val - pg), 1.0)
+                return max(err0, err1)
+
+            for it_idx in range(max_iter):
                 pc_ref = pg + m_delta_pc
                 f0 = x1 - p.Sc * v + coupl * (x0 - pc_ref)
                 f1 = (x0 - pg) - 0.5 * rho * (x1 ** 2) * inv_scd2 * _sign(x1)
@@ -227,6 +239,16 @@ def calcul_hydrau(
                 x0 -= dx0
                 x1 -= dx1
                 m_delta_pc = x0 - pg
+                iterations_used = it_idx + 1
+                err_now = _residual_error(x0, x1, m_delta_pc)
+                if adaptive_newton and it_idx + 1 >= min_iter and err_now is not None and err_now <= target_err:
+                        break
+
+            if metrics is not None:
+                metrics["target_err"] = float(target_err)
+                if err_now is not None:
+                    metrics["final_err"] = float(err_now)
+                metrics["iterations_used"] = float(iterations_used)
 
             delta_pc = x0 - pg
             qc_total = x1
@@ -255,7 +277,20 @@ def calcul_hydrau(
                     p.excentricite_palier_bh,
                 )
 
-            for _ in range(n_iter):
+            err_now = None
+
+            def _residual_error(x0_val: float, x1_val: float, m_delta_pc_val: float) -> float:
+                pc_ref_val = pg + m_delta_pc_val
+                dp_val = x0_val - pg
+                qf_val, _ = _leak(dp_val)
+                qbh_val = x1_val - qf_val
+                f0_val = x1_val - p.Sc * v + coupl * (x0_val - pc_ref_val)
+                f1_val = (x0_val - pg) - 0.5 * rho * (qbh_val ** 2) * inv_scd2 * _sign(qbh_val)
+                err0 = abs(f0_val) / max(abs(p.Sc * v), 1.0e-12)
+                err1 = abs(f1_val) / max(abs(x0_val - pg), 1.0)
+                return max(err0, err1)
+
+            for it_idx in range(max_iter):
                 pc_ref = pg + m_delta_pc         # MLG.Pc (propriété, évolutive)
                 dp = x0 - pg
                 qf_i, re_leak = _leak(dp)         # fuite annulaire au ΔP courant
@@ -292,6 +327,16 @@ def calcul_hydrau(
                 x0 -= dx0
                 x1 -= dx1
                 m_delta_pc = x0 - pg             # MLG.DeltaPc = xRes(0) - Pg
+                iterations_used = it_idx + 1
+                err_now = _residual_error(x0, x1, m_delta_pc)
+                if adaptive_newton and it_idx + 1 >= min_iter and err_now is not None and err_now <= target_err:
+                        break
+
+            if metrics is not None:
+                metrics["target_err"] = float(target_err)
+                if err_now is not None:
+                    metrics["final_err"] = float(err_now)
+                metrics["iterations_used"] = float(iterations_used)
             dp = x0 - pg
             q_leak, re_leak = _leak(dp)
             q_bh = x1 - q_leak

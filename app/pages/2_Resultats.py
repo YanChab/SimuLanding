@@ -278,11 +278,12 @@ def _sanitize_perso_cfg(cfg: dict, options: list[str], none_label: str) -> dict:
 #  Courbes — un seul graphe par onglet
 # --------------------------------------------------------------------------- #
 with col_graphs:
-    tab_eff_t, tab_eff_c, tab_press, tab_cine, tab_acc, tab_torseur, tab_energie, tab_perso, tab_anim = st.tabs(
+    tab_eff_t, tab_eff_c, tab_press, tab_conv, tab_cine, tab_acc, tab_torseur, tab_energie, tab_perso, tab_anim = st.tabs(
         [
             "Efforts (temps)",
             "Effort / course",
             "Pressions",
+            "Conv. hydraulique",
             "Course & déflexion",
             "Accél. & vitesse",
             "Torseur B & C",
@@ -338,6 +339,70 @@ with tab_press:
         width="stretch",
         config={"responsive": True},
     )
+
+with tab_conv:
+    conv_keys = ["hyd_conv_err", "hyd_conv_iter"]
+    missing_cols = [COL[k] for k in conv_keys if COL[k] not in df.columns]
+
+    if missing_cols:
+        st.info(
+            "Données de convergence hydraulique indisponibles pour ce résultat "
+            "(simulation sauvegardée avec une ancienne version du modèle). "
+            "Relancez un calcul pour afficher cet onglet."
+        )
+    else:
+        conv_err = df[COL["hyd_conv_err"]]
+        conv_iter = df[COL["hyd_conv_iter"]]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Erreur moyenne", f"{float(np.mean(conv_err)):.3e}")
+        c2.metric("Erreur max", f"{float(np.max(conv_err)):.3e}")
+        c3.metric("Itérations moyennes", f"{float(np.mean(conv_iter)):.2f}")
+        c4.metric("Itérations max", f"{float(np.max(conv_iter)):.0f}")
+
+        fig_conv = go.Figure()
+        fig_conv.add_trace(
+            go.Scatter(
+                x=t,
+                y=conv_iter,
+                mode="lines",
+                name="Itérations",
+                yaxis="y",
+            )
+        )
+        fig_conv.add_trace(
+            go.Scatter(
+                x=t,
+                y=conv_err,
+                mode="lines",
+                name="Erreur de convergence",
+                yaxis="y2",
+            )
+        )
+        fig_conv.update_layout(
+            title=dict(text="Convergence hydraulique au cours du temps", y=0.98, yanchor="top"),
+            margin=dict(l=10, r=10, t=80, b=55),
+            legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
+            height=GRAPH_HEIGHT,
+            plot_bgcolor=GRAPH_PAPER_BG,
+            paper_bgcolor="white",
+            xaxis=_grid_axis("Temps (s)"),
+            yaxis=_grid_axis("Itérations (-)"),
+            yaxis2={
+                **_grid_axis("Erreur (-)"),
+                "overlaying": "y",
+                "side": "right",
+                "showgrid": False,
+                "zeroline": False,
+                "minor": {"showgrid": False},
+            },
+        )
+
+        st.plotly_chart(
+            fig_conv,
+            width="stretch",
+            config={"responsive": True},
+        )
 
 with tab_cine:
     st.plotly_chart(

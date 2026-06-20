@@ -60,6 +60,8 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "hyd_qc_leak": "Hydrau.Qc fuite annulaire (m³/s)",
     "hyd_leak_ratio": "Hydrau.Part fuite (-)",
     "hyd_re_leak": "Hydrau.Re fuite annulaire (-)",
+    "hyd_conv_err": "Hydrau.Erreur convergence (-)",
+    "hyd_conv_iter": "Hydrau.Itérations convergence (-)",
     "reaction_v": "Reaction sol verticale (N)",
     "reaction_h": "Reaction sol horizontale (N)",
     # Torseur d'effort transmis par le train à la masse suspendue via ses deux
@@ -191,7 +193,10 @@ def damper_force_step(
     sec = section_bh(d, tab_pos, tab_sec)
     delta_pc = delta_pc_prev
     delta_pd = delta_pd_prev
+    hyd_conv_err = 0.0
+    hyd_conv_iter = 0.0
     if v != 0.0:
+        hyd_metrics: dict[str, float] = {}
         (
             delta_pc,
             delta_pd,
@@ -199,8 +204,21 @@ def damper_force_step(
             qc_bh,
             qc_leak,
             re_leak,
-        ) = calcul_hydrau(p, v, d, delta_pc_prev, pg, sec, dt=dt)
+        ) = calcul_hydrau(
+            p,
+            v,
+            d,
+            delta_pc_prev,
+            pg,
+            sec,
+            dt=dt,
+            n_iter=int(getattr(p, "hydraulic_max_iter", 64)),
+            adaptive_newton=True,
+            metrics=hyd_metrics,
+        )
         leak_ratio = abs(qc_leak) / abs(qc_total) if abs(qc_total) > 1.0e-12 else 0.0
+        hyd_conv_err = float(hyd_metrics.get("final_err", 0.0))
+        hyd_conv_iter = float(hyd_metrics.get("iterations_used", 0.0))
     else:
         qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
     pc = pg + delta_pc
@@ -232,6 +250,8 @@ def damper_force_step(
         "re_leak": re_leak,
         "leak_ratio": leak_ratio,
         "sec": sec,
+        "hyd_conv_err": hyd_conv_err,
+        "hyd_conv_iter": hyd_conv_iter,
         "fgas": fgas,
         "ffrijoi": ffrijoi,
         "fhyd": fhyd,
@@ -698,6 +718,8 @@ def run_mlg(
     defl = 0.0
     delta_pc = delta_pd = 0.0
     qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
+    hyd_conv_err = 0.0
+    hyd_conv_iter = 0.0
     pg_prev = pg
     ftot = p.St * pg
     v_prev = 0.0
@@ -865,6 +887,8 @@ def run_mlg(
             qc_leak = damp["qc_leak"]
             re_leak = damp["re_leak"]
             leak_ratio = damp["leak_ratio"]
+            hyd_conv_err = damp.get("hyd_conv_err", 0.0)
+            hyd_conv_iter = damp.get("hyd_conv_iter", 0.0)
             sec = damp["sec"]
             fgas = damp["fgas"]
             ffrijoi = damp["ffrijoi"]
@@ -1057,6 +1081,8 @@ def run_mlg(
         out["hyd_qc_leak"][i] = qc_leak
         out["hyd_leak_ratio"][i] = leak_ratio
         out["hyd_re_leak"][i] = re_leak
+        out["hyd_conv_err"][i] = hyd_conv_err
+        out["hyd_conv_iter"][i] = hyd_conv_iter
         out["reaction_v"][i] = ftyre
         out["reaction_h"][i] = tr_x
 

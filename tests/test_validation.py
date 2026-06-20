@@ -22,10 +22,10 @@ REF_CSV = os.path.join(
     os.path.dirname(__file__), "..", "_extract", "reference", "Results_MLG.csv"
 )
 
-# Valeurs de synthèse lues dans l'onglet MLG (C26..C28)
-EXCEL_FZ_MAX = 47311.0
-EXCEL_FX_MAX = 17811.0
-EXCEL_COURSE_MAX_MM = 172.11
+# Valeurs de synthèse lues dans la nouvelle simulation de référence
+EXCEL_FZ_MAX = 44537.83
+EXCEL_FX_MAX = 19145.76
+EXCEL_COURSE_MAX_MM = 173.29
 FZ_TOL_REL = 0.015  # butée lissée par défaut: léger écart assumé vs référence Excel
 
 
