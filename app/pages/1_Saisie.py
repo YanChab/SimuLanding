@@ -728,18 +728,18 @@ if launch:
     else:
         st.session_state.field_errors = {}
         try:
-            # Créer placeholders pour la progression
+            # Placeholders pour la progression
             progress_placeholder = st.empty()
             status_placeholder = st.empty()
             
             def update_progress(current, total):
-                percentage = (current / total) * 100
-                progress_placeholder.progress(current / total)
-                status_placeholder.text(f"Progression: {percentage:.1f}% ({current}/{total})")
+                # Mettre à jour seulement tous les 10 appels pour ne pas surcharger Streamlit
+                if current % 10 == 0 or current == total:
+                    percentage = (current / total) * 100
+                    progress_placeholder.progress(current / total)
+                    status_placeholder.write(f"**Progression:** {percentage:.1f}% ({current}/{total} étapes)")
             
             result = run_simulation(new_inputs, progress_callback=update_progress)
-            
-            # Nettoyer les placeholders
             progress_placeholder.empty()
             status_placeholder.empty()
             
