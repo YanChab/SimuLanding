@@ -6,6 +6,7 @@ Cellule : effort total amortisseur Ftot (N).
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import importlib
 import math
 import sys
@@ -48,24 +49,15 @@ if "inputs" not in st.session_state:
 inputs = st.session_state.inputs
 
 
-try:
-    inputs.validate().raise_if_any()
-    p = inputs.to_si()
-    tab_pos, tab_sec = build_section_table(p)
-
-    course_mm_max = int(round(inputs.course))
-    course_mm = np.arange(0, course_mm_max + 1, 1, dtype=float)
-    d_values = course_mm / 1000.0
-
-    v_values = np.arange(-1.0, 3.0001, 0.25)
-    col_labels = [f"{v:+.2f} m/s" for v in v_values]
-
-    matrix = np.full((len(d_values), len(v_values)), np.nan, dtype=float)
+def _compute_matrix_for_params(p_case, d_values: np.ndarray, v_values: np.ndarray) -> np.ndarray:
+    """Calcule la matrice effort/course/vitesse pour un jeu de paramètres SI."""
+    tab_pos, tab_sec = build_section_table(p_case)
+    matrix_case = np.full((len(d_values), len(v_values)), np.nan, dtype=float)
 
     # Meme loi que le moteur : calcul stateful avec memoire gaz/hydraulique.
     for j, v in enumerate(v_values):
-        gas = GasSpring(p)
-        pg_prev = p.Pinitbp
+        gas = GasSpring(p_case)
+        pg_prev = p_case.Pinitbp
         delta_pc = 0.0
         delta_pd = 0.0
 
@@ -84,7 +76,7 @@ try:
             d = float(d_values[i])
             try:
                 damp = damper_force_step(
-                    p,
+                    p_case,
                     gas,
                     tab_pos,
                     tab_sec,
@@ -94,12 +86,101 @@ try:
                     delta_pd,
                     pg_prev,
                 )
-                matrix[i, j] = damp["ftot"]
+                matrix_case[i, j] = damp["ftot"]
                 delta_pc = damp["delta_pc"]
                 delta_pd = damp["delta_pd"]
                 pg_prev = damp["pg"]
             except SimError:
-                matrix[i, j] = np.nan
+                matrix_case[i, j] = np.nan
+
+    return matrix_case
+
+
+def _build_tolerance_cases(p_nominal):
+    """Construit les 3 cas (nominal / tol mini / tol maxi) en fonction des tolérances UI."""
+    st.subheader("Tolérances de fabrication")
+    c1, c2, c3 = st.columns(3)
+    tol_palier_mm = c1.number_input(
+        "Tol. Ø intérieur palier BH (± mm)",
+        min_value=0.0,
+        value=0.0,
+        step=0.01,
+        format="%.3f",
+        key="hydrau_tol_dinsidepalier_mm",
+    )
+    tol_dbh_mm = c2.number_input(
+        "Tol. Ø extérieur BH (± mm)",
+        min_value=0.0,
+        value=0.0,
+        step=0.01,
+        format="%.3f",
+        key="hydrau_tol_dbh_mm",
+    )
+    tol_rainure_mm = c3.number_input(
+        "Tol. profondeur rainures (± mm)",
+        min_value=0.0,
+        value=0.0,
+        step=0.01,
+        format="%.3f",
+        key="hydrau_tol_rainure_mm",
+    )
+
+    tol_palier_m = float(tol_palier_mm) / 1000.0
+    tol_dbh_m = float(tol_dbh_mm) / 1000.0
+    tol_rainure = float(tol_rainure_mm)
+
+    cases = {
+        "Nominal": p_nominal,
+        # Cas mini demandé : Dpalier max, DBH min, rainures min
+        "Tolérance mini": replace(
+            p_nominal,
+            DInsidePalierBh=p_nominal.DInsidePalierBh + tol_palier_m,
+            Dbh=p_nominal.Dbh - tol_dbh_m,
+            rainures_profondeur=np.maximum(p_nominal.rainures_profondeur - tol_rainure, 0.0),
+        ),
+        # Cas maxi demandé : Dpalier min, DBH max, rainures max
+        "Tolérance maxi": replace(
+            p_nominal,
+            DInsidePalierBh=p_nominal.DInsidePalierBh - tol_palier_m,
+            Dbh=p_nominal.Dbh + tol_dbh_m,
+            rainures_profondeur=p_nominal.rainures_profondeur + tol_rainure,
+        ),
+    }
+    return cases
+
+
+def _case_is_valid(case_p) -> tuple[bool, str]:
+    """Vérifications minimales des paramètres géométriques d'un cas de tolérance."""
+    if case_p.Dbh <= 0.0:
+        return False, "Dbh devient nul ou négatif."
+    if case_p.DInsidePalierBh <= 0.0:
+        return False, "DInsidePalierBh devient nul ou négatif."
+    if np.any(case_p.rainures_profondeur < 0.0):
+        return False, "Une profondeur de rainure devient négative."
+    return True, ""
+
+
+try:
+    inputs.validate().raise_if_any()
+    p = inputs.to_si()
+
+    course_mm_max = int(round(inputs.course))
+    course_mm = np.arange(0, course_mm_max + 1, 1, dtype=float)
+    d_values = course_mm / 1000.0
+
+    v_values = np.arange(-1.0, 3.0001, 0.25)
+    col_labels = [f"{v:+.2f} m/s" for v in v_values]
+
+    cases = _build_tolerance_cases(p)
+    case_matrices: dict[str, np.ndarray] = {}
+
+    for case_name, case_p in cases.items():
+        valid, reason = _case_is_valid(case_p)
+        if not valid:
+            st.warning(f"{case_name} ignoré : {reason}")
+            case_matrices[case_name] = np.full((len(d_values), len(v_values)), np.nan, dtype=float)
+            continue
+        case_matrices[case_name] = _compute_matrix_for_params(case_p, d_values, v_values)
 
     st.subheader("Courbe effort/course")
     speed_labels = [f"{v:+.2f} m/s" for v in v_values]
@@ -112,27 +193,42 @@ try:
         key="hydrau_curve_speeds",
     )
 
+    case_labels = list(case_matrices.keys())
+    selected_cases = st.multiselect(
+        "Cas a afficher",
+        case_labels,
+        default=["Nominal"],
+        key="hydrau_curve_cases",
+    )
+
     fig = go.Figure()
-    for label in selected_labels:
-        sel_idx = speed_labels.index(label)
-        y = matrix[:, sel_idx]
-        valid = np.isfinite(y)
-        if not np.any(valid):
-            continue
-        fig.add_trace(
-            go.Scatter(
-                x=course_mm[valid],
-                y=y[valid],
-                mode="lines",
-                line=dict(width=2),
-                name=label,
+    for case_name in selected_cases:
+        matrix = case_matrices[case_name]
+        for label in selected_labels:
+            sel_idx = speed_labels.index(label)
+            y = matrix[:, sel_idx]
+            valid = np.isfinite(y)
+            if not np.any(valid):
+                continue
+            fig.add_trace(
+                go.Scatter(
+                    x=course_mm[valid],
+                    y=y[valid],
+                    mode="lines",
+                    line=dict(width=2),
+                    name=f"{case_name} | {label}",
+                )
             )
-        )
 
     if len(fig.data) == 0:
-        st.info("Selectionne au moins une vitesse avec des points calculables.")
+        st.info("Selectionne au moins une vitesse et un cas avec des points calculables.")
 
-    title_suffix = ", ".join(selected_labels) if selected_labels else "aucune vitesse"
+    title_parts = []
+    if selected_cases:
+        title_parts.append(" / ".join(selected_cases))
+    if selected_labels:
+        title_parts.append(", ".join(selected_labels))
+    title_suffix = " | ".join(title_parts) if title_parts else "aucune selection"
     fig.update_layout(
         height=360,
         margin=dict(l=10, r=10, t=70, b=90),
@@ -145,26 +241,46 @@ try:
 
     st.subheader("Tableau effort/course/vitesse")
 
-    df = pd.DataFrame(matrix, columns=col_labels)
-    df.insert(0, "Course (mm)", course_mm.astype(int))
+    tabs = st.tabs(list(case_matrices.keys()))
+    for tab, case_name in zip(tabs, case_matrices.keys()):
+        with tab:
+            matrix = case_matrices[case_name]
+            df = pd.DataFrame(matrix, columns=col_labels)
+            df.insert(0, "Course (mm)", course_mm.astype(int))
+            st.dataframe(
+                df,
+                hide_index=True,
+                width="stretch",
+                height=700,
+                column_config={
+                    "Course (mm)": st.column_config.NumberColumn("Course (mm)", format="%d"),
+                    **{c: st.column_config.NumberColumn(c, format="%.0f") for c in col_labels},
+                },
+            )
 
-    st.dataframe(
-        df,
-        hide_index=True,
-        width="stretch",
-        height=700,
-        column_config={
-            "Course (mm)": st.column_config.NumberColumn("Course (mm)", format="%d"),
-            **{c: st.column_config.NumberColumn(c, format="%.0f") for c in col_labels},
-        },
+    c_nom, c_min, c_max = st.columns(3)
+    c_nom.caption(
+        f"Nominal: Dpalier={p.DInsidePalierBh*1000:.3f} mm, "
+        f"DBH={p.Dbh*1000:.3f} mm"
+    )
+    p_min = cases["Tolérance mini"]
+    p_max = cases["Tolérance maxi"]
+    c_min.caption(
+        f"Tol mini: Dpalier={p_min.DInsidePalierBh*1000:.3f} mm, "
+        f"DBH={p_min.Dbh*1000:.3f} mm"
+    )
+    c_max.caption(
+        f"Tol maxi: Dpalier={p_max.DInsidePalierBh*1000:.3f} mm, "
+        f"DBH={p_max.Dbh*1000:.3f} mm"
     )
 
     st.caption("Modele identique au moteur de simulation (gaz + hydraulique + friction + butees).")
-    n_nan = int(np.isnan(matrix).sum())
-    if n_nan:
-        st.warning(
-            f"{n_nan} points n'ont pas pu etre evalues numeriquement et sont affiches vides (NaN)."
-        )
+    for case_name, matrix in case_matrices.items():
+        n_nan = int(np.isnan(matrix).sum())
+        if n_nan:
+            st.warning(
+                f"{case_name}: {n_nan} points n'ont pas pu etre evalues numeriquement et sont affiches vides (NaN)."
+            )
 except SimError as err:
     st.error(f"Impossible de calculer la loi hydraulique : {err.message}")
     if err.hint:

@@ -588,25 +588,109 @@ $$
 Q_c = Q_{rainures}(\Delta P_c) + Q_{fuite}(\Delta P_c)
 $$
 
-Le débit total $Q_c = S_c\,v$ est imposé par la cinématique de la tige. On définit la **conductance du réseau** :
+Le débit total $Q_c = S_c\,v$ est imposé par la cinématique de la tige. La fuite est donc traitée comme une branche **en parallèle** qui prélève du débit aux rainures : le débit réellement vu par les rainures BH vaut
 
 $$
-Q_{reseau}(\Delta P_c) = Q_{rainures}(\Delta P_c) + Q_{fuite}(\Delta P_c)
+Q_{rainures}^{\text{eff}} = Q_c - Q_{fuite}(\Delta P_c)
 $$
 
-Le solveur Newton-Raphson de la compression (§7.2) est modifié : la relation $f_1$ devient :
+**Formulation du solveur (continuité garantie).** Plutôt que de réécrire le système avec une dérivée numérique du réseau, on **conserve strictement** la structure du Newton-Raphson 2×2 de la compression sans fuite (§7.2). Seule la relation orifice $f_1$ est modifiée en remplaçant $Q_c$ par $Q_{rainures}^{\text{eff}} = Q_c - Q_{fuite}$ :
+
 $$
-f_1 = Q_c - Q_{reseau}(\Delta P_c) = 0
+f_1 = (P_c - P_g) - \tfrac{1}{2}\,\rho \left(\frac{Q_c - Q_{fuite}(\Delta P_c)}{S_{bh}\,C_d}\right)^{2}\operatorname{sign}\!\left(Q_c - Q_{fuite}\right) = 0
 $$
-et la jacobienne utilise la dérivée numérique :
+
+La jacobienne reste **analytique** et identique à celle du modèle historique (à la substitution $Q_c \to Q_c - Q_{fuite}$ près) :
+
 $$
-\frac{dQ_{reseau}}{d\Delta P_c} \approx \frac{Q_{reseau}(\Delta P_c + \varepsilon) - Q_{reseau}(\Delta P_c - \varepsilon)}{2\,\varepsilon}
+J_{11} = \frac{\partial f_1}{\partial Q_c} = -\,(Q_c - Q_{fuite})\,\rho\,(S_{bh}C_d)^{-2}\,\operatorname{sign}\!\left(Q_c - Q_{fuite}\right)
 $$
-ce qui garantit la cohérence pour toute combinaison de régimes (laminaire/turbulent).
+
+Le débit de fuite $Q_{fuite}(\Delta P_c)$ (§7.5.2–7.5.3, laminaire/transition/turbulent) est évalué à la perte de charge courante de l'itération. Comparée à la branche sans fuite, **seule la substitution $Q_c \to Q_c - Q_{fuite}$ dans $f_1$ et $J_{11}$ diffère** ; tout le reste du schéma auto-référent (4 itérations fixes, mise à jour de $\Delta P_c$) est inchangé.
+
+> **Pourquoi cette formulation et pas $f_1 = Q_c - Q_{reseau}$ ?** La version précédente posait $f_1 = Q_c - Q_{reseau}(\Delta P_c)$ avec une jacobienne **numérique** (différences finies). Cette formulation transposée ne se réduisait **pas** au modèle historique lorsque $Q_{fuite}\to 0$ et n'était pas convergée en 4 itérations : pour une fuite quasi nulle, $\Delta P_c$ sautait de ~25 % (3,20 → 2,40 bar) par simple changement de branche de code. La formulation actuelle élimine ce défaut.
+
+**Jacobienne complète (sensibilité de la fuite à la pression).** Le résidu $f_1$ dépend de l'inconnue $P_c$ (donc de $\Delta P_c = P_c - P_g$) **par deux voies** : directement par le terme $(P_c - P_g)$, et indirectement parce que la fuite $Q_{fuite}(\Delta P_c)$ retranche du débit rainures. La dérivée correcte est donc
+
+$$
+J_{10} = \frac{\partial f_1}{\partial P_c}
+= 1 + \rho\,(S_{bh}C_d)^{-2}\,\lvert Q_c - Q_{fuite}\rvert\,\frac{\partial Q_{fuite}}{\partial \Delta P_c}
+$$
+
+où $\partial Q_{fuite}/\partial \Delta P_c$ est estimée par différence finie centrée. **Sans ce terme** (jacobienne supposant la fuite constante pendant le pas, $J_{10}=1$), le Newton-Raphson **diverge** dès que la fuite devient dominante ($Q_{rainures}^{\text{eff}}\to 0$ en fin de course à haute pression) : il prédit un débit de fuite supérieur au débit fourni par la tige, $Q_{rainures}^{\text{eff}}$ devient fortement négatif et $\Delta P_c$ explose (plusieurs milliers de bar — effort hydraulique parasite de plusieurs centaines de kN). En incluant $\partial Q_{fuite}/\partial \Delta P_c$ dans $J_{10}$, le solveur reste **stable et physique** sur toute la course. Lorsque $Q_{fuite}\to 0$, ce terme s'annule ($J_{10}\to 1$) et l'on retombe **exactement** sur le schéma historique (continuité préservée, tests de non-régression sans fuite inchangés).
 
 Le partage des débits, le rapport $Q_{fuite}/Q_c$ et le Reynolds de fuite sont enregistrés par le moteur (colonnes `Hydrau.Qc rainures BH`, `Hydrau.Qc fuite annulaire`, `Hydrau.Part fuite`, `Hydrau.Re fuite annulaire`).
 
-> **Non-régression** : si $D_{pal} \le D_{bh}$ (jeu nul ou négatif), la branche fuite est supprimée et le calcul revient exactement au modèle historique (§7.2 sans modification).
+> **Non-régression** : si $D_{pal} \le D_{bh}$ (jeu nul ou négatif), la branche fuite est supprimée et le calcul revient exactement au modèle historique (§7.2 sans modification). Grâce à la formulation par substitution, la **continuité est aussi assurée à jeu non nul** : lorsque $Q_{fuite}\to 0$ (jeu très fin ou palier très long), $\Delta P_c$ tend continûment vers la valeur du modèle historique.
+
+
+### 7.6 Étude de tolérances mini/maxi de la loi hydraulique
+
+La page **Loi hydraulique** calcule la carte $F_{tot}(d,v)$ pour trois cas :
+
+1. **Nominal** : dimensions issues de la saisie ;
+2. **Tolérance mini** : cas défavorable avec fuite accrue et rainures réduites ;
+3. **Tolérance maxi** : cas opposé avec fuite réduite et rainures accrues.
+
+On note les dimensions nominales :
+
+- $D_{pal,0}$ : diamètre intérieur palier BH ;
+- $D_{bh,0}$ : diamètre extérieur butée hydraulique (BH) ;
+- $p_{i,0}$ : profondeur de la rainure $i$.
+
+et les tolérances saisies (en valeur absolue, positives) :
+
+- $\Delta D_{pal}$ ;
+- $\Delta D_{bh}$ ;
+- $\Delta p$.
+
+Les cas sont construits par :
+
+$$
+	ext{Nominal}:
+\begin{cases}
+D_{pal}=D_{pal,0}\\
+D_{bh}=D_{bh,0}\\
+p_i=p_{i,0}
+\end{cases}
+$$
+
+$$
+	ext{Tolérance mini}:
+\begin{cases}
+D_{pal}=D_{pal,0}+\Delta D_{pal}\\
+D_{bh}=D_{bh,0}-\Delta D_{bh}\\
+p_i=\max(0,\,p_{i,0}-\Delta p)
+\end{cases}
+$$
+
+$$
+	ext{Tolérance maxi}:
+\begin{cases}
+D_{pal}=D_{pal,0}-\Delta D_{pal}\\
+D_{bh}=D_{bh,0}+\Delta D_{bh}\\
+p_i=p_{i,0}+\Delta p
+\end{cases}
+$$
+
+Interprétation physique :
+
+- **Tolérance mini** augmente le jeu annulaire $D_{pal}-D_{bh}$ et diminue les
+  profondeurs de rainures : c'est en général un cas de plus forte sensibilité à
+  la fuite ;
+- **Tolérance maxi** réduit le jeu annulaire et augmente les profondeurs de
+  rainures : cas opposé.
+
+Pour chaque cas, le moteur de la page recalcule intégralement :
+
+- la table de section des rainures $S_{bh}(d)$ ;
+- les pertes hydrauliques (compression/détente, branche rainures + fuite
+  annulaire) ;
+- l'effort total $F_{tot}(d,v)$ sur la grille de vitesses (−1 à +3 m/s) et de
+  course (pas 1 mm).
+
+Remarque importante : dans cette version, les profondeurs de rainures utilisées
+au calcul sont saturées au rayon de bague ($p_i \le D_{bh}/2$).
 
 ---
 

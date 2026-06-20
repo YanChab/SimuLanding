@@ -184,7 +184,7 @@ class MLGInputs:
     DInsideBh: float = 28.0        # mm  diamètre intérieur butée hydraulique BH
     DInsidePalierBh: float = 34.0  # mm  diamètre intérieur palier BH (fuite annulaire)
     Lbh: float = 200.0             # mm  longueur du trou de BH
-    LPalierBh: float = 200.0       # mm  longueur du palier BH (fuite annulaire)
+    LPalierBh: float = 6.0         # mm  longueur du palier BH (fuite annulaire)
     excentricite_palier_bh: float = 0.0  # mm  désaxage BH/palier (0 = concentrique)
     course: float = 185.0          # mm  course totale (SAT)
     DTrouPis: float = 1.5          # mm  diamètre trou piston de détente
@@ -443,14 +443,6 @@ class MLGInputs:
                 field="rainures",
                 hint="Vérifier les cotes début/fin de la rainure.",
             )
-            c.check(
-                r.profondeur > self.Dbh / 2.0,
-                code="RAINURE_TROP_PROFONDE",
-                message=f"Rainure {i + 1} : la profondeur ({r.profondeur} mm) ne peut pas dépasser "
-                f"le rayon de la bague hydraulique ({self.Dbh / 2.0} mm).",
-                field="rainures",
-                hint="Réduire la profondeur de la rainure.",
-            )
         return c
 
     # ------------------------------------------------------------------ #
@@ -494,6 +486,13 @@ class MLGInputs:
             k_huile_ref=self.k_huile,
             temperature=self.temperature,
             k_huile_temp_coeff=self.k_huile_temp_coeff,
+        )
+
+        # Les profondeurs de rainures sont saturées au rayon de BH pour le calcul
+        # (profondeur effective <= Dbh/2), afin d'éviter un blocage de simulation.
+        rainures_profondeur_eff = np.minimum(
+            np.array([r.profondeur for r in self.rainures], dtype=float),
+            self.Dbh / 2.0,
         )
 
         return MLGParamsSI(
@@ -551,7 +550,7 @@ class MLGInputs:
             diametre_rainure=self.diametre_rainure,  # gardé en mm (cf. metering)
             rainures_debut=np.array([r.debut for r in self.rainures]),
             rainures_fin=np.array([r.fin for r in self.rainures]),
-            rainures_profondeur=np.array([r.profondeur for r in self.rainures]),
+            rainures_profondeur=rainures_profondeur_eff,
         )
 
 

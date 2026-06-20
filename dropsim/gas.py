@@ -61,10 +61,17 @@ class GasSpring:
             if base_bp <= 0.0 or base_hp <= 0.0:
                 raise SimError(
                     code="GAZ_VOLUME_NEGATIF",
-                    message="Le solveur du ressort gazeux a produit un volume de chambre négatif.",
+                    message=(
+                        "Le solveur du ressort gazeux a produit un volume de chambre négatif : "
+                        "la course de gaz dépasse la limite physique des chambres. Cela traduit "
+                        "un sur-enfoncement de l'amortisseur (amortissement insuffisant)."
+                    ),
                     level=ErrorLevel.RUNTIME,
                     field="Vgbp" if base_bp <= 0.0 else "Vghp",
-                    hint="Vérifier les volumes/pressions initiaux de gaz et la course.",
+                    hint=(
+                        "Augmenter l'amortissement (réduire la fuite annulaire), ou vérifier "
+                        "les volumes/pressions initiaux de gaz et la course."
+                    ),
                     context={"course_m": d, "base_bp": base_bp, "base_hp": base_hp},
                 )
 

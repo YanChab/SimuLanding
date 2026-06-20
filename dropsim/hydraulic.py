@@ -232,9 +232,18 @@ def calcul_hydrau(
             q_leak = 0.0
             re_leak = 0.0
         else:
-            def q_network(delta_p: float) -> tuple[float, float, float, float]:
-                qb = _flow_bh_from_dp(delta_p, rho, sec_bh, cd_bh)
-                qf, ref = _flow_annular_with_turbulence(
+            # La fuite annulaire est une branche EN PARALLÈLE des rainures BH :
+            # le débit total Qc se répartit entre les rainures (qbh) et la fuite
+            # (q_leak) sous la même perte de charge ΔP = (x0 - Pg). On garde
+            # strictement la structure du schéma sans fuite (même itération
+            # auto-référente calée sur le VBA), la fuite venant simplement
+            # retrancher du débit qui traverse les rainures : qbh_eff = x1 - q_leak.
+            # Ainsi, lorsque la fuite → 0, on retombe EXACTEMENT sur le modèle
+            # historique (continuité garantie).
+            inv_scd2 = (1.0 / (sec_bh * cd_bh)) ** 2
+
+            def _leak(delta_p: float) -> tuple[float, float]:
+                return _flow_annular_with_turbulence(
                     delta_p,
                     rho,
                     visc,
@@ -243,20 +252,32 @@ def calcul_hydrau(
                     p.DInsidePalierBh,
                     p.excentricite_palier_bh,
                 )
-                return qb + qf, qb, qf, ref
 
             for _ in range(n_iter):
                 pc_ref = pg + m_delta_pc         # MLG.Pc (propriété, évolutive)
-                f0 = x1 - p.Sc * v + coupl * (x0 - pc_ref)
                 dp = x0 - pg
-                qnet, qb_i, qf_i, _ref_i = q_network(dp)
-                # Dérivée numérique dQ/dΔP du réseau parallèle (rainures + fuite).
-                eps = max(1.0, abs(dp) * 1.0e-6)
-                q_plus, _, _, _ = q_network(dp + eps)
-                q_minus, _, _, _ = q_network(dp - eps)
-                dqdp = (q_plus - q_minus) / (2.0 * eps)
-                f1 = x1 - qnet
-                det = coupl + dqdp
+                qf_i, re_leak = _leak(dp)         # fuite annulaire au ΔP courant
+                qbh_eff = x1 - qf_i               # le reste passe par les rainures BH
+                f0 = x1 - p.Sc * v + coupl * (x0 - pc_ref)
+                f1 = (x0 - pg) - 0.5 * rho * (qbh_eff ** 2) * inv_scd2 * _sign(qbh_eff)
+
+                # Sensibilité de la fuite à la perte de charge ∂q_fuite/∂ΔP,
+                # estimée par différence finie centrée. Ce terme MANQUAIT dans le
+                # jacobien d'origine : sans lui, le Newton-Raphson suppose la fuite
+                # CONSTANTE pendant le pas et diverge dès qu'elle devient dominante
+                # (qbh_eff → 0). En l'incluant, le solveur reste stable et physique
+                # même lorsque la quasi-totalité du débit passe par la fuite.
+                h = max(abs(dp) * 1.0e-6, 1.0)
+                qf_plus, _ = _leak(dp + h)
+                qf_minus, _ = _leak(dp - h)
+                dqf_ddp = (qf_plus - qf_minus) / (2.0 * h)
+
+                # Jacobien 2×2 complet. j10 = ∂f1/∂x0 : la perte de charge (x0 − Pg)
+                # agit directement (terme « 1 ») ET via la fuite, qui retranche du
+                # débit rainures qbh_eff = x1 − q_fuite(x0 − Pg).
+                j11 = -qbh_eff * rho * inv_scd2 * _sign(qbh_eff)
+                j10 = 1.0 + rho * inv_scd2 * abs(qbh_eff) * dqf_ddp
+                det = coupl * j11 - j10
                 if det == 0.0:
                     raise SimError(
                         code="HYDRAU_JACOBIEN_SINGULIER",
@@ -264,16 +285,15 @@ def calcul_hydrau(
                         level=ErrorLevel.RUNTIME,
                         hint="Réduire le pas de temps ou vérifier la section de bague hydraulique.",
                     )
-                # Résolution 2x2 : [[coupl, 1], [-dqdp, 1]] · dx = [f0, f1]
-                dx0 = (f0 - f1) / det
-                dx1 = (coupl * f1 + dqdp * f0) / det
+                dx0 = (j11 * f0 - 1.0 * f1) / det
+                dx1 = (coupl * f1 - j10 * f0) / det
                 x0 -= dx0
                 x1 -= dx1
                 m_delta_pc = x0 - pg             # MLG.DeltaPc = xRes(0) - Pg
-                q_bh, q_leak = qb_i, qf_i
-                _, _, _, re_leak = q_network(dp)
-            _, q_bh, q_leak, re_leak = q_network(x0 - pg)
-            delta_pc = x0 - pg
+            dp = x0 - pg
+            q_leak, re_leak = _leak(dp)
+            q_bh = x1 - q_leak
+            delta_pc = dp
             qc_total = x1
     else:
         delta_pc = 0.5 * rho * (qc_total / (sec_bh * cd_bh)) ** 2 * _sign(qc_total)

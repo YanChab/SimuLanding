@@ -421,14 +421,14 @@ with col_amort:
     st.subheader("Amortisseur (géométrie)")
     num_table([
         ("Ø piston Dpis (mm)", "Dpis", inp.Dpis),
-        ("Ø bague hydraulique Dbh (mm)", "Dbh", inp.Dbh),
+        ("Ø extérieur butée hydraulique (BH) Dbh (mm)", "Dbh", inp.Dbh),
         ("Ø tige Dt (mm)", "Dt", inp.Dt),
         ("Ø intérieur tige Dp (mm)", "Dp", inp.Dp),
         ("Ø intérieur butée BH (mm)", "DInsideBh", inp.DInsideBh),
-        ("Ø intérieur palier BH (mm)", "DInsidePalierBh", inp.DInsidePalierBh),
+        ("Ø intérieur palier de BH DInsidePalierBh (mm)", "DInsidePalierBh", inp.DInsidePalierBh),
         ("Longueur trou BH (mm)", "Lbh", inp.Lbh),
         ("Longueur palier BH (mm)", "LPalierBh", inp.LPalierBh),
-        ("Désaxage BH/palier (mm)", "excentricite_palier_bh", inp.excentricite_palier_bh),
+        ("Excentricité absolue BH/palier e_exc (mm)", "excentricite_palier_bh", inp.excentricite_palier_bh),
         ("Course totale SAT (mm)", "course", inp.course),
         ("Ø trou piston détente (mm)", "DTrouPis", inp.DTrouPis),
         ("Nb trous piston", "NbTrouPis", inp.NbTrouPis),
