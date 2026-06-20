@@ -1,6 +1,8 @@
 """Tests de non-régression pour le sélecteur d'intégrateur (euler|rk4)."""
 from __future__ import annotations
 
+import time
+
 from dropsim import default_mlg_inputs, run_simulation
 from dropsim.engine import OUTPUT_COLUMNS, _select_damper_core_solver
 
@@ -60,6 +62,7 @@ def _run_auto_case(dt: float = 1.0e-4):
 
 
 def _count_auto_implicit_steps(
+    solver: str,
     masse: float,
     vz: float,
     dt: float,
@@ -67,7 +70,7 @@ def _count_auto_implicit_steps(
 ) -> tuple[int, int]:
     inp = default_mlg_inputs()
     inp.integrator = "rk4"
-    inp.damper_core_solver = "auto"
+    inp.damper_core_solver = solver
     inp.it = dt
     inp.masse = masse
     inp.vz = vz
@@ -84,6 +87,32 @@ def _count_auto_implicit_steps(
         if _select_damper_core_solver(si, d, v, pg, ftot_prev) == "implicit_adaptive":
             implicit += 1
     return implicit, len(df)
+
+
+def _run_solver_case(
+    solver: str,
+    dt: float,
+    masse: float,
+    vz: float,
+    temperature: float = 25.0,
+) -> tuple[float, float, float, float]:
+    inp = default_mlg_inputs()
+    inp.integrator = "rk4"
+    inp.damper_core_solver = solver
+    inp.it = dt
+    inp.masse = masse
+    inp.vz = vz
+    inp.temperature = temperature
+    result = run_simulation(inp)
+    summary = result.summary
+    residual_col = OUTPUT_COLUMNS["e_residual"]
+    res_max = float(result.df[residual_col].abs().max())
+    return (
+        summary["Effort vertical max Fz (N)"],
+        summary["Course max (mm)"],
+        summary["Accélération max (g)"],
+        res_max,
+    )
 
 
 def test_invalid_integrator_is_rejected():
@@ -116,6 +145,29 @@ def test_auto_solver_heuristic_switches_on_stiff_states():
     si = inp.to_si()
     assert _select_damper_core_solver(si, 0.0005, 2.00, si.Pinitbp * 13.0, si.St * si.Pinitbp * 1.2) == "implicit_adaptive"
     assert _select_damper_core_solver(si, 0.10, 0.20, si.Pinitbp * 1.2, 0.0) == "legacy"
+
+
+def test_auto_profiles_cover_fast_and_precise_tradeoff():
+    fast_start = time.perf_counter()
+    fast = _run_solver_case("auto_fast", 5.0e-5, 1275.0, 3.05)
+    fast_elapsed = time.perf_counter() - fast_start
+
+    precise_start = time.perf_counter()
+    precise = _run_solver_case("auto_precise", 5.0e-5, 1275.0, 3.05)
+    precise_elapsed = time.perf_counter() - precise_start
+
+    legacy = _run_solver_case("legacy", 5.0e-5, 1275.0, 3.05)
+
+    fast_implicit, fast_steps = _count_auto_implicit_steps("auto_fast", 1275.0, 3.05, 5.0e-5)
+    precise_implicit, precise_steps = _count_auto_implicit_steps("auto_precise", 1275.0, 3.05, 5.0e-5)
+
+    assert fast_elapsed < precise_elapsed
+    assert fast_implicit < precise_implicit
+    assert fast_implicit / fast_steps < precise_implicit / precise_steps
+    assert abs(fast[0] - legacy[0]) <= 0.02 * legacy[0]
+    assert abs(precise[0] - legacy[0]) <= 0.02 * legacy[0]
+    assert abs(fast[1] - legacy[1]) <= 0.5
+    assert abs(precise[1] - legacy[1]) <= 0.5
 
 
 def test_rk4_stays_close_to_euler_with_controlled_energy_residual():

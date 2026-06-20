@@ -285,12 +285,13 @@ with col_chute:
         st.session_state[_core_key] = inp.damper_core_solver
     st.selectbox(
         "Solveur noyau gaz/hydraulique",
-        options=["legacy", "implicit_adaptive", "auto"],
+        options=["legacy", "implicit_adaptive", "auto", "auto_fast", "auto_precise"],
         key=_core_key,
         help=(
             "legacy: comportement historique; implicit_adaptive: essai de "
             "résolution implicite locale avec sous-pas adaptatifs; auto: "
-            "hybride automatique qui active l'implicite dans les zones raides."
+            "hybride automatique équilibré; auto_fast: plus rapide; "
+            "auto_precise: plus prudent sur les erreurs."
         ),
     )
     # Champ dédié pour la température : un number_input accepte nativement les

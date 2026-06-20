@@ -1006,6 +1006,12 @@ hydrauliques et de butée.
   sur le noyau gaz/hydraulique.
 - `auto` : sélection hybride locale, qui bascule vers `implicit_adaptive` dans
   les zones raides détectées et conserve `legacy` ailleurs.
+- `auto_fast` : variante plus conservatrice, destinée à réduire le temps de
+  calcul au maximum. Hors implicite, il emprunte le chemin hydraulique le plus
+  léger avec un pas de calcul un peu plus large pour limiter le coût sur les
+  longs transitoires.
+- `auto_precise` : variante plus prudente, qui privilégie la fidélité numérique
+  au prix d'une activation implicite plus fréquente.
 
 La mémoire interne hydraulique/gaz est toutefois réinjectée au niveau du pas
 global (mise à jour en fin de pas), ce qui reste un compromis pragmatique :
@@ -1048,6 +1054,13 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
   il n'est qu'une heuristique locale, pas une garantie de coût minimal global,
   mais son réglage actuel ramène le coût quasiment au niveau du chemin
   historique tout en réservant l'implicite aux zones les plus raides.
+- **Profils rapide / précis** : ils matérialisent deux réglages du même principe
+  hybride afin de pouvoir choisir explicitement entre vitesse de calcul et marge
+  de sécurité numérique.
+- **Benchmark 10 s** : sur deux cas représentatifs, `auto_fast` passe à un peu
+  plus de 4 s sur les cas 10 s testés, soit largement plus de 2× plus vite que
+  `legacy`, alors que `auto_precise` augmente nettement le temps de calcul pour
+  activer plus souvent le noyau implicite.
 - **Mécanisme plan** : la rotation du balancier est traitée dans le plan
   $X\!-\!Z$ ; l'obliquité en $Y$ est prise en compte uniquement par projection de
   l'effort d'amortisseur.

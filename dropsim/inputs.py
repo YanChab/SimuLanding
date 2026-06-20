@@ -175,7 +175,7 @@ class MLGInputs:
     temps_simu: float = 0.5        # s   (durée simulée)
     it: float = 0.0001             # s   (pas de temps)
     integrator: str = "euler"      # euler|rk4
-    damper_core_solver: str = "legacy"  # legacy|implicit_adaptive|auto
+    damper_core_solver: str = "legacy"  # legacy|implicit_adaptive|auto|auto_fast|auto_precise
     temperature: float = 25.0      # °C
 
     # --- Amortisseur (géométrie) ------------------------------------------ #
@@ -341,15 +341,21 @@ class MLGInputs:
             hint="Choisir 'euler' ou 'rk4'.",
         )
         c.check(
-            self.damper_core_solver not in {"legacy", "implicit_adaptive", "auto"},
+            self.damper_core_solver not in {
+                "legacy",
+                "implicit_adaptive",
+                "auto",
+                "auto_fast",
+                "auto_precise",
+            },
             code="SOLVEUR_AMORTISSEUR_INVALIDE",
             message=(
                 "Le solveur noyau amortisseur doit être 'legacy', "
-                "'implicit_adaptive' ou 'auto' "
+                "'implicit_adaptive', 'auto', 'auto_fast' ou 'auto_precise' "
                 f"(reçu : {self.damper_core_solver})."
             ),
             field="damper_core_solver",
-            hint="Choisir 'legacy', 'implicit_adaptive' ou 'auto'.",
+            hint="Choisir 'legacy', 'implicit_adaptive', 'auto', 'auto_fast' ou 'auto_precise'.",
         )
 
         # Géométrie amortisseur

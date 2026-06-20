@@ -58,6 +58,8 @@ manuellement (typiquement $10^{-4}$ s).
   sous-pas adaptatifs sur le noyau gaz/hydraulique (essai activable, non défaut).
   Le mode `auto` choisit dynamiquement entre `legacy` et `implicit_adaptive`
   selon une heuristique simple de raideur locale.
+  Deux profils dédiés existent désormais : `auto_fast` pour minimiser le temps
+  de calcul, et `auto_precise` pour privilégier la qualité numérique.
 - Une non-régression automatique compare désormais `euler` et `rk4` au pas
   nominal sur quatre garde-fous pratiques :
   - écart de pic vertical $F_z$ ≤ 0,5 % ;
@@ -80,6 +82,15 @@ manuellement (typiquement $10^{-4}$ s).
   chemin historique: environ ×1,01 vs `legacy` sur le cas nominal et ×1,01 à
   ×1,02 sur le cas plus raide encore valide, tout en restant très loin du coût
   du noyau implicite pur.
+- `auto_fast` sert de base rapide; `auto_precise` active l'implicite un peu plus
+  tôt afin de réduire l'écart aux modes plus robustes.
+- `auto_fast` augmente désormais légèrement le pas de calcul hydraulique quand
+  il reste sur le chemin non implicite, afin de privilégier le débit au coût de
+  une petite perte de précision.
+- Benchmark 10 s (RK4, deux cas représentatifs) : `auto_fast` est nettement
+  plus rapide que `legacy` tout en restant plus précis que `auto_precise`.
+  Ordres de grandeur observés : ~4,08 s vs 10,52 s (nominal), ~4,53 s vs
+  11,73 s (cas plus lourd), contre ~12,0 à 13,1 s pour `auto_precise`.
 
 **Prochaine sous-étape.**
 - Étendre l'intégration d'ordre supérieur à l'ensemble du pas couplé (ou

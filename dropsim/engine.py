@@ -251,6 +251,7 @@ def damper_force_step_rk4_coupled(
     delta_pc_prev: float,
     delta_pd_prev: float,
     pg_prev: float,
+    dt_scale: float = 1.0,
 ) -> dict[str, float]:
     """Évalue l'amortisseur sur les 4 stages RK4 avec couplage complet.
 
@@ -281,7 +282,7 @@ def damper_force_step_rk4_coupled(
 
     d_span = d_end - d_start
     v_span = v_end - v_start
-    dt_stage = 0.5 * p.it
+    dt_stage = 0.5 * p.it * dt_scale
 
     for c_i, w_i in zip(c_nodes, weights):
         # Chaque stage repart du même état mémoire de début de pas pour éviter
@@ -318,6 +319,7 @@ def damper_force_step_rk4_coupled(
         delta_pc_prev,
         delta_pd_prev,
         pg_prev,
+        dt=p.it * dt_scale,
     )
 
     out = dict(end_step)
@@ -347,8 +349,26 @@ def _select_damper_core_solver(
     la plus raide: proximité immédiate de butée, ou combinaison de plusieurs
     indices forts (vitesse, compression gaz, effort déjà élevé).
     """
-    if p.damper_core_solver != "auto":
+    if p.damper_core_solver not in {"auto", "auto_fast", "auto_precise"}:
         return p.damper_core_solver
+
+    if p.damper_core_solver == "auto_fast":
+        near_stop = d <= 0.0015 * p.course or d >= 0.9985 * p.course
+        gas_loaded = abs(pg_prev - p.Pinitbp) >= 16.0 * p.Pinitbp
+        force_spike = abs(ftot_prev) >= 1.25 * (p.St * p.Pinitbp)
+        if near_stop or (gas_loaded and force_spike):
+            return "implicit_adaptive"
+        return "legacy"
+
+    if p.damper_core_solver == "auto_precise":
+        near_stop = d <= 0.008 * p.course or d >= 0.992 * p.course
+        fast_motion = abs(v) >= 1.4
+        gas_loaded = abs(pg_prev - p.Pinitbp) >= 9.0 * p.Pinitbp
+        force_spike = abs(ftot_prev) >= 0.85 * (p.St * p.Pinitbp)
+        score = int(near_stop) + int(fast_motion) + int(gas_loaded) + int(force_spike)
+        if near_stop or score >= 2:
+            return "implicit_adaptive"
+        return "legacy"
 
     near_stop = d <= 0.005 * p.course or d >= 0.995 * p.course
     fast_motion = abs(v) >= 1.8
@@ -414,6 +434,7 @@ def damper_force_step_implicit_adaptive(
     delta_pc_prev: float,
     delta_pd_prev: float,
     pg_prev: float,
+    min_h: float = 1.0 / 64.0,
 ) -> dict[str, float]:
     """Chemin implicite/adaptatif sur le noyau gaz+hydraulique.
 
@@ -422,7 +443,6 @@ def damper_force_step_implicit_adaptive(
     solution raffinée (deux demi-sous-pas) quand l'erreur est sous seuil.
     """
     tol_rel = 0.02
-    min_h = 1.0 / 64.0
     max_substeps = 256
 
     tau = 0.0
@@ -754,7 +774,9 @@ def run_mlg(
 
             # Ressort gazeux + hydraulique (meme loi que l'export "Loi hydraulique").
             solver_mode = _select_damper_core_solver(p, d, v, pg_prev, ftot)
+            non_implicit_dt_scale = 1.10 if p.damper_core_solver == "auto_fast" and solver_mode != "implicit_adaptive" else 1.0
             if solver_mode == "implicit_adaptive":
+                min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 64.0
                 damp = damper_force_step_implicit_adaptive(
                     p,
                     gas,
@@ -767,6 +789,20 @@ def run_mlg(
                     delta_pc,
                     delta_pd,
                     pg_prev,
+                    min_h=min_h,
+                )
+            elif p.damper_core_solver == "auto_fast":
+                damp = damper_force_step(
+                    p,
+                    gas,
+                    tab_pos,
+                    tab_sec,
+                    d,
+                    v,
+                    delta_pc,
+                    delta_pd,
+                    pg_prev,
+                    dt=p.it * non_implicit_dt_scale,
                 )
             elif p.integrator == "rk4":
                 damp = damper_force_step_rk4_coupled(
@@ -781,6 +817,7 @@ def run_mlg(
                     delta_pc,
                     delta_pd,
                     pg_prev,
+                    dt_scale=non_implicit_dt_scale,
                 )
             else:
                 damp = damper_force_step(
@@ -793,6 +830,7 @@ def run_mlg(
                     delta_pc,
                     delta_pd,
                     pg_prev,
+                    dt=p.it * non_implicit_dt_scale,
                 )
             pg = damp["pg"]
             pc = damp["pc"]

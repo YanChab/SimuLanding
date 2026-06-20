@@ -5,6 +5,7 @@
 -> créer un système de sauvegarde des configurations -> OK
 -> lui faire faire un fichier scientifique -> OK
 -> revoir interface résultats -> OK
+-> séparer le mode auto en rapide/précis -> OK
 -> rajouter un graphe sur le quel on peut mettre les courbes que l'on veut-> OK
 -> rajouter la fuite entre le palbh et la BH -> OK
 -> remplacement de la méthode de calcul en RK
@@ -13,3 +14,6 @@
 -> intégrer les tolérances sur les effort hydrauliques -> OK
 -> permettre le calcul du bulk en fonction de l'aeration -> OK
 -> intégré la variation du gamma en fonction de la vitesse
+-> Rajouter un avertissement lorqu'il y a des pression négatives
+-> page paramètre du modèle pour pouvoir le configurer.
+-> demander
