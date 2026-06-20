@@ -1,4 +1,4 @@
-# Modèle scientifique de la simulation de drop test — train à balancier (MLG)
+# Modèle scientifique de la simulation de drop test — train à balancier (TrailingArm)
 
 > Document de référence décrivant la physique et les équations implémentées dans
 > le moteur de calcul `dropsim`. Il reproduit fidèlement la macro VBA d'origine
@@ -10,15 +10,17 @@
 ## 1. Objet et principe général
 
 Le simulateur reproduit un **essai de chute** (drop test) d'un atterrisseur
-principal (MLG, *Main Landing Gear*) de type **à balancier** (*levered /
-trailing-arm*). Une masse représentant la part d'avion supportée par la jambe
+de type **à balancier** (*levered / trailing-arm*). Une masse représentant la
+part d'avion supportée par la jambe
 tombe d'une hauteur donnée (vitesse verticale d'impact $V_z$) avec une vitesse
 horizontale $V_x$ représentant la vitesse avion au toucher des roues. On calcule
 l'évolution temporelle des efforts, courses, pressions et accélérations jusqu'à
 l'enfoncement maximal et le rebond.
 
 Le modèle couple **quatre sous-systèmes** physiques, intégrés pas à pas avec un
-schéma explicite de pas de temps $\Delta t$ (sélecteur `integrator = euler|rk4`) :
+schéma explicite de pas de temps $\Delta t$.
+L'interface utilisateur est **RK4-only** ; le moteur conserve un mode interne
+explicite pour le profil `auto_fast`.
 
 | Sous-système | Loi physique dominante | Module |
 |---|---|---|
@@ -41,7 +43,7 @@ Repère train orthonormé $(X, Y, Z)$ :
 
 Le moteur travaille **intégralement en unités SI** ; les saisies utilisateur
 sont en unités d'affichage (mm, bar, cc, cSt, MPa, °, °C) et converties par
-`MLGInputs.to_si()`.
+`TrailingArmInputs.to_si()`.
 
 ### 2.2 Points géométriques du mécanisme
 
@@ -90,7 +92,7 @@ sont en unités d'affichage (mm, bar, cc, cSt, MPa, °, °C) et converties par
 | $D_t$ | Diamètre de tige | m (mm) |
 | $\text{course}$ | Course totale (SAT, *Stroke At Tail*) | m (mm) |
 
-Sections déduites (propriétés de `MLGParamsSI`) :
+Sections déduites (propriétés de `TrailingArmParamsSI`) :
 
 $$
 S_c = \frac{\pi}{4}\left(D_{pis}^2 - D_{bh}^2\right), \qquad
@@ -1022,8 +1024,8 @@ ou adaptatif fully-coupled sur toutes les variables internes.
 
 ## 13. Grandeurs de synthèse
 
-À l'issue du calcul, les indicateurs caractéristiques (reproduisant l'onglet
-*Summary MLG*, plage B46:C61) sont extraits :
+À l'issue du calcul, les indicateurs caractéristiques (historiquement alignés
+sur l'onglet *Summary MLG*, plage B46:C61) sont extraits :
 
 | Grandeur | Définition | Unité |
 |---|---|---|
