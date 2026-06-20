@@ -53,6 +53,9 @@ manuellement (typiquement $10^{-4}$ s).
 - Le couplage complet gaz/hydraulique reste évalué explicitement au pas (même
   structure de boucle que l'historique), donc le RK4 actuel n'est pas encore un
   schéma fully-coupled de toute la chaîne.
+- Un mode noyau `damper_core_solver = legacy|implicit_adaptive` est disponible.
+  Le mode `implicit_adaptive` applique une résolution implicite locale avec
+  sous-pas adaptatifs sur le noyau gaz/hydraulique (essai activable, non défaut).
 - Une non-régression automatique compare désormais `euler` et `rk4` au pas
   nominal sur quatre garde-fous pratiques :
   - écart de pic vertical $F_z$ ≤ 0,5 % ;
@@ -63,6 +66,11 @@ manuellement (typiquement $10^{-4}$ s).
   tests : passage de $10^{-4}$ s à $5\times10^{-5}$ s pour `euler` et `rk4`,
   avec contrôle de baisse du résidu énergétique et bornes d'écart coarse/fine
   sur les grandeurs de synthèse.
+
+**Retour de benchmark (nominal, RK4, $\Delta t=10^{-4}$ s).**
+- `implicit_adaptive` améliore légèrement la cohérence des grandeurs de sortie
+  (écarts faibles, résidu énergétique similaire), mais coûte environ ×2,5 en
+  temps CPU vs `legacy` sur le cas nominal.
 
 **Prochaine sous-étape.**
 - Étendre l'intégration d'ordre supérieur à l'ensemble du pas couplé (ou

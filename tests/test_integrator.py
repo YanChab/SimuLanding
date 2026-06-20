@@ -21,6 +21,27 @@ def _run_case(integrator: str, dt: float) -> tuple[float, float, float, float]:
     )
 
 
+def _run_case_with_solver(
+    integrator: str,
+    dt: float,
+    damper_core_solver: str,
+) -> tuple[float, float, float, float]:
+    inp = default_mlg_inputs()
+    inp.integrator = integrator
+    inp.it = dt
+    inp.damper_core_solver = damper_core_solver
+    result = run_simulation(inp)
+    summary = result.summary
+    residual_col = OUTPUT_COLUMNS["e_residual"]
+    res_max = float(result.df[residual_col].abs().max())
+    return (
+        summary["Effort vertical max Fz (N)"],
+        summary["Course max (mm)"],
+        summary["Accélération max (g)"],
+        res_max,
+    )
+
+
 def test_invalid_integrator_is_rejected():
     inp = default_mlg_inputs()
     inp.integrator = "invalid"
@@ -35,6 +56,14 @@ def test_rk4_selection_emits_warning_and_runs():
     result = run_simulation(inp)
     assert result.n_steps > 0
     assert not any(w.code == "INTEGRATEUR_RK4_INACTIF" for w in result.warnings)
+
+
+def test_invalid_damper_solver_is_rejected():
+    inp = default_mlg_inputs()
+    inp.damper_core_solver = "unknown"
+    collector = inp.validate()
+    assert collector.has_errors
+    assert any(err.code == "SOLVEUR_AMORTISSEUR_INVALIDE" for err in collector.errors)
 
 
 def test_rk4_stays_close_to_euler_with_controlled_energy_residual():
@@ -69,3 +98,22 @@ def test_timestep_convergence_comparison_euler_vs_rk4():
     assert dfz_rk4 <= 100.0
     assert dcourse_rk4 <= 0.10
     assert dacc_rk4 <= 0.01
+
+
+def test_implicit_adaptive_solver_runs_and_stays_close_to_legacy():
+    fz_legacy, course_legacy, acc_legacy, _ = _run_case_with_solver(
+        "rk4", 1.0e-4, "legacy"
+    )
+    fz_impl, course_impl, acc_impl, _ = _run_case_with_solver(
+        "rk4", 1.0e-4, "implicit_adaptive"
+    )
+
+    assert abs(fz_impl - fz_legacy) <= 0.03 * fz_legacy
+    assert abs(course_impl - course_legacy) <= 2.0
+    assert abs(acc_impl - acc_legacy) <= 0.2
+
+
+def test_implicit_adaptive_solver_timestep_refinement_reduces_residual():
+    coarse = _run_case_with_solver("rk4", 1.0e-4, "implicit_adaptive")
+    fine = _run_case_with_solver("rk4", 5.0e-5, "implicit_adaptive")
+    assert fine[3] < 0.80 * coarse[3]

@@ -326,6 +326,187 @@ def damper_force_step_rk4_coupled(
     return out
 
 
+def _gas_state(gas: GasSpring) -> tuple[float, float]:
+    return gas.Vgbp, gas.Vghp
+
+
+def _set_gas_state(gas: GasSpring, state: tuple[float, float]) -> None:
+    gas.Vgbp, gas.Vghp = state
+
+
+def _damper_force_step_implicit_endpoint(
+    p: MLGParamsSI,
+    gas: GasSpring,
+    tab_pos: np.ndarray,
+    tab_sec: np.ndarray,
+    d: float,
+    v: float,
+    dt_local: float,
+    delta_pc_prev: float,
+    delta_pd_prev: float,
+    pg_prev: float,
+    gas_state_prev: tuple[float, float],
+) -> tuple[dict[str, float], tuple[float, float]]:
+    """Sous-pas implicite local (évaluation en fin de sous-pas)."""
+    # Point fixe léger sur la pression tampon de gaz (stabilisation locale).
+    pg_guess = pg_prev
+    for _ in range(4):
+        _set_gas_state(gas, gas_state_prev)
+        pg_new = gas.pressure(d, pg_guess)
+        scale = max(1.0, abs(pg_new))
+        if abs(pg_new - pg_guess) <= 1.0e-7 * scale:
+            pg_guess = pg_new
+            break
+        pg_guess = 0.5 * (pg_new + pg_guess)
+
+    _set_gas_state(gas, gas_state_prev)
+    step = damper_force_step(
+        p,
+        gas,
+        tab_pos,
+        tab_sec,
+        d,
+        v,
+        delta_pc_prev,
+        delta_pd_prev,
+        pg_guess,
+        dt=dt_local,
+    )
+    return step, _gas_state(gas)
+
+
+def damper_force_step_implicit_adaptive(
+    p: MLGParamsSI,
+    gas: GasSpring,
+    tab_pos: np.ndarray,
+    tab_sec: np.ndarray,
+    d_start: float,
+    v_start: float,
+    d_end: float,
+    v_end: float,
+    delta_pc_prev: float,
+    delta_pd_prev: float,
+    pg_prev: float,
+) -> dict[str, float]:
+    """Chemin implicite/adaptatif sur le noyau gaz+hydraulique.
+
+    On avance par sous-pas adaptatifs sur [0, 1] en utilisant une estimation
+    d'erreur par comparaison 1 sous-pas vs 2 demi-sous-pas, puis on accepte la
+    solution raffinée (deux demi-sous-pas) quand l'erreur est sous seuil.
+    """
+    tol_rel = 0.02
+    min_h = 1.0 / 64.0
+    max_substeps = 256
+
+    tau = 0.0
+    h = 0.5
+    substeps = 0
+
+    delta_pc_state = delta_pc_prev
+    delta_pd_state = delta_pd_prev
+    pg_state = pg_prev
+    gas_state = _gas_state(gas)
+    last_step: dict[str, float] | None = None
+
+    d_span = d_end - d_start
+    v_span = v_end - v_start
+
+    while tau < 1.0 and substeps < max_substeps:
+        h = min(h, 1.0 - tau)
+        dt_local = h * p.it
+
+        seg_delta_pc = delta_pc_state
+        seg_delta_pd = delta_pd_state
+        seg_pg = pg_state
+        seg_gas = gas_state
+
+        tau_mid = tau + 0.5 * h
+        tau_end = tau + h
+        d_mid = d_start + tau_mid * d_span
+        v_mid = v_start + tau_mid * v_span
+        d_seg_end = d_start + tau_end * d_span
+        v_seg_end = v_start + tau_end * v_span
+
+        # Chemin A: un seul sous-pas.
+        one_step, _ = _damper_force_step_implicit_endpoint(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            d_seg_end,
+            v_seg_end,
+            dt_local,
+            seg_delta_pc,
+            seg_delta_pd,
+            seg_pg,
+            seg_gas,
+        )
+
+        # Chemin B: deux demi-sous-pas (solution retenue quand acceptée).
+        half_1, gas_half = _damper_force_step_implicit_endpoint(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            d_mid,
+            v_mid,
+            0.5 * dt_local,
+            seg_delta_pc,
+            seg_delta_pd,
+            seg_pg,
+            seg_gas,
+        )
+        half_2, gas_end = _damper_force_step_implicit_endpoint(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            d_seg_end,
+            v_seg_end,
+            0.5 * dt_local,
+            half_1["delta_pc"],
+            half_1["delta_pd"],
+            half_1["pg"],
+            gas_half,
+        )
+
+        # Estimateur d'erreur relatif sur l'effort total (grandeur pilotante).
+        scale = max(1.0, abs(one_step["ftot"]), abs(half_2["ftot"]))
+        err_rel = abs(half_2["ftot"] - one_step["ftot"]) / scale
+
+        if err_rel <= tol_rel or h <= min_h:
+            tau = tau_end
+            delta_pc_state = half_2["delta_pc"]
+            delta_pd_state = half_2["delta_pd"]
+            pg_state = half_2["pg"]
+            gas_state = gas_end
+            last_step = half_2
+            if err_rel < 0.3 * tol_rel:
+                h = min(1.0 - tau, h * 1.5)
+        else:
+            h *= 0.5
+
+        substeps += 1
+
+    if last_step is None:
+        _set_gas_state(gas, gas_state)
+        return damper_force_step(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            d_end,
+            v_end,
+            delta_pc_prev,
+            delta_pd_prev,
+            pg_prev,
+            dt=p.it,
+        )
+
+    _set_gas_state(gas, gas_state)
+    return last_step
+
+
 def run_mlg(
     p: MLGParamsSI,
     collector: ErrorCollector | None = None,
@@ -544,7 +725,21 @@ def run_mlg(
             d = entraxe_init - entraxe
 
             # Ressort gazeux + hydraulique (meme loi que l'export "Loi hydraulique").
-            if p.integrator == "rk4":
+            if p.damper_core_solver == "implicit_adaptive":
+                damp = damper_force_step_implicit_adaptive(
+                    p,
+                    gas,
+                    tab_pos,
+                    tab_sec,
+                    d_prev,
+                    v_prev,
+                    d,
+                    v,
+                    delta_pc,
+                    delta_pd,
+                    pg_prev,
+                )
+            elif p.integrator == "rk4":
                 damp = damper_force_step_rk4_coupled(
                     p,
                     gas,

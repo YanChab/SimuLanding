@@ -999,6 +999,12 @@ hydrauliques et de butée.
   évaluation couplée gaz/hydraulique sur 4 stages RK4 le long de la trajectoire
   locale du pas.
 
+**Solveur noyau gaz/hydraulique (optionnel)** :
+- `legacy` : chemin historique explicite ;
+- `implicit_adaptive` : tentative de résolution implicite locale en fin de
+  sous-pas avec raffinement adaptatif (estimateur 1 sous-pas vs 2 demi-sous-pas)
+  sur le noyau gaz/hydraulique.
+
 La mémoire interne hydraulique/gaz est toutefois réinjectée au niveau du pas
 global (mise à jour en fin de pas), ce qui reste un compromis pragmatique :
 amélioration de la cohérence intra-pas sans basculer vers un solveur implicite
@@ -1034,6 +1040,8 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
   d'adaptation automatique. Le mode `rk4` améliore le couplage intra-pas, mais
   ne remplace pas encore un schéma fully-coupled implicite/adaptatif sur toutes
   les variables internes (gaz/hydraulique).
+- **Mode implicite/adaptatif noyau** : activable pour étude numérique, mais non
+  retenu comme défaut à ce stade (coût CPU supérieur sur le cas nominal).
 - **Mécanisme plan** : la rotation du balancier est traitée dans le plan
   $X\!-\!Z$ ; l'obliquité en $Y$ est prise en compte uniquement par projection de
   l'effort d'amortisseur.
