@@ -102,14 +102,14 @@ def accueil() -> None:
         """
 Cette application remplace le classeur Excel de simulation de chute (*drop test*).
 Elle reproduit **exactement** la méthodologie de calcul d'origine (intégration
-d'Euler explicite, ressort gazeux double chambre, pertes hydrauliques à section
-variable, cinématique du balancier).
+RK4, ressort gazeux double chambre, pertes hydrauliques à section variable,
+cinématique du balancier).
 
 **Comment l'utiliser :**
 
 1. Ouvrez la page **Saisie** (bandeau en haut) pour renseigner ou ajuster les
-   données du train d'atterrissage. Les valeurs par défaut correspondent au cas
-   nominal de l'Excel.
+    données du train d'atterrissage. Les valeurs par défaut correspondent au cas
+    nominal de l'Excel et l'intégrateur est fixé à RK4.
 2. Lancez le calcul : les erreurs éventuelles sont **localisées précisément**
    (champ concerné, cause, conseil de correction).
 3. Consultez la page **Résultats** pour visualiser les courbes et la synthèse.

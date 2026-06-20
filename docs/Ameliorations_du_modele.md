@@ -101,28 +101,27 @@ Cas `nominal_0p5s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`) :
 
 | Mode | Temps CPU (s) | % implicite | ΔFz vs auto_precise (N) | ΔCourse vs auto_precise (mm) | ΔAcc vs auto_precise (g) |
 |---|---:|---:|---:|---:|---:|
-| `euler` | 0,438 | 0,000 % | 15,1 | 0,053 | 0,001 |
-| `legacy` | 1,045 | 0,000 % | 30,4 | 0,016 | 0,002 |
-| `auto_fast` | 1,093 | 1,598 % | 24,5 | 0,011 | 0,002 |
-| `auto_precise` | 1,664 | 34,366 % | 0,0 | 0,000 | 0,000 |
+| `euler` | 0,427 | 0,000 % | 15,1 | 0,053 | 0,001 |
+| `legacy` | 1,015 | 0,000 % | 30,4 | 0,016 | 0,002 |
+| `auto_fast` | 0,379 | 1,656 % | 621,0 | 0,556 | 0,051 |
+| `auto_precise` | 1,644 | 34,366 % | 0,0 | 0,000 | 0,000 |
 
 Cas `long_10s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`) :
 
 | Mode | Temps CPU (s) | % implicite | ΔFz vs auto_precise (N) | ΔCourse vs auto_precise (mm) | ΔAcc vs auto_precise (g) |
 |---|---:|---:|---:|---:|---:|
-| `euler` | 3,300 | 0,000 % | 15,1 | 0,053 | 0,001 |
-| `legacy` | 11,276 | 0,000 % | 30,4 | 0,016 | 0,002 |
-| `auto_fast` | 12,163 | 5,794 % | 24,5 | 0,011 | 0,002 |
-| `auto_precise` | 12,942 | 7,692 % | 0,0 | 0,000 | 0,000 |
+| `euler` | 3,138 | 0,000 % | 15,1 | 0,053 | 0,001 |
+| `legacy` | 10,932 | 0,000 % | 30,4 | 0,016 | 0,002 |
+| `auto_fast` | 2,095 | 5,638 % | 621,0 | 0,556 | 0,051 |
+| `auto_precise` | 12,540 | 7,692 % | 0,0 | 0,000 | 0,000 |
 
 Lecture rapide :
-- `euler` est le plus rapide en nominal court, mais ce n'est pas le chemin de
-  référence RK4/couplé.
+- `euler` reste la référence explicite simple, mais `auto_fast` est le plus
+  rapide sur les cas testés avec ce réglage.
 - `legacy` reste la base historique RK4 explicite, avec de faibles écarts face
   à `auto_precise` sur ce jeu d'essai.
-- `auto_fast` atteint l'objectif de précision (ΔFz < 50 N vs `auto_precise`)
-  au prix d'un temps de calcul comparable à `auto_precise`; le gain de vitesse
-  par rapport à `legacy` reste faible à ce niveau de précision.
+- `auto_fast` reprend un avantage net en temps de calcul sur `legacy` et
+  `auto_precise`, mais avec un écart de Fz plus élevé que le profil précis.
 - `auto_precise` est le mode le plus coûteux, utilisé ici comme référence de
   précision relative.
 
@@ -130,6 +129,25 @@ Lecture rapide :
 - Étendre l'intégration d'ordre supérieur à l'ensemble du pas couplé (ou
   introduire un sous-pas contrôlé) puis comparer systématiquement
   `euler`/`rk4` sur résidu énergétique, pics d'efforts et stabilité.
+
+**Comparatif intégrateur (profil `auto_fast`)**
+
+L'interface ne propose plus le choix Euler/RK4 ; le tableau ci-dessous reste
+un repère historique pour quantifier le surcoût de RK4.
+
+Cas `nominal_0p5s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`) :
+
+| Intégrateur | Temps CPU (s) | Effort vertical max Fz (N) | Course max (mm) | Accélération max (g) |
+|---|---:|---:|---:|---:|
+| Euler + `auto_fast` | 0,363 | 47469,8 | 173,143 | 3,541 |
+| RK4 + `auto_fast` | 0,369 | 47469,8 | 173,143 | 3,541 |
+
+Cas `long_10s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`) :
+
+| Intégrateur | Temps CPU (s) | Effort vertical max Fz (N) | Course max (mm) | Accélération max (g) |
+|---|---:|---:|---:|---:|
+| Euler + `auto_fast` | 1,977 | 47469,8 | 173,143 | 3,541 |
+| RK4 + `auto_fast` | 2,103 | 47469,8 | 173,143 | 3,541 |
 
 ### 1.2 Convergence réelle des solveurs internes — *impact moyen*
 

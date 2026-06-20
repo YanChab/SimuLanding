@@ -49,6 +49,9 @@ def inputs_from_dict(d: dict) -> MLGInputs:
     known = {f.name for f in fields(MLGInputs)}
     data = {k: v for k, v in d.items() if k in known}
 
+    if data.get("damper_core_solver") in {"legacy", "implicit_adaptive", "auto"}:
+        data["damper_core_solver"] = "auto_precise"
+
     for key in ("B", "A", "C", "R", "S"):
         if key in data and isinstance(data[key], dict):
             data[key] = Point3(**data[key])

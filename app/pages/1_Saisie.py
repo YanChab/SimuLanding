@@ -271,28 +271,14 @@ with col_chute:
         ("Durée simulée (s)", "temps_simu", inp.temps_simu),
         ("Pas de temps It (s)", "it", inp.it),
     ], "chute_editor")
-    _int_key = "f_integrator"
-    if _int_key not in st.session_state:
-        st.session_state[_int_key] = inp.integrator
-    st.selectbox(
-        "Intégrateur",
-        options=["euler", "rk4"],
-        key=_int_key,
-        help="Choix du schéma d'intégration temporelle (Euler ou RK4).",
-    )
     _core_key = "f_damper_core_solver"
     if _core_key not in st.session_state:
         st.session_state[_core_key] = inp.damper_core_solver
     st.selectbox(
         "Solveur noyau gaz/hydraulique",
-        options=["legacy", "implicit_adaptive", "auto", "auto_fast", "auto_precise"],
+        options=["auto_fast", "auto_precise"],
         key=_core_key,
-        help=(
-            "legacy: comportement historique; implicit_adaptive: essai de "
-            "résolution implicite locale avec sous-pas adaptatifs; auto: "
-            "hybride automatique équilibré; auto_fast: plus rapide; "
-            "auto_precise: plus prudent sur les erreurs."
-        ),
+        help="auto_fast: plus rapide; auto_precise: plus prudent sur les erreurs.",
     )
     # Champ dédié pour la température : un number_input accepte nativement les
     # valeurs négatives (température froide), contrairement à l'éditeur tabulaire.
@@ -645,7 +631,7 @@ def _build_inputs() -> MLGInputs:
     return MLGInputs(
         masse=g("masse"), vz=g("vz"), vx=g("vx"), lift=g("lift"),
         pitch=g("pitch"), roll=g("roll"), temps_simu=g("temps_simu"),
-        it=g("it"), integrator=str(st.session_state.get("f_integrator", inp.integrator)),
+        it=g("it"), integrator="rk4",
         damper_core_solver=str(st.session_state.get("f_damper_core_solver", inp.damper_core_solver)),
         temperature=g("temperature"),
         Dpis=g("Dpis"), Dbh=g("Dbh"), Dt=g("Dt"), Dp=g("Dp"),

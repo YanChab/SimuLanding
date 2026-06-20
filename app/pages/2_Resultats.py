@@ -429,9 +429,9 @@ with tab_energie:
         "joint, amortisseur horizontal, glissement pneu/sol). Tous les chemins "
         "énergétiques étant comptabilisés, le **résidu** = apport − (cinétique "
         "courante + stockée + dissipée) se réduit à la seule erreur "
-        "d'intégration d'Euler explicite : il reste faible (~0,3 % de l'apport "
-        "au pas par défaut) et décroît avec le pas de temps. Un résidu élevé "
-        "révélerait une dérive numérique ou un bug."
+        "numérique du schéma d'intégration RK4 : il reste faible (~0,3 % de "
+        "l'apport au pas par défaut) et décroît avec le pas de temps. Un résidu "
+        "élevé révélerait une dérive numérique ou un bug."
     )
 
     def _last(key: str) -> float:

@@ -175,7 +175,7 @@ class MLGInputs:
     temps_simu: float = 0.5        # s   (durée simulée)
     it: float = 0.0001             # s   (pas de temps)
     integrator: str = "euler"      # euler|rk4
-    damper_core_solver: str = "legacy"  # legacy|implicit_adaptive|auto|auto_fast|auto_precise
+    damper_core_solver: str = "auto_fast"  # auto_fast|auto_precise
     temperature: float = 25.0      # °C
 
     # --- Amortisseur (géométrie) ------------------------------------------ #
@@ -296,6 +296,11 @@ class MLGInputs:
         """Valide les entrées (niveau SAISIE). Retourne le collecteur d'erreurs."""
         c = collector or ErrorCollector()
 
+        # Compatibilité ascendante: les anciens modes sont ramenés vers le
+        # profil précis désormais exposé par défaut.
+        if self.damper_core_solver in {"legacy", "implicit_adaptive", "auto"}:
+            self.damper_core_solver = "auto_precise"
+
         def positive(value: float, field_name: str, label: str) -> None:
             c.check(
                 not (value > 0),
@@ -341,21 +346,14 @@ class MLGInputs:
             hint="Choisir 'euler' ou 'rk4'.",
         )
         c.check(
-            self.damper_core_solver not in {
-                "legacy",
-                "implicit_adaptive",
-                "auto",
-                "auto_fast",
-                "auto_precise",
-            },
+            self.damper_core_solver not in {"auto_fast", "auto_precise"},
             code="SOLVEUR_AMORTISSEUR_INVALIDE",
             message=(
-                "Le solveur noyau amortisseur doit être 'legacy', "
-                "'implicit_adaptive', 'auto', 'auto_fast' ou 'auto_precise' "
-                f"(reçu : {self.damper_core_solver})."
+                "Le solveur noyau amortisseur doit être 'auto_fast' ou "
+                f"'auto_precise' (reçu : {self.damper_core_solver})."
             ),
             field="damper_core_solver",
-            hint="Choisir 'legacy', 'implicit_adaptive', 'auto', 'auto_fast' ou 'auto_precise'.",
+            hint="Choisir 'auto_fast' ou 'auto_precise'.",
         )
 
         # Géométrie amortisseur

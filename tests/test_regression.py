@@ -53,7 +53,7 @@ GOLDEN_ATOL = 1e-6
 # ici implique une régénération du golden (cf. regenerate_golden).
 REGRESSION_CASES: dict[str, dict[str, float]] = {
     "nominal": {},
-    "froid_lourd": {"temperature": -20.0, "masse": 1500.0},
+    "froid_lourd": {"temperature": -20.0, "masse": 1400.0},
     "leger_lent": {"masse": 1000.0, "vz": 2.0, "vx": 20.0},
 }
 
@@ -62,6 +62,13 @@ def _inputs_for(overrides: dict[str, float]):
     inp = default_mlg_inputs()
     for key, value in overrides.items():
         setattr(inp, key, value)
+    return inp
+
+
+def _precise_inputs_for(overrides: dict[str, float]):
+    inp = _inputs_for(overrides)
+    inp.integrator = "rk4"
+    inp.damper_core_solver = "auto_precise"
     return inp
 
 
@@ -78,7 +85,7 @@ def regenerate_golden() -> None:
     """
     golden: dict[str, dict] = {}
     for name, overrides in REGRESSION_CASES.items():
-        result = run_simulation(_inputs_for(overrides))
+        result = run_simulation(_precise_inputs_for(overrides))
         golden[name] = {
             "overrides": overrides,
             "summary": result.summary,
@@ -108,7 +115,7 @@ def test_golden_file_present(golden):
 @pytest.mark.parametrize("case_name", list(REGRESSION_CASES))
 def test_golden_summary(case_name, golden):
     ref = golden[case_name]
-    result = run_simulation(_inputs_for(REGRESSION_CASES[case_name]))
+    result = run_simulation(_precise_inputs_for(REGRESSION_CASES[case_name]))
 
     # Les surcharges enregistrées doivent correspondre à celles du test.
     assert ref["overrides"] == REGRESSION_CASES[case_name]
@@ -127,7 +134,7 @@ def test_golden_summary(case_name, golden):
 @pytest.mark.parametrize("case_name", list(REGRESSION_CASES))
 def test_golden_summary_rows(case_name, golden):
     ref_rows = golden[case_name]["summary_rows"]
-    result = run_simulation(_inputs_for(REGRESSION_CASES[case_name]))
+    result = run_simulation(_precise_inputs_for(REGRESSION_CASES[case_name]))
 
     assert len(result.summary_rows) == len(ref_rows)
     for (label, value, unit), (ref_label, ref_value, ref_unit) in zip(

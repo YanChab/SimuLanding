@@ -363,14 +363,7 @@ def _select_damper_core_solver(
         return "legacy"
 
     if p.damper_core_solver == "auto_precise":
-        near_stop = d <= 0.008 * p.course or d >= 0.992 * p.course
-        fast_motion = abs(v) >= 1.4
-        gas_loaded = abs(pg_prev - p.Pinitbp) >= 9.0 * p.Pinitbp
-        force_spike = abs(ftot_prev) >= 0.85 * (p.St * p.Pinitbp)
-        score = int(near_stop) + int(fast_motion) + int(gas_loaded) + int(force_spike)
-        if near_stop or score >= 2:
-            return "implicit_adaptive"
-        return "legacy"
+        return "implicit_adaptive"
 
     near_stop = d <= 0.005 * p.course or d >= 0.995 * p.course
     fast_motion = abs(v) >= 1.8
@@ -804,7 +797,7 @@ def run_mlg(
                 else 1.0
             )
             if solver_mode == "implicit_adaptive":
-                min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 64.0
+                min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 128.0
                 damp = damper_force_step_implicit_adaptive(
                     p,
                     gas,
