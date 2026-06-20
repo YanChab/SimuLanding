@@ -628,7 +628,8 @@ with tab_anim:
     else:
         st.caption(
             "Vue de côté (plan X-Z, en mm) du train à balancier pendant la chute. "
-            "Utilisez ▶ pour lancer l'animation ou le curseur pour parcourir le temps."
+            "Utilisez les boutons de vitesse (1x, 0.5x, 0.25x) et le curseur pour "
+            "parcourir le temps."
         )
 
         # Positions en mm (le moteur les stocke en m).
@@ -647,6 +648,21 @@ with tab_anim:
         idx = list(range(0, n, stride))
         if idx[-1] != n - 1:
             idx.append(n - 1)
+
+        # Durée de frame en "temps réel" sur les images affichées.
+        if len(idx) > 1:
+            sampled_dt_ms = float(np.mean(np.diff(gt[idx])) * 1000.0)
+        else:
+            sampled_dt_ms = 40.0
+        real_time_frame_ms = max(1, int(round(sampled_dt_ms)))
+
+        def _anim_args(speed_factor: float) -> list[object]:
+            duration = max(1, int(round(real_time_frame_ms / speed_factor)))
+            return [None, dict(
+                frame=dict(duration=duration, redraw=True),
+                fromcurrent=True,
+                transition=dict(duration=0),
+            )]
 
         theta = np.linspace(0.0, 2.0 * np.pi, 48)
 
@@ -704,22 +720,23 @@ with tab_anim:
             paper_bgcolor="white",
             xaxis=anim_xaxis,
             yaxis=anim_yaxis,
-            margin=dict(l=10, r=10, t=30, b=10),
+            # Reserve bottom space for animation controls to avoid overlap.
+            margin=dict(l=10, r=10, t=30, b=140),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             updatemenus=[dict(
-                type="buttons", showactive=False, x=0.0, y=-0.08, xanchor="left",
+                type="buttons", showactive=False, x=0.0, y=0.02, xanchor="left",
                 direction="left",
                 buttons=[
-                    dict(label="▶ Lecture", method="animate",
-                         args=[None, dict(frame=dict(duration=40, redraw=True),
-                                          fromcurrent=True, transition=dict(duration=0))]),
+                    dict(label="▶ 1x (réel)", method="animate", args=_anim_args(1.0)),
+                    dict(label="▶ 0.5x", method="animate", args=_anim_args(0.5)),
+                    dict(label="▶ 0.25x", method="animate", args=_anim_args(0.25)),
                     dict(label="⏸ Pause", method="animate",
                          args=[[None], dict(frame=dict(duration=0, redraw=False),
                                             mode="immediate")]),
                 ],
             )],
             sliders=[dict(
-                active=0, x=0.0, len=1.0, y=-0.02,
+                active=0, x=0.0, len=1.0, y=-0.08,
                 currentvalue=dict(prefix="t = ", suffix=" ms"),
                 steps=[dict(method="animate", label=f"{gt[i]*1000:.0f}",
                             args=[[f"{gt[i]*1000:.0f}"],
