@@ -344,19 +344,19 @@ def _select_damper_core_solver(
     """Sélectionne le noyau de solveur selon un critère de raideur simple.
 
     En mode ``auto``, on réserve ``implicit_adaptive`` aux zones où la loi est
-    la plus raide: vitesse importante, forte compression de gaz, proximité de
-    butée ou effort déjà élevé au pas précédent.
+    la plus raide: proximité immédiate de butée, ou combinaison de plusieurs
+    indices forts (vitesse, compression gaz, effort déjà élevé).
     """
     if p.damper_core_solver != "auto":
         return p.damper_core_solver
 
-    near_stop = d <= 0.01 * p.course or d >= 0.99 * p.course
-    fast_motion = abs(v) >= 1.25
-    gas_loaded = abs(pg_prev - p.Pinitbp) >= 10.0 * p.Pinitbp
-    force_spike = abs(ftot_prev) >= 0.90 * (p.St * p.Pinitbp)
+    near_stop = d <= 0.005 * p.course or d >= 0.995 * p.course
+    fast_motion = abs(v) >= 1.8
+    gas_loaded = abs(pg_prev - p.Pinitbp) >= 12.0 * p.Pinitbp
+    force_spike = abs(ftot_prev) >= 1.05 * (p.St * p.Pinitbp)
 
     score = int(near_stop) + int(fast_motion) + int(gas_loaded) + int(force_spike)
-    if near_stop or score >= 2:
+    if near_stop or score >= 3:
         return "implicit_adaptive"
     return "legacy"
 

@@ -76,9 +76,10 @@ manuellement (typiquement $10^{-4}$ s).
 - Le mode `auto` sert de compromis pratique: il conserve le coût du mode
   historique sur les phases calmes et n'active l'implicite que dans les zones
   détectées comme raides.
-- Sur le cas nominal, l'hybride reste sensiblement plus léger que `implicit_adaptive`
-  pur (environ ×1,5 vs `legacy` au dernier benchmark), tout en conservant des
-  écarts de sortie très faibles.
+- Après resserrage de l'heuristique, `auto` est revenu quasiment au coût du
+  chemin historique: environ ×1,01 vs `legacy` sur le cas nominal et ×1,01 à
+  ×1,02 sur le cas plus raide encore valide, tout en restant très loin du coût
+  du noyau implicite pur.
 
 **Prochaine sous-étape.**
 - Étendre l'intégration d'ordre supérieur à l'ensemble du pas couplé (ou

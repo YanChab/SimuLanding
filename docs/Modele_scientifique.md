@@ -1046,7 +1046,8 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
   retenu comme défaut à ce stade (coût CPU supérieur sur le cas nominal).
 - **Mode hybride automatique** : compromis pragmatique entre coût et robustesse;
   il n'est qu'une heuristique locale, pas une garantie de coût minimal global,
-  mais il réduit nettement le surcoût du mode implicite pur sur le cas nominal.
+  mais son réglage actuel ramène le coût quasiment au niveau du chemin
+  historique tout en réservant l'implicite aux zones les plus raides.
 - **Mécanisme plan** : la rotation du balancier est traitée dans le plan
   $X\!-\!Z$ ; l'obliquité en $Y$ est prise en compte uniquement par projection de
   l'effort d'amortisseur.

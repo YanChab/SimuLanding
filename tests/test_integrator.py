@@ -59,6 +59,33 @@ def _run_auto_case(dt: float = 1.0e-4):
     )
 
 
+def _count_auto_implicit_steps(
+    masse: float,
+    vz: float,
+    dt: float,
+    temperature: float = 25.0,
+) -> tuple[int, int]:
+    inp = default_mlg_inputs()
+    inp.integrator = "rk4"
+    inp.damper_core_solver = "auto"
+    inp.it = dt
+    inp.masse = masse
+    inp.vz = vz
+    inp.temperature = temperature
+    result = run_simulation(inp)
+    si = inp.to_si()
+    df = result.df
+    implicit = 0
+    for i in range(len(df)):
+        d = float(df[OUTPUT_COLUMNS["mlg_d"]].iloc[i])
+        v = float(df[OUTPUT_COLUMNS["mlg_v"]].iloc[i])
+        pg = float(df[OUTPUT_COLUMNS["pg"]].iloc[i]) * 1e5
+        ftot_prev = float(df[OUTPUT_COLUMNS["mlg_ftot"]].iloc[i - 1]) if i > 0 else 0.0
+        if _select_damper_core_solver(si, d, v, pg, ftot_prev) == "implicit_adaptive":
+            implicit += 1
+    return implicit, len(df)
+
+
 def test_invalid_integrator_is_rejected():
     inp = default_mlg_inputs()
     inp.integrator = "invalid"
@@ -87,7 +114,7 @@ def test_auto_solver_heuristic_switches_on_stiff_states():
     inp = default_mlg_inputs()
     inp.damper_core_solver = "auto"
     si = inp.to_si()
-    assert _select_damper_core_solver(si, 0.001, 1.50, si.Pinitbp * 11.0, si.St * si.Pinitbp) == "implicit_adaptive"
+    assert _select_damper_core_solver(si, 0.0005, 2.00, si.Pinitbp * 13.0, si.St * si.Pinitbp * 1.2) == "implicit_adaptive"
     assert _select_damper_core_solver(si, 0.10, 0.20, si.Pinitbp * 1.2, 0.0) == "legacy"
 
 
@@ -153,3 +180,17 @@ def test_auto_solver_runs_and_stays_close_to_legacy_on_nominal_case():
     assert abs(fz_auto - fz_legacy) <= 0.01 * fz_legacy
     assert abs(course_auto - course_legacy) <= 0.5
     assert abs(acc_auto - acc_legacy) <= 0.05
+
+
+def test_auto_solver_stays_efficient_on_stiffer_valid_case():
+    fz_legacy, course_legacy, acc_legacy, res_legacy = _run_case_with_solver(
+        "rk4", 5.0e-5, "legacy"
+    )
+    fz_auto, course_auto, acc_auto, res_auto = _run_auto_case(5.0e-5)
+
+    # L'heuristique auto doit rester très proche du chemin historique tout en
+    # évitant le coût du noyau implicite pur.
+    assert abs(fz_auto - fz_legacy) <= 0.01 * fz_legacy
+    assert abs(course_auto - course_legacy) <= 0.5
+    assert abs(acc_auto - acc_legacy) <= 0.05
+    assert res_auto <= 1.01 * res_legacy
