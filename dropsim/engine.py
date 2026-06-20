@@ -121,12 +121,25 @@ GEOMETRY_KEYS: tuple[str, ...] = (
 )
 
 
-def _endstop(d: float, course: float) -> float:
-    """Effort de butée (raideur 1e8 N/m) hors de la plage [0, course]."""
+def _endstop(
+    d: float,
+    course: float,
+    smooth_len: float = 2.0e-3,
+    k_endstop: float = 1.0e8,
+) -> float:
+    """Effort de butée lissé hors plage [0, course].
+
+    Loi progressive ``k*x*(1-exp(-x/s))`` avec même asymptote qu'une loi
+    linéaire en grande pénétration et pente nulle à l'entrée en contact.
+    """
     if d > course:
-        return (d - course) * 1.0e8
+        x = d - course
+        s = max(smooth_len, 1.0e-9)
+        return k_endstop * x * (1.0 - math.exp(-x / s))
     if d < 0.0:
-        return d * 1.0e8
+        x = -d
+        s = max(smooth_len, 1.0e-9)
+        return -k_endstop * x * (1.0 - math.exp(-x / s))
     return 0.0
 
 
@@ -175,7 +188,11 @@ def damper_force_step(
         )
     else:
         ffrijoi = 0.0
-    ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + _endstop(d, p.course)
+    ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + _endstop(
+        d,
+        p.course,
+        smooth_len=p.endstop_smooth,
+    )
     fhyd = p.Sc * (pc - pg) - p.Sd * (pd - pg)
     return {
         "pg": pg,
@@ -279,7 +296,11 @@ def run_mlg(
     for _ in range(100000):
         d -= 1.0e-8
         pg = gas.pressure(d, pgtamp)
-        ftot = p.St * pg + _endstop(d, p.course)  # v = 0 → ΔP = 0, FFriJoi = 0
+        ftot = p.St * pg + _endstop(
+            d,
+            p.course,
+            smooth_len=p.endstop_smooth,
+        )  # v = 0 → ΔP = 0, FFriJoi = 0
         if abs(ftot) < 1.0:
             stabilized = True
             break
@@ -486,7 +507,11 @@ def run_mlg(
         #     l'énergie d'avancement (qui lance la roue et la freine au sol).
         dd = d - d_prev
         e_gas_acc += fgas * dd
-        e_endstop_acc += _endstop(d, p.course) * dd
+        e_endstop_acc += _endstop(
+            d,
+            p.course,
+            smooth_len=p.endstop_smooth,
+        ) * dd
         e_tyre_acc += ftyre * (defl - defl_prev)
         # Dissipations de l'amortisseur : on utilise le travail SIGNÉ de chaque
         # composante d'effort le long de la course (F·dd) et non |F·v|·dt. Comme

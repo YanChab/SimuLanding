@@ -439,6 +439,17 @@ with col_amort:
         ("Friction sèche joint fc (N/mm)", "fc", inp.fc),
         ("Coeff. friction pression fh", "fh", inp.fh),
     ], "amort_editor")
+
+    # Paramètre de butée lissée (mode unique du modèle).
+    st.markdown("**Butée de course**")
+    num(
+        "Longueur de lissage butée (mm)",
+        "endstop_smooth_mm",
+        inp.endstop_smooth_mm,
+        step=0.1,
+        help="Lissage progressif de la butée de fin de course.",
+        min_value=1.0e-6,
+    )
 with col_gaz:
     st.subheader("Ressort gazeux")
     num_table([
@@ -622,6 +633,7 @@ def _build_inputs() -> MLGInputs:
         DTrouPis=g("DTrouPis"), NbTrouPis=g("NbTrouPis"),
         HauteurPisBh=g("HauteurPisBh"), DTrouDiap=g("DTrouDiap"),
         NbTrouDiap=g("NbTrouDiap"),
+        endstop_smooth_mm=g("endstop_smooth_mm"),
         tore=g("tore"), fc=g("fc"), fh=g("fh"),
         Pinitbp=g("Pinitbp"), Vgbp=g("Vgbp"), Vh=g("Vh"),
         Pinithp=g("Pinithp"), Vghp=g("Vghp"), gamma=g("gamma"),

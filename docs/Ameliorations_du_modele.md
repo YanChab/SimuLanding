@@ -101,9 +101,61 @@ paramétrable) pour décider de l'activation des termes dépendant de la vitesse
 **Constat.** L'exposant polytropique est **fixe** ($\gamma = 1{,}4$). En réalité
 $\gamma$ varie entre compression rapide (adiabatique) et lente (isotherme).
 
-**Proposition.** Modèle thermodynamique avec **échange de chaleur** (γ effectif
-fonction de la vitesse de compression / d'un temps caractéristique), pour
-affiner les pics de pression.
+**Clarification physique (état de l'art).** En pratique, l'effet de la dynamique
+(vitesse de compression, durée du choc, échanges thermiques avec la paroi) agit
+surtout sur l'**exposant polytropique effectif** $n_{eff}$ de la loi
+$P\,V^{n_{eff}}=\text{cte}$, et non sur le $\gamma$ thermodynamique pur
+($\gamma = C_p/C_v$) pris isolément. Le comportement observé est :
+- régime lent, bien refroidi : $n_{eff} \rightarrow 1$ (quasi isotherme) ;
+- régime rapide, peu d'échange thermique : $n_{eff} \rightarrow \gamma(T)$
+  (quasi adiabatique).
+
+**Proposition (niveau 1, faible risque).** Conserver l'architecture actuelle et
+introduire un $n_{eff}$ dépendant d'un rapport de temps caractéristiques :
+
+$$
+n_{eff} = 1 + (\gamma(T)-1)\,\frac{\tau_{th}}{\tau_{th}+\tau_c},
+\quad
+{}\tau_c = \frac{V}{|\dot V|+\varepsilon}
+$$
+
+avec mise a jour pression par pas :
+
+$$
+P_{k+1}=P_k\left(\frac{V_k}{V_{k+1}}\right)^{n_{eff,k}}
+$$
+
+Ce formalisme reproduit naturellement la transition lent/rapide sans changer le
+reste du solveur.
+
+**Proposition (niveau 2, fidelite accrue).** Ajouter $\gamma(T)$ (table ou loi
+analytique simple) afin de capturer la variation de proprietes du gaz avec la
+temperature.
+
+**Proposition (niveau 3, modele thermo complet).** Remplacer la loi polytropique
+imposee par une equation d'energie gaz :
+
+$$
+m c_v(T)\frac{dT}{dt} = -P\frac{dV}{dt} - hA\,(T-T_{paroi}),
+\quad
+P=\frac{mRT}{V}
+$$
+
+Dans ce cas, $n_{eff}$ devient emergent et n'est plus un parametre direct.
+
+**Plan d'integration recommande (differe).**
+1. **Ne pas activer maintenant** dans le mode par defaut ; documenter et garder
+  le mode actuel pour la regression VBA.
+2. Ajouter un drapeau de configuration, par exemple
+  `gas_model = "legacy_gamma_constant" | "dynamic_polytropic" | "thermo_coupled"`.
+3. Commencer par `dynamic_polytropic` (1 parametre principal $\tau_{th}$ a
+  calibrer), puis envisager `thermo_coupled` uniquement si les ecarts essais
+  restent significatifs.
+
+**Impact attendu.** Amelioration de la prediction des pics de pression et de la
+raideur apparente du ressort gaz quand on change l'echelle temporelle de
+l'impact, sans perturber les cas deja valides tant que le mode legacy reste
+actif.
 
 ### 3.2 Friction : stick-slip et bagues de guidage — *impact moyen*
 

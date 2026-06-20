@@ -730,8 +730,8 @@ contact effective du joint sur laquelle agit la pression.
 
 L'effort axial total transmis par l'amortisseur résulte de la somme des
 contributions de pression (compression, détente, gaz) et de friction, avec une
-**butée de fin de course** modélisée par un ressort très raide
-($K = 10^{8}\ \text{N·m}^{-1}$) hors de l'intervalle $[0, \text{course}]$ :
+**butée de fin de course lissée** (active hors de l'intervalle
+$[0, \text{course}]$) :
 
 $$
 F_{tot} = S_c\,P_c - S_d\,P_d + S_{bh}\,P_g + F_{joint} + F_{butée}(d)
@@ -742,11 +742,22 @@ avec
 $$
 F_{butée}(d) =
 \begin{cases}
-d \cdot K & \text{si } d < 0 \\
 0 & \text{si } 0 \le d \le \text{course} \\
-(d - \text{course})\cdot K & \text{si } d > \text{course}
+\phantom{-}K\,x\left(1-e^{-x/s}\right) & \text{si } d > \text{course},\ x=d-\text{course} \\
+-K\,x\left(1-e^{-x/s}\right) & \text{si } d < 0,\ x=-d
 \end{cases}
 $$
+
+où :
+
+- $K = 10^{8}\ \text{N·m}^{-1}$ est la raideur asymptotique ;
+- $s$ est une longueur de lissage (paramètre utilisateur,
+  `endstop_smooth_mm`, 2 mm par défaut).
+
+Cette loi conserve la même asymptote qu'une butée linéaire en grande
+pénétration, tout en imposant une pente nulle à l'entrée en contact pour réduire
+les chocs numériques. Le mode historique « butée linéaire pure » n'est plus
+utilisé.
 
 L'**effort hydraulique** isolé (sans gaz ni friction) vaut :
 

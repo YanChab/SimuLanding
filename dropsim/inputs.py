@@ -192,6 +192,7 @@ class MLGInputs:
     HauteurPisBh: float = 10.0     # mm  hauteur du piston de BH
     DTrouDiap: float = 1.5         # mm  diamètre trou du clapet (diaphragme)
     NbTrouDiap: float = 1.0        # -   nombre de trous clapet
+    endstop_smooth_mm: float = 2.0  # mm  longueur caractéristique de lissage
 
     # --- Joint d'étanchéité (friction) ------------------------------------ #
     # Friction du joint dépendant de la pression et de la taille du joint
@@ -341,6 +342,7 @@ class MLGInputs:
             ("DTrouDiap", "Le diamètre trou clapet"),
             ("NbTrouPis", "Le nombre de trous piston"),
             ("NbTrouDiap", "Le nombre de trous clapet"),
+            ("endstop_smooth_mm", "La longueur de lissage de butée"),
         ]:
             positive(getattr(self, name), name, label)
 
@@ -519,6 +521,7 @@ class MLGInputs:
             HauteurPisBh=self.HauteurPisBh * U.MM_TO_M,
             DTrouDiap=self.DTrouDiap * U.MM_TO_M,
             NbTrouDiap=self.NbTrouDiap,
+            endstop_smooth=self.endstop_smooth_mm * U.MM_TO_M,
             ASeal=(self.Dt + 2.0 * self.tore) * U.MM_TO_M,  # Ø joint = Dt + 2·tore
             fc=self.fc * 1000.0,  # N/mm -> N/m
             fh=self.fh,
@@ -586,6 +589,7 @@ class MLGParamsSI:
     HauteurPisBh: float
     DTrouDiap: float
     NbTrouDiap: float
+    endstop_smooth: float
 
     ASeal: float
     fc: float
