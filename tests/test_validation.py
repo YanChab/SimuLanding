@@ -16,6 +16,7 @@ import pandas as pd
 import pytest
 
 from dropsim import default_mlg_inputs, run_simulation
+from dropsim.simulation import _negative_pressure_warnings
 
 REF_CSV = os.path.join(
     os.path.dirname(__file__), "..", "_extract", "reference", "Results_MLG.csv"
@@ -61,3 +62,31 @@ def test_against_reference_curve(result):
 
     assert result.summary["Effort vertical max Fz (N)"] == pytest.approx(ref_fz, rel=FZ_TOL_REL)
     assert result.summary["Course max (mm)"] == pytest.approx(ref_d, rel=0.01)
+
+
+def test_negative_pressure_warning_detects_each_channel():
+    full = {
+        "temps": np.array([0.0, 0.01, 0.02]),
+        "pg": np.array([10.0, -0.5, 11.0]),
+        "pc": np.array([20.0, 19.0, -1.2]),
+        "pd": np.array([5.0, -0.2, 6.0]),
+    }
+
+    warnings = _negative_pressure_warnings(full)
+    fields = {w.field for w in warnings}
+
+    assert len(warnings) == 3
+    assert fields == {"pg", "pc", "pd"}
+    assert all(w.code == "PRESSION_NEGATIVE" for w in warnings)
+
+
+def test_negative_pressure_warning_ignores_positive_series():
+    full = {
+        "temps": np.array([0.0, 0.01, 0.02]),
+        "pg": np.array([10.0, 10.2, 11.0]),
+        "pc": np.array([20.0, 19.0, 18.8]),
+        "pd": np.array([5.0, 5.1, 6.0]),
+    }
+
+    warnings = _negative_pressure_warnings(full)
+    assert warnings == []

@@ -39,6 +39,47 @@ def _subsample(data: dict[str, np.ndarray], max_points: int = 1000) -> dict[str,
     return {k: v[::step] for k, v in data.items()}
 
 
+def _negative_pressure_warnings(full: dict[str, np.ndarray]) -> list[SimError]:
+    """Détecte les pressions négatives et génère des avertissements explicites."""
+    warnings: list[SimError] = []
+    temps = full.get("temps")
+
+    pressure_specs = (
+        ("pg", "pression gaz"),
+        ("pc", "pression compression"),
+        ("pd", "pression détente"),
+    )
+
+    for key, label in pressure_specs:
+        series = full.get(key)
+        if series is None or len(series) == 0:
+            continue
+        idx_min = int(np.argmin(series))
+        min_val = float(series[idx_min])
+        if min_val >= 0.0:
+            continue
+
+        t_s = float(temps[idx_min]) if temps is not None and len(temps) > idx_min else float("nan")
+        warnings.append(
+            SimError(
+                code="PRESSION_NEGATIVE",
+                message=(
+                    f"La {label} devient négative: {min_val:.3f} bar "
+                    f"(t = {t_s*1000.0:.2f} ms)."
+                ),
+                level=ErrorLevel.RUNTIME,
+                field=key,
+                hint=(
+                    "Vérifier les conditions d'entrée (pression initiale, température, "
+                    "masse, vitesse d'impact) et le mode de calcul."
+                ),
+                context={"key": key, "min_bar": min_val, "index": idx_min, "time_s": t_s},
+            )
+        )
+
+    return warnings
+
+
 def run_simulation(inputs: MLGInputs, max_points: int = 1000) -> SimulationResult:
     """Valide, exécute et synthétise une simulation de drop test MLG.
 
@@ -100,11 +141,14 @@ def run_simulation(inputs: MLGInputs, max_points: int = 1000) -> SimulationResul
 
     summary_rows = _build_summary_rows(full, inputs)
 
+    warnings = list(engine_out.warnings)
+    warnings.extend(_negative_pressure_warnings(full))
+
     return SimulationResult(
         df=df,
         summary=summary,
         n_steps=engine_out.n_steps,
-        warnings=engine_out.warnings,
+        warnings=warnings,
         geometry=geom_df,
         summary_rows=summary_rows,
     )

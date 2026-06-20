@@ -382,43 +382,61 @@ with tab_torseur:
         "réaction sol."
     )
 
-    def _amax(key: str) -> float:
-        return float(np.abs(df[COL[key]]).max())
+    torseur_keys = [
+        "tors_res_norm",
+        "torsC_fx",
+        "torsC_fz",
+        "torsB_fx",
+        "torsB_fz",
+        "torsB_mx",
+        "torsB_mz",
+    ]
+    missing_cols = [COL[k] for k in torseur_keys if COL[k] not in df.columns]
 
-    m1, m2 = st.columns(2)
-    m1.metric("‖Résultante‖ max", f"{_amax('tors_res_norm'):.0f} N")
-    m2.metric("|Moment au pivot B| max", f"{max(_amax('torsB_mx'), _amax('torsB_mz')):.0f} N·m")
+    if missing_cols:
+        st.info(
+            "Données torseur indisponibles pour ce résultat (simulation sauvegardée "
+            "avec une ancienne version du modèle). Relancez un calcul pour afficher "
+            "cet onglet."
+        )
+    else:
+        def _amax(key: str) -> float:
+            return float(np.abs(df[COL[key]]).max())
 
-    st.plotly_chart(
-        line(
-            t,
-            [
-                ("Effort rotule C — X", df[COL["torsC_fx"]]),
-                ("Effort rotule C — Z", df[COL["torsC_fz"]]),
-                ("Effort pivot B — X", df[COL["torsB_fx"]]),
-                ("Effort pivot B — Z", df[COL["torsB_fz"]]),
-            ],
-            "Efforts de liaison aux attaches C (rotule) et B (pivot)",
-            "Temps (s)",
-            "Effort (N)",
-        ),
-        width="stretch",
-        config={"responsive": True},
-    )
-    st.plotly_chart(
-        line(
-            t,
-            [
-                ("Moment X au pivot B", df[COL["torsB_mx"]]),
-                ("Moment Z au pivot B", df[COL["torsB_mz"]]),
-            ],
-            "Moments de liaison (axes X et Z) repris par le pivot B",
-            "Temps (s)",
-            "Moment (N·m)",
-        ),
-        width="stretch",
-        config={"responsive": True},
-    )
+        m1, m2 = st.columns(2)
+        m1.metric("‖Résultante‖ max", f"{_amax('tors_res_norm'):.0f} N")
+        m2.metric("|Moment au pivot B| max", f"{max(_amax('torsB_mx'), _amax('torsB_mz')):.0f} N·m")
+
+        st.plotly_chart(
+            line(
+                t,
+                [
+                    ("Effort rotule C — X", df[COL["torsC_fx"]]),
+                    ("Effort rotule C — Z", df[COL["torsC_fz"]]),
+                    ("Effort pivot B — X", df[COL["torsB_fx"]]),
+                    ("Effort pivot B — Z", df[COL["torsB_fz"]]),
+                ],
+                "Efforts de liaison aux attaches C (rotule) et B (pivot)",
+                "Temps (s)",
+                "Effort (N)",
+            ),
+            width="stretch",
+            config={"responsive": True},
+        )
+        st.plotly_chart(
+            line(
+                t,
+                [
+                    ("Moment X au pivot B", df[COL["torsB_mx"]]),
+                    ("Moment Z au pivot B", df[COL["torsB_mz"]]),
+                ],
+                "Moments de liaison (axes X et Z) repris par le pivot B",
+                "Temps (s)",
+                "Moment (N·m)",
+            ),
+            width="stretch",
+            config={"responsive": True},
+        )
 
 with tab_energie:
     st.caption(
@@ -523,8 +541,9 @@ with tab_perso:
     if x_widget_key not in st.session_state:
         st.session_state[x_widget_key] = cfg["x"]
 
-    x_index = options.index(st.session_state[x_widget_key]) if st.session_state[x_widget_key] in options else 0
-    x_label = st.selectbox("Abscisse (X)", options, index=x_index, key=x_widget_key)
+    if st.session_state[x_widget_key] not in options:
+        st.session_state[x_widget_key] = options[0]
+    x_label = st.selectbox("Abscisse (X)", options, key=x_widget_key)
 
     selections: list[tuple[str, bool]] = []
     for i in range(5):
@@ -540,9 +559,8 @@ with tab_perso:
 
         if st.session_state[y_widget_key] not in opts:
             st.session_state[y_widget_key] = opts[0]
-        idx = opts.index(st.session_state[y_widget_key])
 
-        y_sel = c_curve.selectbox(f"Courbe {i + 1}", opts, index=idx, key=y_widget_key)
+        y_sel = c_curve.selectbox(f"Courbe {i + 1}", opts, key=y_widget_key)
         on_right = c_axis.checkbox("Axe droit", key=axis_widget_key)
         if y_sel != none_label:
             selections.append((y_sel, on_right))
