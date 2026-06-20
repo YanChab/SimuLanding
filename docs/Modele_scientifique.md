@@ -1061,6 +1061,24 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
   plus de 4 s sur les cas 10 s testés, soit largement plus de 2× plus vite que
   `legacy`, alors que `auto_precise` augmente nettement le temps de calcul pour
   activer plus souvent le noyau implicite.
+- **Comparatif vitesse / précision (référence = `auto_precise`)** :
+  cas `nominal_0p5s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`)
+
+  | Mode | Temps CPU (s) | ΔFz (N) | ΔCourse (mm) | ΔAcc (g) |
+  |---|---:|---:|---:|---:|
+  | `euler` | 0,435 | 15,1 | 0,053 | 0,001 |
+  | `legacy` | 1,036 | 30,4 | 0,016 | 0,002 |
+  | `auto_fast` | 0,473 | 557,4 | 0,418 | 0,045 |
+  | `auto_precise` | 1,723 | 0,0 | 0,000 | 0,000 |
+
+  cas `long_10s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`)
+
+  | Mode | Temps CPU (s) | ΔFz (N) | ΔCourse (mm) | ΔAcc (g) |
+  |---|---:|---:|---:|---:|
+  | `euler` | 3,232 | 15,1 | 0,053 | 0,001 |
+  | `legacy` | 11,311 | 30,4 | 0,016 | 0,002 |
+  | `auto_fast` | 4,284 | 557,4 | 0,418 | 0,045 |
+  | `auto_precise` | 12,958 | 0,0 | 0,000 | 0,000 |
 - **Mécanisme plan** : la rotation du balancier est traitée dans le plan
   $X\!-\!Z$ ; l'obliquité en $Y$ est prise en compte uniquement par projection de
   l'effort d'amortisseur.

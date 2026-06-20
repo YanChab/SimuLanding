@@ -92,6 +92,38 @@ manuellement (typiquement $10^{-4}$ s).
   Ordres de grandeur observés : ~4,08 s vs 10,52 s (nominal), ~4,53 s vs
   11,73 s (cas plus lourd), contre ~12,0 à 13,1 s pour `auto_precise`.
 
+**Comparatif synthétique (vitesse + précision)**
+
+Référence de précision retenue : `auto_precise` (écarts absolus reportés).
+
+Cas `nominal_0p5s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`) :
+
+| Mode | Temps CPU (s) | ΔFz vs auto_precise (N) | ΔCourse vs auto_precise (mm) | ΔAcc vs auto_precise (g) |
+|---|---:|---:|---:|---:|
+| `euler` | 0,435 | 15,1 | 0,053 | 0,001 |
+| `legacy` | 1,036 | 30,4 | 0,016 | 0,002 |
+| `auto_fast` | 0,473 | 557,4 | 0,418 | 0,045 |
+| `auto_precise` | 1,723 | 0,0 | 0,000 | 0,000 |
+
+Cas `long_10s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`) :
+
+| Mode | Temps CPU (s) | ΔFz vs auto_precise (N) | ΔCourse vs auto_precise (mm) | ΔAcc vs auto_precise (g) |
+|---|---:|---:|---:|---:|
+| `euler` | 3,232 | 15,1 | 0,053 | 0,001 |
+| `legacy` | 11,311 | 30,4 | 0,016 | 0,002 |
+| `auto_fast` | 4,284 | 557,4 | 0,418 | 0,045 |
+| `auto_precise` | 12,958 | 0,0 | 0,000 | 0,000 |
+
+Lecture rapide :
+- `euler` est le plus rapide en nominal court, mais ce n'est pas le chemin de
+  référence RK4/couplé.
+- `legacy` reste la base historique RK4 explicite, avec de faibles écarts face
+  à `auto_precise` sur ce jeu d'essai.
+- `auto_fast` atteint l'objectif de gain CPU (> ×2 vs `legacy` sur 10 s) au
+  prix d'un écart plus marqué sur les grandeurs de synthèse.
+- `auto_precise` est le mode le plus coûteux, utilisé ici comme référence de
+  précision relative.
+
 **Prochaine sous-étape.**
 - Étendre l'intégration d'ordre supérieur à l'ensemble du pas couplé (ou
   introduire un sous-pas contrôlé) puis comparer systématiquement
