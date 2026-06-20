@@ -121,6 +121,31 @@ GEOMETRY_KEYS: tuple[str, ...] = (
 )
 
 
+def _integrate_const_acc(
+    x: float,
+    v: float,
+    a: float,
+    dt: float,
+    method: str,
+) -> tuple[float, float]:
+    """Intègre ``x' = v`` et ``v' = a`` sur ``dt``.
+
+    Le moteur emploie des efforts explicites (évalués au pas précédent) :
+    l'accélération est donc tenue constante pendant le pas. Dans ce cadre,
+    ``rk4`` correspond à l'intégration d'ordre 4 de ce système affine,
+    équivalente à la primitive exacte sur un pas (position avec terme 1/2 a dt²).
+    """
+    if method == "rk4":
+        v_new = v + a * dt
+        x_new = x + v * dt + 0.5 * a * dt * dt
+        return x_new, v_new
+
+    # Euler (comportement historique du modèle)
+    v_new = v + a * dt
+    x_new = x + v_new * dt
+    return x_new, v_new
+
+
 def _endstop(
     d: float,
     course: float,
@@ -361,16 +386,24 @@ def run_mlg(
     depms_prev = depms    # déplacement masse suspendue au pas précédent
     omega_prev = 0.0      # vitesse de rotation roue au pas précédent
     rx_prev = float(R[0])  # position horizontale du moyeu R au pas précédent
+    fgas_prev = p.St * pg
+    fhyd_prev = 0.0
+    ffrijoi_prev = 0.0
+    ftyre_prev = 0.0
+    endstop_prev = _endstop(d_prev, p.course, smooth_len=p.endstop_smooth)
+    tr_x_prev = 0.0
+    fspin_prev = 0.0
+    vitx_prev = vitx
 
     n_steps = n_it
     for i in range(n_out):
         try:
             # Dynamique de la masse suspendue (TA/TB du pas précédent)
             accms = (1.0 / Ms) * (-ta_z - tb_z - pms_rlg_z)
-            vitms = vitms + accms * It
-            depms = depms + vitms * It
-            B[2] += vitms * It
-            C[2] += vitms * It
+            depms, vitms = _integrate_const_acc(depms, vitms, accms, It, p.integrator)
+            dz = depms - depms_prev
+            B[2] += dz
+            C[2] += dz
 
             # Rotation du balancier
             al_y = (1.0 / Jyy) * (
@@ -379,9 +412,16 @@ def run_mlg(
                 + (R[2] - B[2]) * tr_x
                 - (R[0] - B[0]) * tr_z
             )
-            om_y = om_y + al_y * It
-            th_ay = th_ay + om_y * It
-            th_ry = th_ry + om_y * It
+            om_prev = om_y
+            if p.integrator == "rk4":
+                om_y = om_prev + al_y * It
+                dtheta = om_prev * It + 0.5 * al_y * It * It
+                th_ay += dtheta
+                th_ry += dtheta
+            else:
+                om_y = om_prev + al_y * It
+                th_ay += om_y * It
+                th_ry += om_y * It
 
             # Position de R et écrasement du pneu
             R[0] = -lg_rb * math.sin(th_ry) + B[0]
@@ -399,8 +439,7 @@ def run_mlg(
             fspin = mu_val * tr_z * _sign(slip)
             fx_old = p.kx * depx + p.cx * vitx
             accx = (-fx_old + fspin) / p.wheelmass
-            vitx = vitx + accx * It
-            depx = depx + vitx * It
+            depx, vitx = _integrate_const_acc(depx, vitx, accx, It, p.integrator)
             tr_x = p.kx * depx + p.cx * vitx
             alpha = (fspin * (p.unload_radius - defl)) / p.wheel_inertia
             omega = omega + alpha * It
@@ -506,23 +545,33 @@ def run_mlg(
         #   - apports : gravité + travail de la friction de contact puisé dans
         #     l'énergie d'avancement (qui lance la roue et la freine au sol).
         dd = d - d_prev
-        e_gas_acc += fgas * dd
-        e_endstop_acc += _endstop(
-            d,
-            p.course,
-            smooth_len=p.endstop_smooth,
-        ) * dd
-        e_tyre_acc += ftyre * (defl - defl_prev)
+        endstop_cur = _endstop(d, p.course, smooth_len=p.endstop_smooth)
+        ddefl = defl - defl_prev
+        if p.integrator == "rk4":
+            e_gas_acc += 0.5 * (fgas_prev + fgas) * dd
+            e_endstop_acc += 0.5 * (endstop_prev + endstop_cur) * dd
+            e_tyre_acc += 0.5 * (ftyre_prev + ftyre) * ddefl
+        else:
+            e_gas_acc += fgas * dd
+            e_endstop_acc += endstop_cur * dd
+            e_tyre_acc += ftyre * ddefl
         # Dissipations de l'amortisseur : on utilise le travail SIGNÉ de chaque
         # composante d'effort le long de la course (F·dd) et non |F·v|·dt. Comme
         # l'effort total se décompose en Ftot = Fgas + Fhyd + Ffrijoi + Fbutée,
         # la somme des travaux se télescope EXACTEMENT avec le travail de la
         # réaction d'amortisseur sur les corps (→ résidu = simple erreur Euler).
         # Le léger retard (lag) du calcul de ΔP rendrait |Fhyd·v|·dt ≠ −Fhyd·dd.
-        e_hyd_acc += fhyd * dd
-        e_fric_acc += ffrijoi * dd
+        if p.integrator == "rk4":
+            e_hyd_acc += 0.5 * (fhyd_prev + fhyd) * dd
+            e_fric_acc += 0.5 * (ffrijoi_prev + ffrijoi) * dd
+        else:
+            e_hyd_acc += fhyd * dd
+            e_fric_acc += ffrijoi * dd
         # Amortisseur horizontal du pneu (spring-back) : Pdiss = cx·vitx².
-        e_damp_x_acc += p.cx * vitx * vitx * It
+        if p.integrator == "rk4":
+            e_damp_x_acc += 0.5 * p.cx * (vitx_prev * vitx_prev + vitx * vitx) * It
+        else:
+            e_damp_x_acc += p.cx * vitx * vitx * It
         # Énergie d'avancement et glissement au contact pneu/sol.
         #   • Apport : la friction de contact Fspin puise dans l'énergie
         #     d'avancement de l'aéronef à la VITESSE SOL Vx (puissance Fspin·Vx).
@@ -542,8 +591,15 @@ def run_mlg(
         # le bilan du chemin d'avancement se ferme par construction.
         vr_x = (R[0] - rx_prev) / It
         dke_spin = 0.5 * p.wheel_inertia * (omega * omega - omega_prev * omega_prev)
-        e_fwd_acc += fspin * Vx * It
-        e_slip_acc += fspin * (Vx - vitx) * It - dke_spin - tr_x * vr_x * It
+        if p.integrator == "rk4":
+            fspin_avg = 0.5 * (fspin_prev + fspin)
+            tr_x_avg = 0.5 * (tr_x_prev + tr_x)
+            vitx_avg = 0.5 * (vitx_prev + vitx)
+            e_fwd_acc += fspin_avg * Vx * It
+            e_slip_acc += fspin_avg * (Vx - vitx_avg) * It - dke_spin - tr_x_avg * vr_x * It
+        else:
+            e_fwd_acc += fspin * Vx * It
+            e_slip_acc += fspin * (Vx - vitx) * It - dke_spin - tr_x * vr_x * It
         # Poids (le long de Z, dirigé vers le bas) × déplacement de la masse.
         e_grav_acc += -pms_rlg_z * (depms - depms_prev)
         d_prev = d
@@ -551,6 +607,14 @@ def run_mlg(
         depms_prev = depms
         omega_prev = omega
         rx_prev = float(R[0])
+        fgas_prev = fgas
+        fhyd_prev = fhyd
+        ffrijoi_prev = ffrijoi
+        ftyre_prev = ftyre
+        endstop_prev = endstop_cur
+        tr_x_prev = tr_x
+        fspin_prev = fspin
+        vitx_prev = vitx
 
         # Réservoirs cinétiques courants.
         e_kin = 0.5 * Ms * vitms * vitms

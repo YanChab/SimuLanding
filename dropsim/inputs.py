@@ -174,6 +174,7 @@ class MLGInputs:
     roll: float = 0.0              # deg (gîte / roll, alfar)
     temps_simu: float = 0.5        # s   (durée simulée)
     it: float = 0.0001             # s   (pas de temps)
+    integrator: str = "euler"      # euler|rk4
     temperature: float = 25.0      # °C
 
     # --- Amortisseur (géométrie) ------------------------------------------ #
@@ -327,6 +328,16 @@ class MLGInputs:
             message="La vitesse verticale de chute doit être positive.",
             field="vz",
             hint="Saisir Vz > 0 (sens de chute).",
+        )
+        c.check(
+            self.integrator not in {"euler", "rk4"},
+            code="INTEGRATEUR_INVALIDE",
+            message=(
+                "L'intégrateur doit être 'euler' ou 'rk4' "
+                f"(reçu : {self.integrator})."
+            ),
+            field="integrator",
+            hint="Choisir 'euler' ou 'rk4'.",
         )
 
         # Géométrie amortisseur
@@ -506,6 +517,7 @@ class MLGInputs:
             roll=self.roll * U.DEG_TO_RAD,
             temps_simu=self.temps_simu,
             it=self.it,
+            integrator=self.integrator,
             Dpis=self.Dpis * U.MM_TO_M,
             Dbh=self.Dbh * U.MM_TO_M,
             Dt=self.Dt * U.MM_TO_M,
@@ -573,6 +585,7 @@ class MLGParamsSI:
     roll: float
     temps_simu: float
     it: float
+    integrator: str
 
     Dpis: float
     Dbh: float

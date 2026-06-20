@@ -13,8 +13,8 @@
 |---|---|---|---|---|---|
 | 5.2 | Bilan énergétique en sortie — ✅ **fait** | Diagnostic | Fort | Faible | Faible |
 | 5.1 | Tests de non-régression — ✅ **fait** | Validation | Fort | Faible | Moyen |
-| 2.1 | Butée de contact lissée | Robustesse | Moyen | Faible | Faible |
-| 1.1 | Intégrateur RK4 / adaptatif | Numérique | Fort | Moyen | Élevé |
+| 2.1 | Butée de contact lissée — ✅ **fait** | Robustesse | Moyen | Faible | Faible |
+| 1.1 | Intégrateur RK4 / adaptatif — 🔄 **en cours** | Numérique | Fort | Moyen | Élevé |
 | 1.2 | Convergence réelle des solveurs | Numérique | Moyen | Moyen | Moyen |
 | 3.x | Raffinements physiques (γ, friction, pneu) | Physique | Variable | Moyen | Variable |
 | 3.5 | Compressibilité et pertes de charge | Physique | Moyen | Moyen | Moyen |
@@ -45,6 +45,25 @@ manuellement (typiquement $10^{-4}$ s).
 - Le couplage raide (butée $K = 10^8$ N/m, hydraulique) est un cas typiquement
   **raide** : un schéma implicite serait plus stable.
 - Conserver Euler en **option** pour comparer et garder la fidélité au classeur.
+
+**État d'avancement (juin 2026).**
+- Le sélecteur `integrator = euler|rk4` est disponible en entrée (UI + modèle).
+- Le mode `rk4` est actif sur les intégrations cinématiques à accélération tenue
+  constante pendant le pas (masse suspendue, rotation balancier, spring-back).
+- Le couplage complet gaz/hydraulique reste évalué explicitement au pas (même
+  structure de boucle que l'historique), donc le RK4 actuel n'est pas encore un
+  schéma fully-coupled de toute la chaîne.
+- Une non-régression automatique compare désormais `euler` et `rk4` au pas
+  nominal sur quatre garde-fous pratiques :
+  - écart de pic vertical $F_z$ ≤ 0,5 % ;
+  - écart de course max ≤ 0,5 mm ;
+  - écart d'accélération max ≤ 0,05 g ;
+  - résidu énergétique max RK4 ≤ 1,2 × résidu Euler.
+
+**Prochaine sous-étape.**
+- Étendre l'intégration d'ordre supérieur à l'ensemble du pas couplé (ou
+  introduire un sous-pas contrôlé) puis comparer systématiquement
+  `euler`/`rk4` sur résidu énergétique, pics d'efforts et stabilité.
 
 ### 1.2 Convergence réelle des solveurs internes — *impact moyen*
 

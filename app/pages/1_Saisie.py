@@ -271,6 +271,15 @@ with col_chute:
         ("Durée simulée (s)", "temps_simu", inp.temps_simu),
         ("Pas de temps It (s)", "it", inp.it),
     ], "chute_editor")
+    _int_key = "f_integrator"
+    if _int_key not in st.session_state:
+        st.session_state[_int_key] = inp.integrator
+    st.selectbox(
+        "Intégrateur",
+        options=["euler", "rk4"],
+        key=_int_key,
+        help="Choix du schéma d'intégration temporelle (Euler ou RK4).",
+    )
     # Champ dédié pour la température : un number_input accepte nativement les
     # valeurs négatives (température froide), contrairement à l'éditeur tabulaire.
     num(
@@ -622,7 +631,8 @@ def _build_inputs() -> MLGInputs:
     return MLGInputs(
         masse=g("masse"), vz=g("vz"), vx=g("vx"), lift=g("lift"),
         pitch=g("pitch"), roll=g("roll"), temps_simu=g("temps_simu"),
-        it=g("it"), temperature=g("temperature"),
+        it=g("it"), integrator=str(st.session_state.get("f_integrator", inp.integrator)),
+        temperature=g("temperature"),
         Dpis=g("Dpis"), Dbh=g("Dbh"), Dt=g("Dt"), Dp=g("Dp"),
         DInsideBh=g("DInsideBh"),
         DInsidePalierBh=g("DInsidePalierBh"),

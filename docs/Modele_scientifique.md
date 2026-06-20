@@ -17,8 +17,8 @@ horizontale $V_x$ représentant la vitesse avion au toucher des roues. On calcul
 l'évolution temporelle des efforts, courses, pressions et accélérations jusqu'à
 l'enfoncement maximal et le rebond.
 
-Le modèle couple **quatre sous-systèmes** physiques, intégrés pas à pas par un
-schéma d'**Euler explicite** de pas de temps $\Delta t$ :
+Le modèle couple **quatre sous-systèmes** physiques, intégrés pas à pas avec un
+schéma explicite de pas de temps $\Delta t$ (sélecteur `integrator = euler|rk4`) :
 
 | Sous-système | Loi physique dominante | Module |
 |---|---|---|
@@ -970,8 +970,8 @@ $|F_{tot}| < 1\ \text{N}$.
 
 ## 12. Schéma d'intégration temporelle
 
-L'ensemble est intégré par **Euler explicite** de la séquence suivante, répétée
-sur $N = \lfloor T_{simu} / \Delta t \rfloor$ pas :
+L'ensemble est intégré par schéma explicite de la séquence suivante, répétée sur
+$N = \lfloor T_{simu} / \Delta t \rfloor$ pas :
 
 ```mermaid
 flowchart TD
@@ -990,6 +990,16 @@ flowchart TD
 Le pas de temps typique est $\Delta t = 10^{-4}\ \text{s}$ ; la stabilité du
 schéma explicite impose un pas suffisamment petit devant les constantes de temps
 hydrauliques et de butée.
+
+**Portée actuelle du sélecteur d'intégrateur** :
+- `euler` : comportement historique (Euler explicite d'ordre 1) ;
+- `rk4` : intégration d'ordre supérieur activée sur les sous-équations
+  cinématiques où l'accélération est tenue constante pendant le pas
+  (translation masse suspendue, rotation balancier, spring-back).
+
+À ce stade, le couplage gaz/hydraulique reste évalué explicitement au pas de
+temps (même topologie de boucle), ce qui signifie que le mode `rk4` n'est pas
+encore un RK4 fully-coupled de toute la chaîne multiphysique.
 
 ---
 
@@ -1018,7 +1028,9 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
 ## 14. Hypothèses et limites du modèle
 
 - **Intégration explicite** : pas de temps borné par la stabilité ; pas
-  d'adaptation automatique.
+  d'adaptation automatique. Le mode `rk4` actuel est partiel (cinématique) et ne
+  remplace pas encore une intégration d'ordre supérieur fully-coupled du
+  couplage gaz/hydraulique.
 - **Mécanisme plan** : la rotation du balancier est traitée dans le plan
   $X\!-\!Z$ ; l'obliquité en $Y$ est prise en compte uniquement par projection de
   l'effort d'amortisseur.
