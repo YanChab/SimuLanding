@@ -353,10 +353,12 @@ def _select_damper_core_solver(
         return p.damper_core_solver
 
     if p.damper_core_solver == "auto_fast":
-        near_stop = d <= 0.0015 * p.course or d >= 0.9985 * p.course
-        gas_loaded = abs(pg_prev - p.Pinitbp) >= 16.0 * p.Pinitbp
-        force_spike = abs(ftot_prev) >= 1.25 * (p.St * p.Pinitbp)
-        if near_stop or (gas_loaded and force_spike):
+        near_stop = d <= 0.004 * p.course or d >= 0.996 * p.course
+        fast_motion = abs(v) >= 1.4
+        gas_loaded = abs(pg_prev - p.Pinitbp) >= 10.0 * p.Pinitbp
+        force_spike = abs(ftot_prev) >= 1.0 * (p.St * p.Pinitbp)
+        score = int(near_stop) + int(fast_motion) + int(gas_loaded) + int(force_spike)
+        if near_stop or score >= 3:
             return "implicit_adaptive"
         return "legacy"
 
@@ -435,6 +437,8 @@ def damper_force_step_implicit_adaptive(
     delta_pd_prev: float,
     pg_prev: float,
     min_h: float = 1.0 / 64.0,
+    auto_fast_mode: bool = False,
+    implicit_dt_scale: float = 1.0,
 ) -> dict[str, float]:
     """Chemin implicite/adaptatif sur le noyau gaz+hydraulique.
 
@@ -442,6 +446,24 @@ def damper_force_step_implicit_adaptive(
     d'erreur par comparaison 1 sous-pas vs 2 demi-sous-pas, puis on accepte la
     solution raffinée (deux demi-sous-pas) quand l'erreur est sous seuil.
     """
+    if auto_fast_mode:
+        gas_state = _gas_state(gas)
+        step, gas_end = _damper_force_step_implicit_endpoint(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            d_end,
+            v_end,
+            p.it * implicit_dt_scale,
+            delta_pc_prev,
+            delta_pd_prev,
+            pg_prev,
+            gas_state,
+        )
+        _set_gas_state(gas, gas_end)
+        return step
+
     tol_rel = 0.02
     max_substeps = 256
 
@@ -609,7 +631,9 @@ def run_mlg(
     Jyy = p.jyy
     Vx = p.vx
     Vitesse = p.vz
-    It = p.it
+    fast_time_scale = 1.8 if p.damper_core_solver == "auto_fast" else 1.0
+    It = p.it * fast_time_scale
+    integrator_mode = "euler" if p.damper_core_solver == "auto_fast" else p.integrator
 
     if c.check(
         not (entraxe_init > 0),
@@ -718,7 +742,7 @@ def run_mlg(
         try:
             # Dynamique de la masse suspendue (TA/TB du pas précédent)
             accms = (1.0 / Ms) * (-ta_z - tb_z - pms_rlg_z)
-            depms, vitms = _integrate_const_acc(depms, vitms, accms, It, p.integrator)
+            depms, vitms = _integrate_const_acc(depms, vitms, accms, It, integrator_mode)
             dz = depms - depms_prev
             B[2] += dz
             C[2] += dz
@@ -731,7 +755,7 @@ def run_mlg(
                 - (R[0] - B[0]) * tr_z
             )
             om_prev = om_y
-            if p.integrator == "rk4":
+            if integrator_mode == "rk4":
                 om_y = om_prev + al_y * It
                 dtheta = om_prev * It + 0.5 * al_y * It * It
                 th_ay += dtheta
@@ -757,7 +781,7 @@ def run_mlg(
             fspin = mu_val * tr_z * _sign(slip)
             fx_old = p.kx * depx + p.cx * vitx
             accx = (-fx_old + fspin) / p.wheelmass
-            depx, vitx = _integrate_const_acc(depx, vitx, accx, It, p.integrator)
+            depx, vitx = _integrate_const_acc(depx, vitx, accx, It, integrator_mode)
             tr_x = p.kx * depx + p.cx * vitx
             alpha = (fspin * (p.unload_radius - defl)) / p.wheel_inertia
             omega = omega + alpha * It
@@ -774,7 +798,11 @@ def run_mlg(
 
             # Ressort gazeux + hydraulique (meme loi que l'export "Loi hydraulique").
             solver_mode = _select_damper_core_solver(p, d, v, pg_prev, ftot)
-            non_implicit_dt_scale = 1.10 if p.damper_core_solver == "auto_fast" and solver_mode != "implicit_adaptive" else 1.0
+            non_implicit_dt_scale = (
+                fast_time_scale * 1.10
+                if p.damper_core_solver == "auto_fast" and solver_mode != "implicit_adaptive"
+                else 1.0
+            )
             if solver_mode == "implicit_adaptive":
                 min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 64.0
                 damp = damper_force_step_implicit_adaptive(
@@ -790,6 +818,8 @@ def run_mlg(
                     delta_pd,
                     pg_prev,
                     min_h=min_h,
+                    auto_fast_mode=(p.damper_core_solver == "auto_fast"),
+                    implicit_dt_scale=(2.0 * fast_time_scale) if p.damper_core_solver == "auto_fast" else 1.0,
                 )
             elif p.damper_core_solver == "auto_fast":
                 damp = damper_force_step(

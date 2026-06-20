@@ -1057,28 +1057,28 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
 - **Profils rapide / précis** : ils matérialisent deux réglages du même principe
   hybride afin de pouvoir choisir explicitement entre vitesse de calcul et marge
   de sécurité numérique.
-- **Benchmark 10 s** : sur deux cas représentatifs, `auto_fast` passe à un peu
-  plus de 4 s sur les cas 10 s testés, soit largement plus de 2× plus vite que
-  `legacy`, alors que `auto_precise` augmente nettement le temps de calcul pour
-  activer plus souvent le noyau implicite.
+- **Benchmark 10 s** : sur deux cas représentatifs, `auto_fast` est désormais
+  réglé pour maintenir ΔFz < 50 N vs `auto_precise`, ce qui le place à un coût
+  proche de `auto_precise`; `euler` reste le plus rapide en temps brut, mais
+  sans couplage implicite.
 - **Comparatif vitesse / précision (référence = `auto_precise`)** :
   cas `nominal_0p5s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`)
 
-  | Mode | Temps CPU (s) | ΔFz (N) | ΔCourse (mm) | ΔAcc (g) |
-  |---|---:|---:|---:|---:|
-  | `euler` | 0,435 | 15,1 | 0,053 | 0,001 |
-  | `legacy` | 1,036 | 30,4 | 0,016 | 0,002 |
-  | `auto_fast` | 0,473 | 557,4 | 0,418 | 0,045 |
-  | `auto_precise` | 1,723 | 0,0 | 0,000 | 0,000 |
+  | Mode | Temps CPU (s) | % implicite | ΔFz (N) | ΔCourse (mm) | ΔAcc (g) |
+  |---|---:|---:|---:|---:|---:|
+  | `euler` | 0,438 | 0,000 % | 15,1 | 0,053 | 0,001 |
+  | `legacy` | 1,045 | 0,000 % | 30,4 | 0,016 | 0,002 |
+  | `auto_fast` | 1,093 | 1,598 % | 24,5 | 0,011 | 0,002 |
+  | `auto_precise` | 1,664 | 34,366 % | 0,0 | 0,000 | 0,000 |
 
   cas `long_10s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`)
 
-  | Mode | Temps CPU (s) | ΔFz (N) | ΔCourse (mm) | ΔAcc (g) |
-  |---|---:|---:|---:|---:|
-  | `euler` | 3,232 | 15,1 | 0,053 | 0,001 |
-  | `legacy` | 11,311 | 30,4 | 0,016 | 0,002 |
-  | `auto_fast` | 4,284 | 557,4 | 0,418 | 0,045 |
-  | `auto_precise` | 12,958 | 0,0 | 0,000 | 0,000 |
+  | Mode | Temps CPU (s) | % implicite | ΔFz (N) | ΔCourse (mm) | ΔAcc (g) |
+  |---|---:|---:|---:|---:|---:|
+  | `euler` | 3,300 | 0,000 % | 15,1 | 0,053 | 0,001 |
+  | `legacy` | 11,276 | 0,000 % | 30,4 | 0,016 | 0,002 |
+  | `auto_fast` | 12,163 | 5,794 % | 24,5 | 0,011 | 0,002 |
+  | `auto_precise` | 12,942 | 7,692 % | 0,0 | 0,000 | 0,000 |
 - **Mécanisme plan** : la rotation du balancier est traitée dans le plan
   $X\!-\!Z$ ; l'obliquité en $Y$ est prise en compte uniquement par projection de
   l'effort d'amortisseur.

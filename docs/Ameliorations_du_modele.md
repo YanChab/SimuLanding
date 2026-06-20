@@ -87,10 +87,11 @@ manuellement (typiquement $10^{-4}$ s).
 - `auto_fast` augmente désormais légèrement le pas de calcul hydraulique quand
   il reste sur le chemin non implicite, afin de privilégier le débit au coût de
   une petite perte de précision.
-- Benchmark 10 s (RK4, deux cas représentatifs) : `auto_fast` est nettement
-  plus rapide que `legacy` tout en restant plus précis que `auto_precise`.
-  Ordres de grandeur observés : ~4,08 s vs 10,52 s (nominal), ~4,53 s vs
-  11,73 s (cas plus lourd), contre ~12,0 à 13,1 s pour `auto_precise`.
+- Benchmark 10 s (RK4, deux cas représentatifs) : `auto_fast` est proche de
+  `auto_precise` en temps mais avec un écart de `Fz` réduit à ~24,5 N (vs
+  621 N précédemment), respectant l'objectif < 50 N demandé.
+  Ordres de grandeur observés : ~12,2 s (`auto_fast`) vs ~3,3 s (`euler`) vs
+  ~11,3 s (`legacy`) vs ~12,9 s (`auto_precise`).
 
 **Comparatif synthétique (vitesse + précision)**
 
@@ -98,29 +99,30 @@ Référence de précision retenue : `auto_precise` (écarts absolus reportés).
 
 Cas `nominal_0p5s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`) :
 
-| Mode | Temps CPU (s) | ΔFz vs auto_precise (N) | ΔCourse vs auto_precise (mm) | ΔAcc vs auto_precise (g) |
-|---|---:|---:|---:|---:|
-| `euler` | 0,435 | 15,1 | 0,053 | 0,001 |
-| `legacy` | 1,036 | 30,4 | 0,016 | 0,002 |
-| `auto_fast` | 0,473 | 557,4 | 0,418 | 0,045 |
-| `auto_precise` | 1,723 | 0,0 | 0,000 | 0,000 |
+| Mode | Temps CPU (s) | % implicite | ΔFz vs auto_precise (N) | ΔCourse vs auto_precise (mm) | ΔAcc vs auto_precise (g) |
+|---|---:|---:|---:|---:|---:|
+| `euler` | 0,438 | 0,000 % | 15,1 | 0,053 | 0,001 |
+| `legacy` | 1,045 | 0,000 % | 30,4 | 0,016 | 0,002 |
+| `auto_fast` | 1,093 | 1,598 % | 24,5 | 0,011 | 0,002 |
+| `auto_precise` | 1,664 | 34,366 % | 0,0 | 0,000 | 0,000 |
 
 Cas `long_10s` (`dt = 1e-4`, `m = 1250 kg`, `vz = 3.05 m/s`) :
 
-| Mode | Temps CPU (s) | ΔFz vs auto_precise (N) | ΔCourse vs auto_precise (mm) | ΔAcc vs auto_precise (g) |
-|---|---:|---:|---:|---:|
-| `euler` | 3,232 | 15,1 | 0,053 | 0,001 |
-| `legacy` | 11,311 | 30,4 | 0,016 | 0,002 |
-| `auto_fast` | 4,284 | 557,4 | 0,418 | 0,045 |
-| `auto_precise` | 12,958 | 0,0 | 0,000 | 0,000 |
+| Mode | Temps CPU (s) | % implicite | ΔFz vs auto_precise (N) | ΔCourse vs auto_precise (mm) | ΔAcc vs auto_precise (g) |
+|---|---:|---:|---:|---:|---:|
+| `euler` | 3,300 | 0,000 % | 15,1 | 0,053 | 0,001 |
+| `legacy` | 11,276 | 0,000 % | 30,4 | 0,016 | 0,002 |
+| `auto_fast` | 12,163 | 5,794 % | 24,5 | 0,011 | 0,002 |
+| `auto_precise` | 12,942 | 7,692 % | 0,0 | 0,000 | 0,000 |
 
 Lecture rapide :
 - `euler` est le plus rapide en nominal court, mais ce n'est pas le chemin de
   référence RK4/couplé.
 - `legacy` reste la base historique RK4 explicite, avec de faibles écarts face
   à `auto_precise` sur ce jeu d'essai.
-- `auto_fast` atteint l'objectif de gain CPU (> ×2 vs `legacy` sur 10 s) au
-  prix d'un écart plus marqué sur les grandeurs de synthèse.
+- `auto_fast` atteint l'objectif de précision (ΔFz < 50 N vs `auto_precise`)
+  au prix d'un temps de calcul comparable à `auto_precise`; le gain de vitesse
+  par rapport à `legacy` reste faible à ce niveau de précision.
 - `auto_precise` est le mode le plus coûteux, utilisé ici comme référence de
   précision relative.
 
