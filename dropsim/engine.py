@@ -334,6 +334,33 @@ def _set_gas_state(gas: GasSpring, state: tuple[float, float]) -> None:
     gas.Vgbp, gas.Vghp = state
 
 
+def _select_damper_core_solver(
+    p: MLGParamsSI,
+    d: float,
+    v: float,
+    pg_prev: float,
+    ftot_prev: float,
+) -> str:
+    """Sélectionne le noyau de solveur selon un critère de raideur simple.
+
+    En mode ``auto``, on réserve ``implicit_adaptive`` aux zones où la loi est
+    la plus raide: vitesse importante, forte compression de gaz, proximité de
+    butée ou effort déjà élevé au pas précédent.
+    """
+    if p.damper_core_solver != "auto":
+        return p.damper_core_solver
+
+    near_stop = d <= 0.01 * p.course or d >= 0.99 * p.course
+    fast_motion = abs(v) >= 1.25
+    gas_loaded = abs(pg_prev - p.Pinitbp) >= 10.0 * p.Pinitbp
+    force_spike = abs(ftot_prev) >= 0.90 * (p.St * p.Pinitbp)
+
+    score = int(near_stop) + int(fast_motion) + int(gas_loaded) + int(force_spike)
+    if near_stop or score >= 2:
+        return "implicit_adaptive"
+    return "legacy"
+
+
 def _damper_force_step_implicit_endpoint(
     p: MLGParamsSI,
     gas: GasSpring,
@@ -635,6 +662,7 @@ def run_mlg(
     delta_pc = delta_pd = 0.0
     qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
     pg_prev = pg
+    ftot = p.St * pg
     v_prev = 0.0
 
     # --- Accumulateurs du bilan énergétique (diagnostic) ------------------ #
@@ -725,7 +753,8 @@ def run_mlg(
             d = entraxe_init - entraxe
 
             # Ressort gazeux + hydraulique (meme loi que l'export "Loi hydraulique").
-            if p.damper_core_solver == "implicit_adaptive":
+            solver_mode = _select_damper_core_solver(p, d, v, pg_prev, ftot)
+            if solver_mode == "implicit_adaptive":
                 damp = damper_force_step_implicit_adaptive(
                     p,
                     gas,

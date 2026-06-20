@@ -1004,6 +1004,8 @@ hydrauliques et de butée.
 - `implicit_adaptive` : tentative de résolution implicite locale en fin de
   sous-pas avec raffinement adaptatif (estimateur 1 sous-pas vs 2 demi-sous-pas)
   sur le noyau gaz/hydraulique.
+- `auto` : sélection hybride locale, qui bascule vers `implicit_adaptive` dans
+  les zones raides détectées et conserve `legacy` ailleurs.
 
 La mémoire interne hydraulique/gaz est toutefois réinjectée au niveau du pas
 global (mise à jour en fin de pas), ce qui reste un compromis pragmatique :
@@ -1042,6 +1044,9 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
   les variables internes (gaz/hydraulique).
 - **Mode implicite/adaptatif noyau** : activable pour étude numérique, mais non
   retenu comme défaut à ce stade (coût CPU supérieur sur le cas nominal).
+- **Mode hybride automatique** : compromis pragmatique entre coût et robustesse;
+  il n'est qu'une heuristique locale, pas une garantie de coût minimal global,
+  mais il réduit nettement le surcoût du mode implicite pur sur le cas nominal.
 - **Mécanisme plan** : la rotation du balancier est traitée dans le plan
   $X\!-\!Z$ ; l'obliquité en $Y$ est prise en compte uniquement par projection de
   l'effort d'amortisseur.

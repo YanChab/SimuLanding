@@ -56,6 +56,8 @@ manuellement (typiquement $10^{-4}$ s).
 - Un mode noyau `damper_core_solver = legacy|implicit_adaptive` est disponible.
   Le mode `implicit_adaptive` applique une résolution implicite locale avec
   sous-pas adaptatifs sur le noyau gaz/hydraulique (essai activable, non défaut).
+  Le mode `auto` choisit dynamiquement entre `legacy` et `implicit_adaptive`
+  selon une heuristique simple de raideur locale.
 - Une non-régression automatique compare désormais `euler` et `rk4` au pas
   nominal sur quatre garde-fous pratiques :
   - écart de pic vertical $F_z$ ≤ 0,5 % ;
@@ -71,6 +73,12 @@ manuellement (typiquement $10^{-4}$ s).
 - `implicit_adaptive` améliore légèrement la cohérence des grandeurs de sortie
   (écarts faibles, résidu énergétique similaire), mais coûte environ ×2,5 en
   temps CPU vs `legacy` sur le cas nominal.
+- Le mode `auto` sert de compromis pratique: il conserve le coût du mode
+  historique sur les phases calmes et n'active l'implicite que dans les zones
+  détectées comme raides.
+- Sur le cas nominal, l'hybride reste sensiblement plus léger que `implicit_adaptive`
+  pur (environ ×1,5 vs `legacy` au dernier benchmark), tout en conservant des
+  écarts de sortie très faibles.
 
 **Prochaine sous-étape.**
 - Étendre l'intégration d'ordre supérieur à l'ensemble du pas couplé (ou

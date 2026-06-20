@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dropsim import default_mlg_inputs, run_simulation
-from dropsim.engine import OUTPUT_COLUMNS
+from dropsim.engine import OUTPUT_COLUMNS, _select_damper_core_solver
 
 
 def _run_case(integrator: str, dt: float) -> tuple[float, float, float, float]:
@@ -42,6 +42,23 @@ def _run_case_with_solver(
     )
 
 
+def _run_auto_case(dt: float = 1.0e-4):
+    inp = default_mlg_inputs()
+    inp.integrator = "rk4"
+    inp.damper_core_solver = "auto"
+    inp.it = dt
+    result = run_simulation(inp)
+    summary = result.summary
+    residual_col = OUTPUT_COLUMNS["e_residual"]
+    res_max = float(result.df[residual_col].abs().max())
+    return (
+        summary["Effort vertical max Fz (N)"],
+        summary["Course max (mm)"],
+        summary["Accélération max (g)"],
+        res_max,
+    )
+
+
 def test_invalid_integrator_is_rejected():
     inp = default_mlg_inputs()
     inp.integrator = "invalid"
@@ -64,6 +81,14 @@ def test_invalid_damper_solver_is_rejected():
     collector = inp.validate()
     assert collector.has_errors
     assert any(err.code == "SOLVEUR_AMORTISSEUR_INVALIDE" for err in collector.errors)
+
+
+def test_auto_solver_heuristic_switches_on_stiff_states():
+    inp = default_mlg_inputs()
+    inp.damper_core_solver = "auto"
+    si = inp.to_si()
+    assert _select_damper_core_solver(si, 0.001, 1.50, si.Pinitbp * 11.0, si.St * si.Pinitbp) == "implicit_adaptive"
+    assert _select_damper_core_solver(si, 0.10, 0.20, si.Pinitbp * 1.2, 0.0) == "legacy"
 
 
 def test_rk4_stays_close_to_euler_with_controlled_energy_residual():
@@ -117,3 +142,14 @@ def test_implicit_adaptive_solver_timestep_refinement_reduces_residual():
     coarse = _run_case_with_solver("rk4", 1.0e-4, "implicit_adaptive")
     fine = _run_case_with_solver("rk4", 5.0e-5, "implicit_adaptive")
     assert fine[3] < 0.80 * coarse[3]
+
+
+def test_auto_solver_runs_and_stays_close_to_legacy_on_nominal_case():
+    fz_legacy, course_legacy, acc_legacy, _ = _run_case_with_solver(
+        "rk4", 1.0e-4, "legacy"
+    )
+    fz_auto, course_auto, acc_auto, _ = _run_auto_case(1.0e-4)
+
+    assert abs(fz_auto - fz_legacy) <= 0.01 * fz_legacy
+    assert abs(course_auto - course_legacy) <= 0.5
+    assert abs(acc_auto - acc_legacy) <= 0.05
