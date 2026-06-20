@@ -1,6 +1,6 @@
 """Sauvegarde et rechargement des simulations (entrées + résultats).
 
-Sérialise une simulation complète (les entrées :class:`~dropsim.inputs.MLGInputs`
+Sérialise une simulation complète (les entrées :class:`~dropsim.inputs.TrailingArmInputs`
 et le résultat :class:`~dropsim.simulation.SimulationResult`) dans un fichier
 **JSON** autonome, puis permet de la recharger à l'identique. Le format JSON est
 volontairement choisi (plutôt que ``pickle``) pour être **sûr** (aucune exécution
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .inputs import MLGInputs, Point3, Rainure
+from .inputs import TrailingArmInputs, Point3, Rainure
 from .simulation import SimulationResult
 
 # Version du schéma de fichier (incrémentée si le format évolue de façon incompatible).
@@ -39,14 +39,14 @@ DEFAULT_PROJECT = "Général"
 # --------------------------------------------------------------------------- #
 #  Sérialisation des entrées
 # --------------------------------------------------------------------------- #
-def inputs_to_dict(inputs: MLGInputs) -> dict:
-    """Convertit ``MLGInputs`` en dictionnaire JSON-compatible."""
+def inputs_to_dict(inputs: TrailingArmInputs) -> dict:
+    """Convertit ``TrailingArmInputs`` en dictionnaire JSON-compatible."""
     return asdict(inputs)
 
 
-def inputs_from_dict(d: dict) -> MLGInputs:
-    """Reconstruit ``MLGInputs`` depuis un dictionnaire (robuste aux clés en trop)."""
-    known = {f.name for f in fields(MLGInputs)}
+def inputs_from_dict(d: dict) -> TrailingArmInputs:
+    """Reconstruit ``TrailingArmInputs`` depuis un dictionnaire (robuste aux clés en trop)."""
+    known = {f.name for f in fields(TrailingArmInputs)}
     data = {k: v for k, v in d.items() if k in known}
 
     if data.get("damper_core_solver") in {"legacy", "implicit_adaptive", "auto"}:
@@ -66,7 +66,7 @@ def inputs_from_dict(d: dict) -> MLGInputs:
     if "mu_curve" in data:
         data["mu_curve"] = [tuple(t) for t in data["mu_curve"]]
 
-    return MLGInputs(**data)
+    return TrailingArmInputs(**data)
 
 
 # --------------------------------------------------------------------------- #
@@ -114,7 +114,7 @@ def _project_dir(directory: Path | str, project: str | None) -> Path:
 
 
 def bundle(
-    inputs: MLGInputs,
+    inputs: TrailingArmInputs,
     result: SimulationResult,
     *,
     name: str,
@@ -132,7 +132,7 @@ def bundle(
 
 
 def save_simulation(
-    inputs: MLGInputs,
+    inputs: TrailingArmInputs,
     result: SimulationResult,
     *,
     name: str,
@@ -153,7 +153,7 @@ def save_simulation(
     return path
 
 
-def load_simulation(path: Path | str) -> tuple[MLGInputs, SimulationResult, dict]:
+def load_simulation(path: Path | str) -> tuple[TrailingArmInputs, SimulationResult, dict]:
     """Recharge une simulation ; renvoie ``(inputs, result, meta)``.
 
     ``meta`` contient ``name`` et ``saved_at``. Lève ``ValueError`` si le schéma

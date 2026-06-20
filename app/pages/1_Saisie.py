@@ -1,4 +1,4 @@
-"""Page **Saisie** : formulaire des données du train à balancier (MLG).
+"""Page **Saisie** : formulaire des données du train à balancier (trailing arm).
 
 Toutes les valeurs sont saisies dans les unités d'affichage de l'Excel d'origine.
 À la validation, les erreurs sont détectées à trois niveaux (saisie, pré-calcul,
@@ -23,7 +23,7 @@ _APP = Path(__file__).resolve().parent.parent
 if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
-from dropsim import MLGInputs, SimError, default_mlg_inputs, run_simulation  # noqa: E402
+from dropsim import TrailingArmInputs, SimError, default_trailing_arm_inputs, run_simulation  # noqa: E402
 from dropsim.inputs import (  # noqa: E402
     Point3,
     Rainure,
@@ -38,7 +38,7 @@ from theme import apply_theme  # noqa: E402
 apply_theme()
 
 if "inputs" not in st.session_state:
-    st.session_state.inputs = default_mlg_inputs()
+    st.session_state.inputs = default_trailing_arm_inputs()
 
 _LEGACY_OIL_DEFAULTS = {
     "k_huile": 10000.0,
@@ -57,10 +57,10 @@ def _migrate_legacy_oil_defaults() -> None:
     if st.session_state.get("_oil_defaults_migrated_v1", False):
         return
 
-    new_defaults = default_mlg_inputs()
+    new_defaults = default_trailing_arm_inputs()
 
     inp = st.session_state.get("inputs")
-    if isinstance(inp, MLGInputs):
+    if isinstance(inp, TrailingArmInputs):
         if (
             _is_close(float(inp.k_huile), _LEGACY_OIL_DEFAULTS["k_huile"])
             and _is_close(
@@ -105,7 +105,7 @@ _migrate_legacy_oil_defaults()
 field_errors: dict[str, str] = st.session_state.get("field_errors", {})
 
 st.title("📝 Saisie des données du train d'atterrissage")
-st.caption("Architecture à balancier (MLG) — unités : mm · bar · cc · cSt · MPa · ° · °C")
+st.caption("Architecture à balancier (trailing arm) — unités : mm · bar · cc · cSt · MPa · ° · °C")
 
 
 # --------------------------------------------------------------------------- #
@@ -252,7 +252,7 @@ def _safe_xy(df_table: pd.DataFrame):
     return d.iloc[:, 0].to_numpy(), d.iloc[:, 1].to_numpy()
 
 
-inp: MLGInputs = st.session_state.inputs
+inp: TrailingArmInputs = st.session_state.inputs
 if not hasattr(inp, "hydraulic_max_iter"):
     inp.hydraulic_max_iter = 64
 
@@ -638,9 +638,9 @@ with rs_col:
 
 
 # --------------------------------------------------------------------------- #
-#  Construction d'un MLGInputs depuis les widgets
+#  Construction d'un TrailingArmInputs depuis les widgets
 # --------------------------------------------------------------------------- #
-def _build_inputs() -> MLGInputs:
+def _build_inputs() -> TrailingArmInputs:
     def g(field: str) -> float:
         return float(st.session_state[f"f_{field}"])
 
@@ -652,7 +652,7 @@ def _build_inputs() -> MLGInputs:
 
     pts = {r["Point"]: pt(r) for _, r in points_df.iterrows()}
 
-    return MLGInputs(
+    return TrailingArmInputs(
         masse=g("masse"), vz=g("vz"), vx=g("vx"), lift=g("lift"),
         pitch=g("pitch"), roll=g("roll"), temps_simu=g("temps_simu"),
         it=g("it"), integrator="rk4",
@@ -707,7 +707,7 @@ if reset:
     for key in list(st.session_state.keys()):
         if key.startswith("f_") or key.endswith("_editor"):
             del st.session_state[key]
-    st.session_state.inputs = default_mlg_inputs()
+    st.session_state.inputs = default_trailing_arm_inputs()
     st.session_state.pop("field_errors", None)
     st.session_state.pop("result", None)
     st.rerun()

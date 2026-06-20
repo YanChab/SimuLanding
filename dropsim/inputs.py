@@ -1,8 +1,9 @@
-"""Modèle de données d'entrée du train à balancier (MLG) + valeurs par défaut.
+"""Modèle de données d'entrée du train à balancier (TrailingArm) + valeurs par défaut.
 
 Les valeurs sont saisies dans les **unités d'affichage** de l'Excel d'origine
-(mm, bar, cc, cSt, MPa, °, °C). La méthode :meth:`MLGInputs.to_si` produit la
-structure :class:`MLGParamsSI` utilisée en interne par le moteur (tout en SI).
+(mm, bar, cc, cSt, MPa, °, °C). La méthode :meth:`TrailingArmInputs.to_si` produit
+la structure :class:`TrailingArmParamsSI` utilisée en interne par le moteur
+(tout en SI).
 
 Les valeurs par défaut reproduisent l'onglet « MLG » du classeur pour le cas
 nominal (m = 1250 kg, Vz = 3.05 m/s, Vx = 39 m/s).
@@ -164,7 +165,7 @@ def compute_bulk_modulus_at_temperature(
 #  Entrées en unités d'affichage
 # --------------------------------------------------------------------------- #
 @dataclass
-class MLGInputs:
+class TrailingArmInputs:
     # --- Conditions de chute ---------------------------------------------- #
     masse: float = 1250.0          # kg  (masse supportée)
     vz: float = 3.05               # m/s (vitesse verticale de chute)
@@ -510,7 +511,7 @@ class MLGInputs:
         )
 
     # ------------------------------------------------------------------ #
-    def to_si(self) -> "MLGParamsSI":
+    def to_si(self) -> "TrailingArmParamsSI":
         """Convertit toutes les entrées en unités SI pour le moteur."""
         import numpy as np
 
@@ -542,7 +543,7 @@ class MLGInputs:
             self.Dbh / 2.0,
         )
 
-        return MLGParamsSI(
+        return TrailingArmParamsSI(
             masse=self.masse,
             vz=self.vz,
             vx=self.vx,
@@ -608,8 +609,8 @@ class MLGInputs:
 
 
 @dataclass
-class MLGParamsSI:
-    """Paramètres du modèle MLG, intégralement en unités SI (sauf rainures en mm).
+class TrailingArmParamsSI:
+    """Paramètres du modèle TrailingArm, intégralement en unités SI (sauf rainures en mm).
 
     Les rainures restent décrites en millimètres car la loi de metering
     (``CalculBH``) est tabulée millimètre par millimètre, comme dans le VBA.
@@ -712,9 +713,15 @@ class MLGParamsSI:
         return self.NbTrouDiap * self.DTrouDiap ** 2 * math.pi / 4.0
 
 
-def default_mlg_inputs() -> MLGInputs:
-    """Retourne les entrées par défaut (cas nominal de l'onglet « MLG »)."""
-    return MLGInputs()
+def default_trailing_arm_inputs() -> TrailingArmInputs:
+    """Retourne les entrées par défaut (cas nominal trailing arm)."""
+    return TrailingArmInputs()
 
 
-__all__ = ["Point3", "Rainure", "MLGInputs", "MLGParamsSI", "default_mlg_inputs"]
+__all__ = [
+    "Point3",
+    "Rainure",
+    "TrailingArmInputs",
+    "TrailingArmParamsSI",
+    "default_trailing_arm_inputs",
+]

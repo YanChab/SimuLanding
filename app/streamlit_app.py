@@ -1,4 +1,4 @@
-"""Application de simulation de drop test — train d'atterrissage à balancier (MLG).
+"""Application de simulation de drop test — train d'atterrissage à balancier (trailing arm).
 
 Remplace le classeur Excel ``DROSIM`` par une interface web locale :
 
@@ -26,11 +26,11 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from dropsim import default_mlg_inputs  # noqa: E402
+from dropsim import default_trailing_arm_inputs  # noqa: E402
 from theme import apply_theme  # noqa: E402
 
 st.set_page_config(
-    page_title="SimuLanding — Drop test MLG",
+    page_title="SimuLanding — Drop test Trailing Arm",
     page_icon="🛬",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -84,7 +84,7 @@ st.markdown(
 
 # Entrées par défaut conservées d'une page à l'autre.
 if "inputs" not in st.session_state:
-    st.session_state.inputs = default_mlg_inputs()
+    st.session_state.inputs = default_trailing_arm_inputs()
 
 
 # --------------------------------------------------------------------------- #
@@ -96,7 +96,7 @@ def accueil() -> None:
         unsafe_allow_html=True,
     )
     st.title("🛬 SimuLanding — Simulation de drop test")
-    st.subheader("Train d'atterrissage à balancier (MLG)")
+    st.subheader("Train d'atterrissage à balancier (Trailing Arm)")
 
     st.markdown(
         """

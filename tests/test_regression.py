@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dropsim import default_mlg_inputs, run_simulation
+from dropsim import default_trailing_arm_inputs, run_simulation
 
 # --------------------------------------------------------------------------- #
 #  Chemins de référence
@@ -59,7 +59,7 @@ REGRESSION_CASES: dict[str, dict[str, float]] = {
 
 
 def _inputs_for(overrides: dict[str, float]):
-    inp = default_mlg_inputs()
+    inp = default_trailing_arm_inputs()
     for key, value in overrides.items():
         setattr(inp, key, value)
     return inp
@@ -164,7 +164,7 @@ def test_curve_fz_rms_against_excel(reference_curve):
     Contrôle plus exigeant que la seule comparaison des pics : valide la *forme*
     de la réponse temporelle sur l'ensemble de l'historique.
     """
-    result = run_simulation(default_mlg_inputs())
+    result = run_simulation(default_trailing_arm_inputs())
     sim = result.df
 
     t_ref = reference_curve["Temps (s)"].to_numpy()
@@ -182,7 +182,7 @@ def test_curve_fz_rms_against_excel(reference_curve):
 @pytest.mark.skipif(not os.path.exists(REF_CSV), reason="CSV de référence absent")
 def test_curve_stroke_rms_against_excel(reference_curve):
     """Écart RMS sur la course d'amortisseur d(t) vs Excel < 2 % de la course max."""
-    result = run_simulation(default_mlg_inputs())
+    result = run_simulation(default_trailing_arm_inputs())
     sim = result.df
 
     t_ref = reference_curve["Temps (s)"].to_numpy()
@@ -266,12 +266,12 @@ def test_physical_bounds_hold(overrides):
     # (K = 1e8 N/m) qui autorise une légère pénétration physique au-delà de la
     # course mécanique. On tolère cette pénétration (quelques mm) mais on
     # détecte toute divergence (course aberrante de plusieurs cm).
-    course_max_mm = default_mlg_inputs().course
+    course_max_mm = default_trailing_arm_inputs().course
     assert s["Course max (mm)"] <= course_max_mm + 15.0, (
         f"Course {s['Course max (mm)']:.1f} mm bien au-delà de la butée "
         f"{course_max_mm} mm ({overrides}) — divergence probable"
     )
 
     # Sans vitesse d'avancement, pas d'effort de spin-up.
-    if overrides.get("vx", default_mlg_inputs().vx) == 0.0:
+    if overrides.get("vx", default_trailing_arm_inputs().vx) == 0.0:
         assert s["Effort horizontal max Fx (N)"] == pytest.approx(0.0, abs=1.0)

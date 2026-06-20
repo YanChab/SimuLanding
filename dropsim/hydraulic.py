@@ -15,7 +15,7 @@ import math
 import numpy as np
 
 from .errors import ErrorLevel, SimError
-from .inputs import MLGParamsSI
+from .inputs import TrailingArmParamsSI
 
 
 def _sign(x: float) -> float:
@@ -145,7 +145,7 @@ def _flow_annular_with_turbulence(
 
 
 def calcul_hydrau(
-    p: MLGParamsSI,
+    p: TrailingArmParamsSI,
     v: float,
     d: float,
     delta_pc_prev: float,

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from dropsim import default_mlg_inputs, run_simulation
+from dropsim import default_trailing_arm_inputs, run_simulation
 from dropsim.engine import _endstop
 
 
@@ -28,7 +28,7 @@ def test_endstop_smooth_matches_legacy_far_from_contact():
 
 def test_simulation_runs_with_smooth_endstop():
     """Le solveur complet doit tourner avec la butée lissée sans erreur."""
-    inp = default_mlg_inputs()
+    inp = default_trailing_arm_inputs()
     inp.endstop_smooth_mm = 2.0
     result = run_simulation(inp)
     assert result.n_steps > 0

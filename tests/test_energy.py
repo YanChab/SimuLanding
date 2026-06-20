@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dropsim import default_mlg_inputs, run_simulation
+from dropsim import default_trailing_arm_inputs, run_simulation
 from dropsim.engine import OUTPUT_COLUMNS
 
 # Seuil de tolérance sur le résidu de bilan, exprimé en fraction de l'énergie
@@ -24,7 +24,7 @@ RESIDUAL_TOL = 0.02
 
 @pytest.fixture(scope="module")
 def df():
-    return run_simulation(default_mlg_inputs()).df
+    return run_simulation(default_trailing_arm_inputs()).df
 
 
 def _col(df, key: str):
@@ -73,9 +73,9 @@ def test_energy_residual_bounded(df):
 def test_residual_decreases_with_timestep():
     # Le résidu se réduisant à l'erreur d'intégration d'Euler explicite (O(Δt)),
     # diviser le pas de temps par deux doit réduire nettement le résidu max.
-    base = default_mlg_inputs()
+    base = default_trailing_arm_inputs()
     df_coarse = run_simulation(base).df
-    fine = default_mlg_inputs()
+    fine = default_trailing_arm_inputs()
     fine.it = base.it / 2.0
     df_fine = run_simulation(fine).df
     res_coarse = float(np.abs(_col(df_coarse, "e_residual")).max())

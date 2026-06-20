@@ -1,4 +1,4 @@
-"""Point d'entrée haut niveau de la simulation MLG.
+"""Point d'entrée haut niveau de la simulation trailing arm.
 
 Enchaîne : validation des entrées (niveau SAISIE) → conversion SI → contrôles de
 cohérence (niveau PRÉ-CALCUL) → intégration temporelle (niveau EXÉCUTION) →
@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .engine import OUTPUT_COLUMNS, run_mlg
+from .engine import OUTPUT_COLUMNS, run_trailing_arm
 from .errors import ErrorCollector, ErrorLevel, SimError
-from .inputs import MLGInputs
+from .inputs import TrailingArmInputs
 
 
 @dataclass
@@ -80,8 +80,8 @@ def _negative_pressure_warnings(full: dict[str, np.ndarray]) -> list[SimError]:
     return warnings
 
 
-def run_simulation(inputs: MLGInputs, max_points: int = 1000, progress_callback: callable | None = None) -> SimulationResult:
-    """Valide, exécute et synthétise une simulation de drop test MLG.
+def run_simulation(inputs: TrailingArmInputs, max_points: int = 1000, progress_callback: callable | None = None) -> SimulationResult:
+    """Valide, exécute et synthétise une simulation de drop test trailing arm.
 
     ``progress_callback`` est une fonction optionnelle appelée à chaque itération
     avec (étape_courante, nombre_total_étapes) pour afficher la progression.
@@ -122,7 +122,7 @@ def run_simulation(inputs: MLGInputs, max_points: int = 1000, progress_callback:
         pre.raise_if_any()
 
     # Niveau EXÉCUTION.
-    engine_out = run_mlg(params, progress_callback=progress_callback)
+    engine_out = run_trailing_arm(params, progress_callback=progress_callback)
 
     data = _subsample(engine_out.data, max_points=max_points)
     df = pd.DataFrame({OUTPUT_COLUMNS[k]: v for k, v in data.items()})
@@ -132,10 +132,10 @@ def run_simulation(inputs: MLGInputs, max_points: int = 1000, progress_callback:
         geom_df.insert(0, "temps", data["temps"])
     full = engine_out.data
     summary = {
-        "Course max (mm)": float(np.max(full["mlg_d"]) * 1000.0),
+        "Course max (mm)": float(np.max(full["trailing_arm_d"]) * 1000.0),
         "Effort vertical max Fz (N)": float(np.max(full["tyre_ftyre"])),
         "Effort horizontal max Fx (N)": float(np.max(np.abs(full["tr_x"]))),
-        "Effort amortisseur max (N)": float(np.max(np.abs(full["mlg_ftot"]))),
+        "Effort amortisseur max (N)": float(np.max(np.abs(full["trailing_arm_ftot"]))),
         "Pression gaz max (bar)": float(np.max(full["pg"])),
         "Pression compression max (bar)": float(np.max(full["pc"])),
         "Accélération max (g)": float(np.max(np.abs(full["accms"])) / 9.81),
@@ -158,7 +158,7 @@ def run_simulation(inputs: MLGInputs, max_points: int = 1000, progress_callback:
 
 
 def _build_summary_rows(
-    full: dict[str, np.ndarray], inputs: MLGInputs
+    full: dict[str, np.ndarray], inputs: TrailingArmInputs
 ) -> list[tuple[str, float, str]]:
     """Reproduit la synthèse B46:C61 de l'onglet « Summary MLG ».
 
@@ -168,8 +168,8 @@ def _build_summary_rows(
     """
     fz = full["tyre_ftyre"]          # Tyre.FTyre (N)
     fx = full["tr_x"]                # TR.RsolX (N) — effort horizontal
-    stroke = full["mlg_d"]           # MLG.d (m)
-    vel = full["mlg_v"]              # MLG.v (m/s)
+    stroke = full["trailing_arm_d"]           # MLG.d (m)
+    vel = full["trailing_arm_v"]              # MLG.v (m/s)
     pg = full["pg"]                  # MLG.Pg (bar)
     pc = full["pc"]                  # MLG.Pc (bar)
     pd_ = full["pd"]                 # MLG.Pd (bar)

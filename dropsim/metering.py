@@ -16,7 +16,7 @@ import math
 
 import numpy as np
 
-from .inputs import MLGParamsSI
+from .inputs import TrailingArmParamsSI
 
 
 def _lens_area(e: float, r1: float, r2: float) -> float:
@@ -31,7 +31,7 @@ def _lens_area(e: float, r1: float, r2: float) -> float:
     return r1 * r1 * math.acos(a1) + r2 * r2 * math.acos(a2) - 0.5 * math.sqrt(rad)
 
 
-def build_section_table(p: MLGParamsSI) -> tuple[np.ndarray, np.ndarray]:
+def build_section_table(p: TrailingArmParamsSI) -> tuple[np.ndarray, np.ndarray]:
     """Construit la table (position [m], section [m²]) de la bague hydraulique.
 
     Returns

@@ -146,7 +146,7 @@ df = result.df
 COL = OUTPUT_COLUMNS  # clé interne -> libellé de colonne
 
 # Colonne « course » exprimée en mm pour l'affichage.
-course_mm = df[COL["mlg_d"]] * 1000.0
+course_mm = df[COL["trailing_arm_d"]] * 1000.0
 
 
 def _compute_kinematic_curve(inputs, n_pts: int = 401) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
@@ -366,7 +366,7 @@ with tab_eff_t:
             [
                 ("Fz (pneu/sol)", df[COL["tyre_ftyre"]]),
                 ("Fx (horizontal)", df[COL["tr_x"]]),
-                ("Effort amortisseur", df[COL["mlg_ftot"]]),
+                ("Effort amortisseur", df[COL["trailing_arm_ftot"]]),
             ],
             "Efforts en fonction du temps",
             "Temps (s)",
@@ -561,7 +561,7 @@ with tab_acc:
             t,
             [
                 ("Accélération masse susp. (g)", df[COL["accms"]] / 9.81),
-                ("Vitesse amortisseur (m/s)", df[COL["mlg_v"]]),
+                ("Vitesse amortisseur (m/s)", df[COL["trailing_arm_v"]]),
             ],
             "Accélération et vitesse en fonction du temps",
             "Temps (s)",
@@ -976,6 +976,6 @@ with st.expander("Séries temporelles (tableau)"):
 st.download_button(
     "⬇️ Exporter les résultats (CSV)",
     data=df.to_csv(index=False).encode("utf-8"),
-    file_name="resultats_mlg.csv",
+    file_name="resultats_trailing_arm.csv",
     mime="text/csv",
 )

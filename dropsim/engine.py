@@ -16,7 +16,7 @@ from .errors import ErrorCollector, ErrorLevel, SimError
 from .gas import GasSpring
 from .geometry import chgt_rep, deter_pos_bal_a, deter_pos_bal_r, rotate_about
 from .hydraulic import _sign, calcul_hydrau
-from .inputs import MLGParamsSI
+from .inputs import TrailingArmParamsSI
 from .metering import build_section_table, section_bh
 from .tyre import build_tyre_tables, f_tyre, mu, r_eff
 from .units import G
@@ -34,15 +34,15 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "thry": "ThRY (rad)",
     "tyre_defl": "Tyre.Defl (m)",
     "tyre_ftyre": "Tyre.FTyre (N)",
-    "mlg_v": "MLG.v (m/s)",
-    "mlg_d": "MLG.d (m)",
-    "mlg_ftot": "MLG.Ftot (N)",
-    "mlg_fhyd": "MLG.Fhyd (N)",
-    "mlg_ffrijoi": "MLG.FFriJoi (N)",
-    "mlg_fgas": "MLG.FGas (N)",
+    "trailing_arm_v": "TrailingArm.v (m/s)",
+    "trailing_arm_d": "TrailingArm.d (m)",
+    "trailing_arm_ftot": "TrailingArm.Ftot (N)",
+    "trailing_arm_fhyd": "TrailingArm.Fhyd (N)",
+    "trailing_arm_ffrijoi": "TrailingArm.FFriJoi (N)",
+    "trailing_arm_fgas": "TrailingArm.FGas (N)",
     "ta_z": "TA_bal.RsolZ (N)",
     "ta_x": "TA_bal.RsolX (N)",
-    "entraxe": "MLG.Entraxe (m)",
+    "entraxe": "TrailingArm.Entraxe (m)",
     "secbh": "Section de la BH (mm²)",
     "course_roue": "Course centre roue (m)",
     "tyre_alpha": "Tyre.Alpha (rad/s²)",
@@ -50,11 +50,11 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "tr_x": "TR_bal.RsolX (N)",
     "tyre_mu": "Tyre.Mu",
     "tyre_slip": "Tyre.Slip",
-    "pc": "MLG.Pc (bar)",
-    "pd": "MLG.Pd (bar)",
-    "pg": "MLG.Pg (bar)",
-    "delta_pc": "MLG.DeltaPc (bar)",
-    "delta_pd": "MLG.DeltaPd (bar)",
+    "pc": "TrailingArm.Pc (bar)",
+    "pd": "TrailingArm.Pd (bar)",
+    "pg": "TrailingArm.Pg (bar)",
+    "delta_pc": "TrailingArm.DeltaPc (bar)",
+    "delta_pd": "TrailingArm.DeltaPd (bar)",
     "hyd_qc_total": "Hydrau.Qc total (m³/s)",
     "hyd_qc_bh": "Hydrau.Qc rainures BH (m³/s)",
     "hyd_qc_leak": "Hydrau.Qc fuite annulaire (m³/s)",
@@ -171,7 +171,7 @@ def _endstop(
 
 
 def damper_force_step(
-    p: MLGParamsSI,
+    p: TrailingArmParamsSI,
     gas: GasSpring,
     tab_pos: np.ndarray,
     tab_sec: np.ndarray,
@@ -260,7 +260,7 @@ def damper_force_step(
 
 
 def damper_force_step_rk4_coupled(
-    p: MLGParamsSI,
+    p: TrailingArmParamsSI,
     gas: GasSpring,
     tab_pos: np.ndarray,
     tab_sec: np.ndarray,
@@ -357,7 +357,7 @@ def _set_gas_state(gas: GasSpring, state: tuple[float, float]) -> None:
 
 
 def _select_damper_core_solver(
-    p: MLGParamsSI,
+    p: TrailingArmParamsSI,
     d: float,
     v: float,
     pg_prev: float,
@@ -397,7 +397,7 @@ def _select_damper_core_solver(
 
 
 def _damper_force_step_implicit_endpoint(
-    p: MLGParamsSI,
+    p: TrailingArmParamsSI,
     gas: GasSpring,
     tab_pos: np.ndarray,
     tab_sec: np.ndarray,
@@ -438,7 +438,7 @@ def _damper_force_step_implicit_endpoint(
 
 
 def damper_force_step_implicit_adaptive(
-    p: MLGParamsSI,
+    p: TrailingArmParamsSI,
     gas: GasSpring,
     tab_pos: np.ndarray,
     tab_sec: np.ndarray,
@@ -589,8 +589,8 @@ def damper_force_step_implicit_adaptive(
     return last_step
 
 
-def run_mlg(
-    p: MLGParamsSI,
+def run_trailing_arm(
+    p: TrailingArmParamsSI,
     collector: ErrorCollector | None = None,
     section_override: tuple[np.ndarray, np.ndarray] | None = None,
     progress_callback: callable | None = None,
@@ -1063,12 +1063,12 @@ def run_mlg(
         out["thry"][i] = th_ry
         out["tyre_defl"][i] = defl
         out["tyre_ftyre"][i] = ftyre
-        out["mlg_v"][i] = v
-        out["mlg_d"][i] = d
-        out["mlg_ftot"][i] = ftot
-        out["mlg_fhyd"][i] = fhyd
-        out["mlg_ffrijoi"][i] = ffrijoi
-        out["mlg_fgas"][i] = fgas
+        out["trailing_arm_v"][i] = v
+        out["trailing_arm_d"][i] = d
+        out["trailing_arm_ftot"][i] = ftot
+        out["trailing_arm_fhyd"][i] = fhyd
+        out["trailing_arm_ffrijoi"][i] = ffrijoi
+        out["trailing_arm_fgas"][i] = fgas
         out["ta_z"][i] = -ta_z
         out["ta_x"][i] = -ta_x
         out["entraxe"][i] = entraxe
@@ -1147,5 +1147,4 @@ def run_mlg(
 
     return EngineOutput(data=out, n_steps=n_steps, warnings=c.warnings, geometry=geom)
 
-
-__all__ = ["run_mlg", "EngineOutput", "OUTPUT_COLUMNS", "GEOMETRY_KEYS"]
+__all__ = ["run_trailing_arm", "EngineOutput", "OUTPUT_COLUMNS", "GEOMETRY_KEYS"]

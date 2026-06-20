@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dropsim import default_mlg_inputs, run_simulation
+from dropsim import default_trailing_arm_inputs, run_simulation
 from dropsim.simulation import _negative_pressure_warnings
 
 REF_CSV = os.path.join(
@@ -31,7 +31,7 @@ FZ_TOL_REL = 0.015  # butée lissée par défaut: léger écart assumé vs réf�
 
 @pytest.fixture(scope="module")
 def result():
-    return run_simulation(default_mlg_inputs())
+    return run_simulation(default_trailing_arm_inputs())
 
 
 def test_simulation_runs(result):

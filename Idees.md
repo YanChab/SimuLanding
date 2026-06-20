@@ -16,4 +16,4 @@
 -> intégré la variation du gamma en fonction de la vitesse
 -> Rajouter un avertissement lorqu'il y a des pression négatives
 -> page paramètre du modèle pour pouvoir le configurer.
--> Rajouter une courbe du ratio cinématique
+-> Rajouter une courbe du ratio cinématique -> ok

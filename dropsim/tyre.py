@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from .inputs import MLGParamsSI
+from .inputs import TrailingArmParamsSI
 
 
-def build_tyre_tables(p: MLGParamsSI) -> tuple[np.ndarray, np.ndarray]:
+def build_tyre_tables(p: TrailingArmParamsSI) -> tuple[np.ndarray, np.ndarray]:
     """Construit les tables augmentées (déflexion [m], charge [N]) du pneu."""
     defl = list(p.tyre_defl)
     load = list(p.tyre_load)

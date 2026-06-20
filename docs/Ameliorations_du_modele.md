@@ -26,6 +26,19 @@
 3. Butée de contact lissée (§2.1) — stabilité ;
 4. puis expérimenter un intégrateur RK4/adaptatif (§1.1) en gardant Euler en option.
 
+## Mises à jour récentes (juin 2026)
+
+- Référence de validation réalignée sur une simulation de référence améliorée
+  (nouveaux jeux `golden_summary.json`, `golden_results.json` et CSV associé).
+- Convergence hydraulique rendue configurable via `hydraulic_error_tol` et
+  `hydraulic_max_iter` (UI + moteur + diagnostics).
+- Onglet dédié à la convergence hydraulique dans l'interface résultats
+  (itérations + erreur de convergence, double axe).
+- Graphe `Effort / course` enrichi avec l'effort horizontal `Fx`.
+- Affichage de progression pendant le calcul (barre + pourcentage).
+- Courbe de ratio cinématique ajoutée et calculée indépendamment du drop test,
+  sur toute la course amortisseur, avec double axe (ratio + course roue).
+
 ---
 
 ## 1. Schéma d'intégration numérique
@@ -47,7 +60,8 @@ manuellement (typiquement $10^{-4}$ s).
 - Conserver Euler en **option** pour comparer et garder la fidélité au classeur.
 
 **État d'avancement (juin 2026).**
-- Le sélecteur `integrator = euler|rk4` est disponible en entrée (UI + modèle).
+- L'interface utilisateur est désormais en mode RK4-only (plus de choix Euler).
+  Le modèle interne conserve le champ `integrator` pour compatibilité ascendante.
 - Le mode `rk4` est actif sur les intégrations cinématiques à accélération tenue
   constante pendant le pas (masse suspendue, rotation balancier, spring-back).
 - Le couplage complet gaz/hydraulique reste évalué explicitement au pas (même

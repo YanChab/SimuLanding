@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from dropsim import default_mlg_inputs, run_simulation
+from dropsim import default_trailing_arm_inputs, run_simulation
 from dropsim.storage import (
     DEFAULT_PROJECT,
     inputs_from_dict,
@@ -16,13 +16,13 @@ from dropsim.storage import (
 
 
 def test_inputs_roundtrip():
-    inp = default_mlg_inputs()
+    inp = default_trailing_arm_inputs()
     restored = inputs_from_dict(inputs_to_dict(inp))
     assert restored == inp
 
 
 def test_save_load_roundtrip(tmp_path):
-    inp = default_mlg_inputs()
+    inp = default_trailing_arm_inputs()
     result = run_simulation(inp)
 
     path = save_simulation(inp, result, name="Cas nominal", directory=tmp_path)
@@ -43,7 +43,7 @@ def test_save_load_roundtrip(tmp_path):
 
 
 def test_list_saved(tmp_path):
-    inp = default_mlg_inputs()
+    inp = default_trailing_arm_inputs()
     result = run_simulation(inp)
     save_simulation(inp, result, name="Premier", directory=tmp_path)
     save_simulation(inp, result, name="Deuxieme", directory=tmp_path)
@@ -54,7 +54,7 @@ def test_list_saved(tmp_path):
 
 
 def test_projects(tmp_path):
-    inp = default_mlg_inputs()
+    inp = default_trailing_arm_inputs()
     result = run_simulation(inp)
     save_simulation(inp, result, name="Essai 1", project="Avion A", directory=tmp_path)
     save_simulation(inp, result, name="Essai 2", project="Avion A", directory=tmp_path)

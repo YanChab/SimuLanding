@@ -1,8 +1,8 @@
 import math
-from dropsim import default_mlg_inputs
+from dropsim import default_trailing_arm_inputs
 from dropsim.hydraulic import _cd, calcul_hydrau
 
-p = default_mlg_inputs().to_si()
+p = default_trailing_arm_inputs().to_si()
 print("Sc=", p.Sc, "Sd=", p.Sd, "bulk=", p.bulk, "it=", p.it, "rho=", p.rho, "visc=", p.visc, "course=", p.course)
 
 # Conditions fresh à t=0.006

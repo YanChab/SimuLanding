@@ -1,9 +1,9 @@
 import math
 import numpy as np
-from dropsim import default_mlg_inputs
+from dropsim import default_trailing_arm_inputs
 from dropsim.hydraulic import _cd
 
-p = default_mlg_inputs().to_si()
+p = default_trailing_arm_inputs().to_si()
 
 v = 0.12283
 d = 9.75e-5

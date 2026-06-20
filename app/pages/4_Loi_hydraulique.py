@@ -24,7 +24,7 @@ _APP = Path(__file__).resolve().parent.parent
 if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
-from dropsim import default_mlg_inputs  # noqa: E402
+from dropsim import default_trailing_arm_inputs  # noqa: E402
 from dropsim.errors import SimError  # noqa: E402
 from dropsim.gas import GasSpring  # noqa: E402
 from dropsim.metering import build_section_table  # noqa: E402
@@ -44,7 +44,7 @@ st.caption(
 )
 
 if "inputs" not in st.session_state:
-    st.session_state.inputs = default_mlg_inputs()
+    st.session_state.inputs = default_trailing_arm_inputs()
 
 inputs = st.session_state.inputs
 

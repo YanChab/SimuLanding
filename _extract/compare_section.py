@@ -2,14 +2,14 @@
 import numpy as np
 import pandas as pd
 
-from dropsim import default_mlg_inputs
+from dropsim import default_trailing_arm_inputs
 from dropsim.metering import build_section_table, section_bh
 
 sec = pd.read_csv("_extract/reference/section_fresh.csv")
 pos_mm = pd.to_numeric(sec["pos_mm"], errors="coerce").to_numpy()
 sec_mm2 = pd.to_numeric(sec["section_mm2"], errors="coerce").to_numpy()
 
-p = default_mlg_inputs().to_si()
+p = default_trailing_arm_inputs().to_si()
 tab_pos, tab_sec = build_section_table(p)
 
 print("m(mm) | VBA_mm2 | mine_mm2")

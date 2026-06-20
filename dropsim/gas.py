@@ -18,7 +18,7 @@ import math
 import numpy as np
 
 from .errors import ErrorLevel, SimError
-from .inputs import MLGParamsSI
+from .inputs import TrailingArmParamsSI
 
 _K_HP = 0.02  # coefficient de raideur de l'activation HP (cf. VBA)
 
@@ -26,7 +26,7 @@ _K_HP = 0.02  # coefficient de raideur de l'activation HP (cf. VBA)
 class GasSpring:
     """État du ressort gazeux (volumes courants des deux chambres)."""
 
-    def __init__(self, p: MLGParamsSI) -> None:
+    def __init__(self, p: TrailingArmParamsSI) -> None:
         self.p = p
         self.Vgbp = p.Vgbp
         self.Vghp = p.Vghp

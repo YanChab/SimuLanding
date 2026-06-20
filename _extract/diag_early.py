@@ -2,8 +2,8 @@
 import numpy as np
 import pandas as pd
 
-from dropsim import default_mlg_inputs
-from dropsim.engine import run_mlg
+from dropsim import default_trailing_arm_inputs
+from dropsim.engine import run_trailing_arm
 
 fresh = pd.read_csv("_extract/reference/Results_MLG_fresh.csv")
 t = pd.to_numeric(fresh["Temps (s)"], errors="coerce").to_numpy()
@@ -19,7 +19,7 @@ def fcol(name):
     return None
 
 
-o = run_mlg(default_mlg_inputs().to_si())
+o = run_trailing_arm(default_trailing_arm_inputs().to_si())
 D = o.data
 
 pairs = [
@@ -29,8 +29,8 @@ pairs = [
     ("ThRY", "ThRY", "th_ry"),
     ("Tdefl", "Tyre.Defl", "tyre_defl"),
     ("Ftyre", "Tyre.FTyre", "tyre_ftyre"),
-    ("v", "MLG.v", "mlg_v"),
-    ("d_mm", "MLG.d", "mlg_d"),
+    ("v", "MLG.v", "trailing_arm_v"),
+    ("d_mm", "MLG.d", "trailing_arm_d"),
     ("Pc", "MLG.Pc", "pc"),
     ("Pg", "MLG.Pg", "pg"),
     ("Sec", "Section de la BH", None),
