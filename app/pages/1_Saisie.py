@@ -72,6 +72,9 @@ def _migrate_legacy_oil_defaults() -> None:
 
     inp = st.session_state.get("inputs")
     if isinstance(inp, TrailingArmInputs):
+        if getattr(inp, "model_kind", "trailing_arm") == "strait_strut":
+            st.session_state["_oil_defaults_migrated_v1"] = True
+            return
         if (
             _is_close(float(inp.k_huile), _LEGACY_OIL_DEFAULTS["k_huile"])
             and _is_close(

@@ -782,10 +782,137 @@ def default_trailing_arm_inputs() -> TrailingArmInputs:
 def default_strait_strut_inputs() -> StraitStrutInputs:
     """Retourne les entrées par défaut du modèle NLG (StraitStrut).
 
-    Les valeurs initiales reprennent la base validée du modèle TrailingArm,
-    puis seront spécialisées au fur et à mesure de la migration NLG Excel.
+    Valeurs extraites de l'onglet ``NLG`` du classeur Excel DROSIM
+    (RecupData de ``Feuil2.cls.vba``), incluant :
+    - dimensions de jambe,
+    - volumes/pressions gaz,
+    - huile (viscosité/bulk),
+    - géométrie de guidage,
+    - tables pneu et mu-slip,
+    - table de rainures BH.
     """
-    return StraitStrutInputs()
+    return StraitStrutInputs(
+        # Conditions de chute (Summary NLG cas nominal)
+        masse=955.0,
+        vz=3.05,
+        vx=37.0,
+        lift=0.67,
+        pitch=0.0,
+        roll=0.0,
+        temps_simu=0.5,
+        it=0.0005,
+        integrator="rk4",
+        damper_core_solver="auto_fast",
+        temperature=25.0,
+
+        # Amortisseur / géométrie NLG
+        Dpis=56.0,
+        Dbh=34.0,
+        Dt=50.0,
+        Dp=40.0,
+        DInsideBh=28.0,
+        DInsidePalierBh=34.0,
+        Lbh=200.0,
+        LPalierBh=6.0,
+        excentricite_palier_bh=0.0,
+        course=230.0,
+        DTrouPis=1.5,
+        NbTrouPis=10.0,
+        HauteurPisBh=10.0,
+        DTrouDiap=1.8,
+        NbTrouDiap=2.0,
+        endstop_smooth_mm=2.0,
+
+        # Joint / friction
+        tore=2.9,
+        fc=0.3064566929133859,
+        fh=0.0207,
+
+        # Gaz
+        Pinitbp=5.0,
+        Vgbp=338.7029579651496,
+        Vh=464.9714206945573,
+        Pinithp=40.0,
+        Vghp=166.25308322797184,
+        gamma=1.4,
+
+        # Huile (bulk NLG ≈ 196 MPa, cohérent avec Khuile legacy)
+        visc=11.254097376139114,
+        aeration_pct=0.05,
+        k_air=0.1,
+        k_huile=10000.0,
+        k_huile_temp_coeff=-0.003,
+        bulk=196.08035372895813,
+        rho=855.0,
+
+        # Pneu
+        unsprung_mass=6.0,
+        wheel_inertia=0.06493581275,
+        unload_radius=180.0,
+        kx=100000.0,
+        cx=275.2271788904577,
+        wheelmass=3.03,
+
+        # Champs hérités non utilisés par StraitStrut
+        jyy=1.0,
+        B=Point3(0.0, 0.0, 0.0),
+        A=Point3(0.0, 0.0, 0.0),
+        C=Point3(0.0, 0.0, 0.0),
+        R=Point3(0.0, 0.0, 0.0),
+        S=Point3(0.0, 0.0, 0.0),
+
+        # Tables NLG
+        tyre_curve=[
+            (0.0, 0.0),
+            (12.7, 3.55),
+            (25.4, 7.1),
+            (29.0, 8.0),
+            (45.97333333333333, 14.243333333333329),
+            (62.946666666666665, 20.486666666666668),
+            (79.92, 26.73),
+            (80.0, 27.0),
+            (88.0, 54.00000000000053),
+        ],
+        mu_curve=[
+            (0.0, 0.0),
+            (0.05, 0.53),
+            (0.08, 0.8),
+            (0.1, 0.89),
+            (0.15, 1.0),
+            (0.2, 0.98),
+            (0.25, 0.94),
+            (0.3, 0.89),
+            (0.4, 0.82),
+            (0.5, 0.77),
+            (0.6, 0.72),
+            (0.7, 0.65),
+            (0.8, 0.6),
+            (0.9, 0.53),
+            (1.0, 0.49),
+        ],
+
+        diametre_rainure=20.0,
+        rainures=[
+            Rainure(0.0, 240.0, 16.0),
+            Rainure(0.0, 240.0, 16.0),
+            Rainure(0.0, 240.0, 16.0),
+            Rainure(0.0, 240.0, 16.0),
+            Rainure(0.0, 170.0, 16.4),
+            Rainure(0.0, 170.0, 17.0),
+            Rainure(0.0, 240.0, 17.0),
+            Rainure(0.0, 240.0, 17.0),
+        ],
+
+        # Géométrie de jambe / guidage NLG
+        strut_pitch=10.0,
+        strut_roll=0.0,
+        h_pivot_z=869.0,
+        h_guide_top_z=494.0,
+        h_guide_bot_z=346.0,
+        bague_guide=20.0,
+        bague_piston=20.0,
+        seal_precomp_pa=110_649.0,
+    )
 
 
 __all__ = [

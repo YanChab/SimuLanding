@@ -45,8 +45,10 @@ def inputs_to_dict(inputs: TrailingArmInputs | StraitStrutInputs) -> dict:
 
 
 def inputs_from_dict(d: dict) -> TrailingArmInputs | StraitStrutInputs:
-    """Reconstruit ``TrailingArmInputs`` depuis un dictionnaire (robuste aux clés en trop)."""
-    known = {f.name for f in fields(TrailingArmInputs)}
+    """Reconstruit des entrées depuis un dictionnaire (robuste aux clés en trop)."""
+    model_kind = d.get("model_kind", "trailing_arm")
+    cls = StraitStrutInputs if model_kind == "strait_strut" else TrailingArmInputs
+    known = {f.name for f in fields(cls)}
     data = {k: v for k, v in d.items() if k in known}
 
     if data.get("damper_core_solver") in {"legacy", "implicit_adaptive", "auto"}:
@@ -66,8 +68,8 @@ def inputs_from_dict(d: dict) -> TrailingArmInputs | StraitStrutInputs:
     if "mu_curve" in data:
         data["mu_curve"] = [tuple(t) for t in data["mu_curve"]]
 
-    model_kind = data.get("model_kind", "trailing_arm")
-    if model_kind == "strait_strut":
+    resolved_kind = data.get("model_kind", model_kind)
+    if resolved_kind == "strait_strut":
         return StraitStrutInputs(**data)
     return TrailingArmInputs(**data)
 
