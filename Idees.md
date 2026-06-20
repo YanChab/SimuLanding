@@ -1,15 +1,15 @@
 -> affichage des données saisi en tableau -> OK à améliorer encore
--> intégration de la température -> OK a voir pour le module de compressibilité
+-> intégration de la température -> OK
 -> intégration du calcul en train droit
 -> intégration du calcul avion complet
 -> créer un système de sauvegarde des configurations -> OK
 -> lui faire faire un fichier scientifique -> OK
 -> revoir interface résultats -> OK
 -> rajouter un graphe sur le quel on peut mettre les courbes que l'on veut-> OK
--> rajouter la fuite entre le palbh et la BH -> OK à valider
+-> rajouter la fuite entre le palbh et la BH -> OK
 -> remplacement de la méthode de calcul en RK
 -> calcul des efforts aux liaisons -> OK
 -> afficher le teblea d'effort hydraulique -> OK
--> intégrer les tolérances sur les effort hydrauliques
+-> intégrer les tolérances sur les effort hydrauliques -> OK
 -> permettre le calcul du bulk en fonction de l'aeration -> OK
 -> intégré la variation du gamma en fonction de la vitesse
