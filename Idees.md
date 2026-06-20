@@ -8,7 +8,8 @@
 -> rajouter un graphe sur le quel on peut mettre les courbes que l'on veut-> OK
 -> rajouter la fuite entre le palbh et la BH -> OK à valider
 -> remplacement de la méthode de calcul en RK
--> calcul des efforts aux liaisons
--> afficher le teblea d'effort hydraulique
+-> calcul des efforts aux liaisons -> OK
+-> afficher le teblea d'effort hydraulique -> OK
 -> intégrer les tolérances sur les effort hydrauliques
--> permettre le calcul du bulk en fonction de l'aeration
+-> permettre le calcul du bulk en fonction de l'aeration -> OK
+-> intégré la variation du gamma en fonction de la vitesse

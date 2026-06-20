@@ -24,7 +24,14 @@ if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
 from dropsim import MLGInputs, SimError, default_mlg_inputs, run_simulation  # noqa: E402
-from dropsim.inputs import Point3, Rainure, compute_gas_oil_at_temperature, TEMP_REF_C  # noqa: E402
+from dropsim.inputs import (  # noqa: E402
+    Point3,
+    Rainure,
+    compute_gas_oil_at_temperature,
+    compute_bulk_modulus_at_temperature,
+    compute_bulk_modulus_from_aeration,
+    TEMP_REF_C,
+)
 from dropsim.metering import build_section_table  # noqa: E402
 from theme import apply_theme  # noqa: E402
 
@@ -32,6 +39,67 @@ apply_theme()
 
 if "inputs" not in st.session_state:
     st.session_state.inputs = default_mlg_inputs()
+
+_LEGACY_OIL_DEFAULTS = {
+    "k_huile": 10000.0,
+    "k_huile_temp_coeff": -0.003,
+    "bulk": 196.08,
+}
+
+
+def _is_close(a: float, b: float, *, tol: float = 1.0e-9) -> bool:
+    return abs(a - b) <= tol * max(1.0, abs(b))
+
+
+def _migrate_legacy_oil_defaults() -> None:
+    """Migre une session héritée (anciens défauts Excel) vers les défauts
+    MIL-PRF-87257, sans écraser des valeurs déjà personnalisées."""
+    if st.session_state.get("_oil_defaults_migrated_v1", False):
+        return
+
+    new_defaults = default_mlg_inputs()
+
+    inp = st.session_state.get("inputs")
+    if isinstance(inp, MLGInputs):
+        if (
+            _is_close(float(inp.k_huile), _LEGACY_OIL_DEFAULTS["k_huile"])
+            and _is_close(
+                float(inp.k_huile_temp_coeff),
+                _LEGACY_OIL_DEFAULTS["k_huile_temp_coeff"],
+            )
+            and _is_close(float(inp.bulk), _LEGACY_OIL_DEFAULTS["bulk"])
+        ):
+            inp.k_huile = float(new_defaults.k_huile)
+            inp.k_huile_temp_coeff = float(new_defaults.k_huile_temp_coeff)
+            inp.bulk = float(new_defaults.bulk)
+
+    if _is_close(
+        float(st.session_state.get("f_k_huile", _LEGACY_OIL_DEFAULTS["k_huile"])),
+        _LEGACY_OIL_DEFAULTS["k_huile"],
+    ):
+        st.session_state["f_k_huile"] = float(new_defaults.k_huile)
+
+    if _is_close(
+        float(
+            st.session_state.get(
+                "f_k_huile_temp_coeff",
+                _LEGACY_OIL_DEFAULTS["k_huile_temp_coeff"],
+            )
+        ),
+        _LEGACY_OIL_DEFAULTS["k_huile_temp_coeff"],
+    ):
+        st.session_state["f_k_huile_temp_coeff"] = float(new_defaults.k_huile_temp_coeff)
+
+    if _is_close(
+        float(st.session_state.get("f_bulk", _LEGACY_OIL_DEFAULTS["bulk"])),
+        _LEGACY_OIL_DEFAULTS["bulk"],
+    ):
+        st.session_state["f_bulk"] = float(new_defaults.bulk)
+
+    st.session_state["_oil_defaults_migrated_v1"] = True
+
+
+_migrate_legacy_oil_defaults()
 
 # Erreurs localisées issues de la dernière validation : {champ: message}.
 field_errors: dict[str, str] = st.session_state.get("field_errors", {})
@@ -403,9 +471,55 @@ with col_huile:
     st.subheader("Huile")
     num_table([
         ("Viscosité cinématique (cSt)", "visc", inp.visc),
-        ("Module de compressibilité (MPa)", "bulk", inp.bulk),
         ("Masse volumique ρ (kg/m³)", "rho", inp.rho),
+        ("Aération volumique à 25°C (%)", "aeration_pct", inp.aeration_pct),
+        ("Module compressibilité azote Kair à 25°C (MPa)", "k_air", inp.k_air),
+        ("Module compressibilité huile Khuile à 25°C (MPa)", "k_huile", inp.k_huile),
+        ("Sensibilité thermique Khuile (1/°C)", "k_huile_temp_coeff", inp.k_huile_temp_coeff),
     ], "huile_editor")
+    st.caption(
+        "Valeurs par défaut de compressibilité calibrées sur des données "
+        "MIL-PRF-87257 (point de référence 40 °C / 27,6 MPa)."
+    )
+    try:
+        _bulk_25 = compute_bulk_modulus_from_aeration(
+            aeration_pct=float(st.session_state.get("f_aeration_pct", inp.aeration_pct)),
+            k_air=float(st.session_state.get("f_k_air", inp.k_air)),
+            k_huile=float(st.session_state.get("f_k_huile", inp.k_huile)),
+        )
+        _bulk_adj = compute_bulk_modulus_at_temperature(
+            aeration_pct=float(st.session_state.get("f_aeration_pct", inp.aeration_pct)),
+            k_air_ref=float(st.session_state.get("f_k_air", inp.k_air)),
+            k_huile_ref=float(st.session_state.get("f_k_huile", inp.k_huile)),
+            temperature=float(st.session_state.get("f_temperature", inp.temperature)),
+            k_huile_temp_coeff=float(
+                st.session_state.get("f_k_huile_temp_coeff", inp.k_huile_temp_coeff)
+            ),
+        )
+        _bulk_mpa = float(_bulk_adj["bulk"])
+    except (TypeError, ValueError):
+        _bulk_mpa = float(inp.bulk)
+        _bulk_25 = float(inp.bulk)
+        _bulk_adj = {
+            "k_air": float(inp.k_air),
+            "k_huile": float(inp.k_huile),
+            "bulk_ref": float(inp.bulk),
+            "bulk": float(inp.bulk),
+        }
+        st.caption("Bulk calculé indisponible tant que les paramètres d'aération sont invalides.")
+    # Le module utilisé par la simulation est synchronisé avec la formule MLG/NLG
+    # et corrigé à la température courante.
+    st.session_state["f_bulk"] = float(_bulk_mpa)
+    _t_cur = float(st.session_state.get("f_temperature", inp.temperature))
+    st.markdown(
+        f"**Compressibilité calculée** (référence {TEMP_REF_C:g} °C, appliquée à {_t_cur:g} °C)"
+    )
+    value_table([
+        ("Bulk effectif à 25°C (MPa)", _bulk_25),
+        ("Kair corrigé en T (MPa)", float(_bulk_adj["k_air"])),
+        ("Khuile corrigé en T (MPa)", float(_bulk_adj["k_huile"])),
+        ("Bulk effectif à la température courante (MPa)", _bulk_mpa),
+    ])
     _visc_temp = float(st.session_state.get("f_temperature", inp.temperature))
     _visc_adj = compute_gas_oil_at_temperature(
         Pinitbp=float(st.session_state.get("f_Pinitbp", inp.Pinitbp)),
@@ -511,7 +625,13 @@ def _build_inputs() -> MLGInputs:
         tore=g("tore"), fc=g("fc"), fh=g("fh"),
         Pinitbp=g("Pinitbp"), Vgbp=g("Vgbp"), Vh=g("Vh"),
         Pinithp=g("Pinithp"), Vghp=g("Vghp"), gamma=g("gamma"),
-        visc=g("visc"), bulk=g("bulk"), rho=g("rho"),
+        visc=g("visc"),
+        aeration_pct=g("aeration_pct"),
+        k_air=g("k_air"),
+        k_huile=g("k_huile"),
+        k_huile_temp_coeff=g("k_huile_temp_coeff"),
+        bulk=g("bulk"),
+        rho=g("rho"),
         unsprung_mass=g("unsprung_mass"), wheel_inertia=g("wheel_inertia"),
         unload_radius=g("unload_radius"), kx=g("kx"), cx=g("cx"),
         wheelmass=g("wheelmass"), jyy=g("jyy"),

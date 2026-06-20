@@ -93,6 +93,73 @@ def compute_gas_oil_at_temperature(
     }
 
 
+def compute_bulk_modulus_from_aeration(
+    *,
+    aeration_pct: float,
+    k_air: float,
+    k_huile: float,
+) -> float:
+    """Calcule le module de compressibilité effectif (MPa) du mélange huile + gaz.
+
+    Reproduit la formule des onglets Excel ``MLG``/``NLG`` (cellule O36) :
+
+    ``Bulk = 1 / (alpha / Kair + (1 - alpha) / Khuile)``
+
+    où ``alpha`` est la fraction volumique d'aération (en %) convertie en
+    fraction, ``Kair`` et ``Khuile`` sont exprimés en MPa.
+    """
+    alpha = aeration_pct / 100.0
+    if not (0.0 <= alpha < 1.0):
+        raise ValueError("aeration_pct doit être dans [0, 100).")
+    if k_air <= 0.0 or k_huile <= 0.0:
+        raise ValueError("k_air et k_huile doivent être strictement positifs.")
+    return 1.0 / (alpha / k_air + (1.0 - alpha) / k_huile)
+
+
+def compute_bulk_modulus_at_temperature(
+    *,
+    aeration_pct: float,
+    k_air_ref: float,
+    k_huile_ref: float,
+    temperature: float,
+    k_huile_temp_coeff: float,
+    temp_ref: float = TEMP_REF_C,
+) -> dict[str, float]:
+    """Calcule les compressibilités à ``temperature`` à partir des valeurs à 25 °C.
+
+    Hypothèses de travail (modèle système 0D/1D) :
+
+    - ``Kair(T)`` suit le rapport thermodynamique absolu
+      ``(T+273.15)/(Tref+273.15)`` (gaz idéal, volume quasi constant) ;
+    - ``Khuile(T)`` suit une loi affine relative
+      ``Khuile_ref * (1 + cT * (T - Tref))`` ;
+    - le bulk effectif est ensuite calculé par la même loi de mélange que
+      l'Excel (MLG/NLG cellule O36).
+    """
+    ratio_t = (temperature + 273.15) / (temp_ref + 273.15)
+    k_air_t = k_air_ref * ratio_t
+    k_huile_t = k_huile_ref * (1.0 + k_huile_temp_coeff * (temperature - temp_ref))
+    if k_huile_t <= 0.0:
+        raise ValueError("Le module huile corrigé en température devient non positif.")
+
+    bulk_ref = compute_bulk_modulus_from_aeration(
+        aeration_pct=aeration_pct,
+        k_air=k_air_ref,
+        k_huile=k_huile_ref,
+    )
+    bulk_t = compute_bulk_modulus_from_aeration(
+        aeration_pct=aeration_pct,
+        k_air=k_air_t,
+        k_huile=k_huile_t,
+    )
+    return {
+        "k_air": k_air_t,
+        "k_huile": k_huile_t,
+        "bulk_ref": bulk_ref,
+        "bulk": bulk_t,
+    }
+
+
 # --------------------------------------------------------------------------- #
 #  Entrées en unités d'affichage
 # --------------------------------------------------------------------------- #
@@ -145,7 +212,13 @@ class MLGInputs:
 
     # --- Huile ------------------------------------------------------------ #
     visc: float = 11.2541          # cSt viscosité cinématique
-    bulk: float = 196.08           # MPa module de compressibilité
+    aeration_pct: float = 0.05     # %   taux d'aération volumique (Excel R34=0.0005)
+    k_air: float = 0.1             # MPa module équivalent gaz à 25 °C (Excel R35)
+    # Valeurs par défaut orientées MIL-PRF-87257 (H-538), calibrées pour
+    # reproduire ~1418 MPa à 40 °C (RADCOLUBE FR257 TDS 2025, 27.6 MPa).
+    k_huile: float = 1500.0        # MPa module de l'huile pure à 25 °C
+    k_huile_temp_coeff: float = -0.00364  # 1/°C => Khuile(40 °C) ≈ 1418 MPa
+    bulk: float = 176.53           # MPa module effectif à 25 °C (aération 0.05 %)
     rho: float = 855.0             # kg/m³ masse volumique
 
     # --- Pneu ------------------------------------------------------------- #
@@ -312,8 +385,27 @@ class MLGInputs:
 
         # Huile
         positive(self.visc, "visc", "La viscosité")
+        positive(self.k_air, "k_air", "Le module de compressibilité de l'azote")
+        positive(self.k_huile, "k_huile", "Le module de compressibilité de l'huile pure")
         positive(self.bulk, "bulk", "Le module de compressibilité")
         positive(self.rho, "rho", "La masse volumique de l'huile")
+        c.check(
+            not (0.0 <= self.aeration_pct < 100.0),
+            code="AERATION_HORS_PLAGE",
+            message=(
+                f"Le taux d'aération doit être compris entre 0 et 100 % "
+                f"(reçu : {self.aeration_pct})."
+            ),
+            field="aeration_pct",
+            hint="Saisir un pourcentage d'aération entre 0 et strictement inférieur à 100.",
+        )
+        c.check(
+            self.k_huile * (1.0 + self.k_huile_temp_coeff * (self.temperature - TEMP_REF_C)) <= 0.0,
+            code="KHUILE_T_NON_POSITIF",
+            message="Le module de compressibilité de l'huile corrigé en température devient non positif.",
+            field="k_huile_temp_coeff",
+            hint="Réduire la sensibilité thermique ou ajuster Khuile.",
+        )
 
         # Pneu
         positive(self.unload_radius, "unload_radius", "Le rayon libre du pneu")
@@ -396,6 +488,13 @@ class MLGInputs:
 
         # Gaz et huile recalculés à la température de chute (cf. Excel MLG/NLG).
         adj = self.gas_oil_at_temperature()
+        bulk_adj = compute_bulk_modulus_at_temperature(
+            aeration_pct=self.aeration_pct,
+            k_air_ref=self.k_air,
+            k_huile_ref=self.k_huile,
+            temperature=self.temperature,
+            k_huile_temp_coeff=self.k_huile_temp_coeff,
+        )
 
         return MLGParamsSI(
             masse=self.masse,
@@ -431,7 +530,7 @@ class MLGInputs:
             Vghp=adj["Vghp"] * U.CC_TO_M3,
             gamma=self.gamma,
             visc=adj["visc"] * U.CST_TO_M2S,
-            bulk=self.bulk * U.MPA_TO_PA,
+            bulk=bulk_adj["bulk"] * U.MPA_TO_PA,
             rho=self.rho,
             unsprung_mass=self.unsprung_mass,
             wheel_inertia=self.wheel_inertia,

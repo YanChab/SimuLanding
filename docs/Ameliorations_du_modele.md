@@ -17,6 +17,7 @@
 | 1.1 | Intégrateur RK4 / adaptatif | Numérique | Fort | Moyen | Élevé |
 | 1.2 | Convergence réelle des solveurs | Numérique | Moyen | Moyen | Moyen |
 | 3.x | Raffinements physiques (γ, friction, pneu) | Physique | Variable | Moyen | Variable |
+| 3.5 | Compressibilité et pertes de charge | Physique | Moyen | Moyen | Moyen |
 | 4.1 | Dynamique 3D / masse non suspendue | Physique | Moyen | Élevé | Élevé |
 
 **Ordre de démarrage recommandé** (gain rapide, risque faible) :
@@ -133,6 +134,64 @@ verticale).
 
 **Proposition.** Ajouter un terme d'amortissement vertical du pneu (modèle
 ressort-amortisseur), si les données d'hystérésis pneu sont disponibles.
+
+### 3.5 Compressibilité de l'huile et pertes de charge: étude comparative — *impact moyen à fort*
+
+**Constat.** Le modèle actuel traite correctement la compressibilité au bon
+endroit physique: dans le **bilan de volume** de la chambre (`gas.py`) via le
+module volumique $B$, tandis que la **perte de charge** reste fondée sur une loi
+orifice/Bernoulli quasi-incompressible (`hydraulic.py`) avec masse volumique
+constante. C'est une hypothèse standard pour les amortisseurs hydrauliques tant
+que les variations de pression restent loin de la cavitation et que les effets
+thermiques restent secondaires.
+
+**Comparatif des formulations possibles.**
+
+| Formulation | Idée | Avantage | Limite | Insertion dans `dropsim` |
+|---|---|---|---|---|
+| Actuelle | $\Delta P = \tfrac12\rho(Q/(SC_d))^2\,\mathrm{sign}(Q)$, compressibilité seulement dans le bilan de volume | Simple, robuste, fidèle au VBA | Densité figée, pas de cavitation, pas d'air dissous | `hydraulic.py` + `gas.py` |
+| Quasi-compressible | Remplacer $\rho$ par une densité moyenne $\bar\rho(P,T)$ ou un coefficient corrigé | Faible coût, améliore les très fortes pressions | Gain limité si l'huile reste peu compressible | `hydraulic.py` |
+| Compressible avec densité variable | Résoudre $\Delta P$ avec une loi d'état $\rho(P,T)$ et débit massique $\dot m$ | Plus cohérent si la pression varie fortement | Newton plus raide, calibration plus lourde | `hydraulic.py` |
+| Compressible avec cavitation / aération | Ajouter un plafond de pression basse et un $B_{eff}$ dégradé par l'air dissous | Représente les pics raides et la perte d'amortissement | Requiert paramètres supplémentaires et validation expérimentale | `hydraulic.py` + `gas.py` |
+
+**Lecture comparative.**
+- Pour un amortisseur d'atterrisseur, la formulation la plus utilisée en modèle
+  système reste celle du projet: huile faiblement compressible au niveau du
+  volume de chambre, pertes de charge locales de type orifice.
+- La formulation **quasi-compressible** est le meilleur compromis si l'on veut
+  améliorer la physique sans changer l'architecture numérique: on conserve la
+  structure du solveur, mais on évalue $\rho$ et/ou $C_d$ à partir d'une
+  pression moyenne sur la branche hydraulique.
+- La formulation **massique** (débit massique au lieu de débit volumique) n'a
+  d'intérêt que si l'on cherche à traiter des écarts de pression très élevés ou
+  des variations thermiques marquées; elle rend le Newton plus délicat sans
+  bénéfice majeur sur le cas nominal.
+- Le traitement **cavitation / aération** devient pertinent si les calculs ou
+  les essais montrent une chute de pression proche de la pression de vapeur ou
+  une dérive nette des pics mesurés à grande vitesse. C'est le vrai saut de
+  fidélité, mais aussi le plus coûteux en calibration.
+
+**Comment l'implanter proprement dans le modèle.**
+- Conserver le mode actuel comme **référence** et ajouter un drapeau de
+  configuration, par exemple `hydraulic_model = "legacy" | "quasi_compressible" | "massique" | "cavitation"`.
+- Isoler la loi de débit dans une fonction dédiée, de façon à pouvoir choisir
+  entre un débit volumique classique et une version corrigée sans réécrire la
+  boucle Newton.
+- Introduire une loi d'état locale simple, par exemple $\rho(P) = \rho_0
+  (1 + (P-P_0)/B)$, uniquement dans la branche choisie par le drapeau.
+- Si la cavitation est activée, borner la pression minimale à une valeur de
+  référence (pression de vapeur ou pression d'aération) et faire décroître
+  l'amortissement effectif quand la chambre se désaère.
+- Garder la version actuelle en mode par défaut pour préserver la comparabilité
+  avec l'Excel et les tests de non-régression.
+
+**Priorité recommandée.**
+1. Étape 1: formulation quasi-compressible avec densité moyenne, car elle se
+   branche sans changer la topologie du solveur.
+2. Étape 2: ajout d'un $B_{eff}$ ou d'une cavitation simplifiée si les écarts
+   avec l'essai restent concentrés sur les pics de pression ou le rebond.
+3. Étape 3: passage au débit massique seulement si une campagne d'essais ou une
+   étude de sensibilité montre que la variation de densité n'est plus négligeable.
 
 ---
 

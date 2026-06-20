@@ -300,6 +300,117 @@ $T$ (module `inputs.py`, reproduisant les cellules G41–G45 et O35 du classeur)
 - **pression HP** : $P_{hp}(T) = P_{hp}\, r$ ;
 - **viscosité** : loi exponentielle $\nu(T) = 20\,e^{-0{,}023\,T}$ (cSt) pour $T>0$.
 
+### 6.4 Module de compressibilité effectif avec aération
+
+Le module de compressibilité utilisé par le moteur est calculé en deux étapes :
+
+1. définition des paramètres de référence à $T_{ref}=25\,^{\circ}\mathrm{C}$
+   (valeurs de saisie) ;
+2. correction en température à $T$, puis calcul du module équivalent du mélange
+   huile + gaz.
+
+#### 6.4.1 Valeurs de référence à 25 °C
+
+La loi de mélange (moyenne harmonique des modules) est :
+
+$$
+B_{eff} = \left(\frac{\alpha}{K_{air}} + \frac{1-\alpha}{K_{huile}}\right)^{-1}
+$$
+
+avec :
+- $\alpha$ : fraction volumique de gaz (aération), en pratique saisie en % puis
+  convertie en fraction ;
+- $K_{air}$ : module de compressibilité équivalent de la phase gazeuse (MPa) ;
+- $K_{huile}$ : module de compressibilité de l'huile non aérée (MPa).
+
+Dans la version actuelle, les valeurs par défaut sont basées sur des données
+MIL-PRF-87257 disponibles publiquement :
+$\alpha = 0{,}0005$ (0,05 %), $K_{air,ref}=0{,}1$ MPa,
+$K_{huile,ref}=1\,500$ MPa à 25 °C,
+ce qui donne $B_{eff}(25\,^{\circ}\mathrm{C}) \approx 176{,}53$ MPa.
+
+#### 6.4.2 Correction en température
+
+Pour le calcul au point de fonctionnement (température de chute $T$),
+`dropsim` applique les corrections suivantes :
+
+$$
+K_{air}(T) = K_{air,ref}\,\frac{T+273{,}15}{T_{ref}+273{,}15}
+$$
+
+Cette relation provient du comportement d'un gaz parfait piégé dans des
+micro-volumes (bulles/aération) :
+
+$$
+B_g = -V\,\frac{dP}{dV} = n\,P_{abs}
+$$
+
+où $B_g$ est le module volumique du gaz et $n$ l'exposant polytropique
+($n=1$ en isotherme, $n=\gamma$ en adiabatique). Dans ce cadre :
+
+- à volume de gaz donné, $P_{abs}\propto T_K$ (loi des gaz parfaits,
+  température absolue $T_K=T+273{,}15$) ;
+- donc $B_g\propto P_{abs}\propto T_K$ ;
+- en regroupant les constantes (dont $n$) dans la valeur de référence
+  $K_{air,ref}$, on obtient la loi de mise à l'échelle utilisée dans le code.
+
+Autrement dit, le modèle suppose que la **raideur volumique apparente** de la
+phase gazeuse varie linéairement avec la température absolue.
+
+Ordre de grandeur (par rapport à 25 °C) :
+
+- à 0 °C : $K_{air}(0)/K_{air}(25) = 273{,}15/298{,}15 \approx 0{,}916$ ;
+- à 40 °C : $K_{air}(40)/K_{air}(25) = 313{,}15/298{,}15 \approx 1{,}050$.
+
+Cette dépendance est cohérente pour un modèle système 0D/1D. Elle ne représente
+pas explicitement les phénomènes fins de transfert thermique local, dissolution
+du gaz, ni la variation transitoire de l'exposant polytropique.
+
+$$
+K_{huile}(T) = K_{huile,ref}\,\big(1 + c_T\,(T-T_{ref})\big)
+$$
+
+où $c_T$ est la sensibilité thermique relative de $K_{huile}$ (1/°C),
+paramétrable dans la saisie. Le module équivalent utilisé par la simulation est
+alors :
+
+$$
+B_{eff}(T)=\left(\frac{\alpha}{K_{air}(T)}+\frac{1-\alpha}{K_{huile}(T)}\right)^{-1}
+$$
+
+Par défaut, $c_T=-0{,}00364\,\mathrm{\,^{\circ}C^{-1}}$, ce qui donne
+$K_{huile}(40\,^{\circ}\mathrm{C})\approx 1\,418$ MPa, cohérent avec la valeur
+typique publiée pour une huile MIL-PRF-87257 testée à 40 °C et 27,6 MPa
+(4000 psig).
+
+Le terme $\alpha$ est conservé constant avec la température dans cette version
+(hypothèse de modèle système). La dynamique fine des bulles (dissolution,
+cavitation transitoire, coalescence) n'est pas résolue explicitement.
+
+#### 6.4.3 Sources
+
+- **Source Excel de référence (implémentation historique)** :
+  `DROSIM_SA61-_#Simulation drop test avion complet.xlsm`, onglets **MLG** et
+  **NLG**, cellule **O36** :
+  $B_{eff} = 1/(R34/R35 + (1-R34)/R36)$ ; avec **R34** (aération),
+  **R35** ($K_{air}$), **R36** ($K_{huile}$).
+- **Source MIL-PRF-87257 (spécification)** :
+  `MIL-PRF-87257C` (public domain via Everyspec) : exigence
+  $B_{iso,sec}(40\,^{\circ}\mathrm{C},27{,}6\,\mathrm{MPa})\ge 1379$ MPa.
+- **Source produit qualifié MIL-PRF-87257 (valeur typique)** :
+  fiche technique `RADCOLUBE FR257` (MIL-PRF-87257F), valeur typique
+  $B_{iso,sec}(40\,^{\circ}\mathrm{C},27{,}6\,\mathrm{MPa})\approx 1418$ MPa.
+- **Source implémentation SimuLanding** :
+  `dropsim/inputs.py`, fonctions
+  `compute_bulk_modulus_from_aeration` et
+  `compute_bulk_modulus_at_temperature`.
+- **Base physique utilisée** :
+  loi des gaz parfaits (forme absolue en Kelvin) pour l'évolution de la phase
+  gazeuse et loi de mélange en compressibilités de type **Wood** pour le module
+  effectif d'un mélange homogène gaz-liquide (niveau 0D/1D). La dépendance en
+  température de la famille MIL-PRF-87257 est documentée de manière qualitative
+  dans `SAE AIR1362D` (courbes de module secant/tangent pour MIL-PRF-87257).
+
 ---
 
 ## 7. Amortissement hydraulique
@@ -821,8 +932,10 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
 - **Friction des joints** : modèle semi-empirique (Coulomb + pression) calé sur
   le classeur d'origine ; le terme de pression n'est actif que si
   $A_{seal} > D_t$.
-- **Compressibilité** : seule l'huile est traitée comme compressible (module
-  $B$) ; les parois sont supposées rigides.
+- **Compressibilité** : le module effectif $B_{eff}$ tient compte de l'aération
+  via une loi de mélange (huile + gaz) ; c'est une formulation standard des
+  modèles systèmes. En revanche, la dynamique fine des bulles (coalescence,
+  dissolution, cavitation transitoire) n'est pas résolue explicitement.
 - **Fuite annulaire** : l'écoulement annulaire est supposé **axisymétrique, établi et unidirectionnel** (pas d'effet d'entrée). En régime turbulent, la corrélation de Blasius est valable pour $Re < 10^5$ environ (conduite lisse) ; pour une rugosité significative du palier, la loi de Colebrook-White serait plus précise. La transition laminaire-turbulent est lissée mais reste une approximation.
 
 ---

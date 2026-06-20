@@ -247,6 +247,33 @@ def line(x, ys: list[tuple[str, "object"]], title: str, xlab: str, ylab: str):
 
 t = df[COL["temps"]]
 
+# Persistance inter-pages de la configuration du graphe personnalisé.
+PERSO_CFG_KEY = "results_custom_plot_cfg"
+
+
+def _sanitize_perso_cfg(cfg: dict, options: list[str], none_label: str) -> dict:
+    """Nettoie une configuration personnalisée en fonction des colonnes disponibles."""
+    x_default = options[0]
+    y_default = COL["tyre_ftyre"] if COL["tyre_ftyre"] in options else options[1]
+
+    x_label = cfg.get("x", x_default)
+    if x_label not in options:
+        x_label = x_default
+
+    curves = cfg.get("curves", [])
+    clean_curves: list[dict[str, object]] = []
+    for i in range(5):
+        item = curves[i] if i < len(curves) else {}
+        label = item.get("label", y_default if i == 0 else none_label)
+        if i == 0 and label == none_label:
+            label = y_default
+        allowed = options if i == 0 else [none_label] + options
+        if label not in allowed:
+            label = y_default if i == 0 else none_label
+        clean_curves.append({"label": label, "right": bool(item.get("right", False))})
+
+    return {"x": x_label, "curves": clean_curves}
+
 # --------------------------------------------------------------------------- #
 #  Courbes — un seul graphe par onglet
 # --------------------------------------------------------------------------- #
@@ -472,19 +499,65 @@ with tab_perso:
     )
     options = list(df.columns)
     none_label = "— aucune —"
-    x_label = st.selectbox("Abscisse (X)", options, index=0, key="perso_x")
 
-    y_default = COL["tyre_ftyre"] if COL["tyre_ftyre"] in options else options[1]
-    defaults = [y_default] + [none_label] * 4
+    # Migration douce : récupère l'état historique s'il existe encore.
+    legacy_curves = []
+    for i in range(5):
+        legacy_curves.append(
+            {
+                "label": st.session_state.get(f"perso_y{i}", none_label),
+                "right": bool(st.session_state.get(f"perso_axis{i}", False)),
+            }
+        )
+    legacy_cfg = {
+        "x": st.session_state.get("perso_x", options[0]),
+        "curves": legacy_curves,
+    }
+
+    cfg = st.session_state.get(PERSO_CFG_KEY, legacy_cfg)
+    cfg = _sanitize_perso_cfg(cfg, options, none_label)
+    st.session_state[PERSO_CFG_KEY] = cfg
+
+    # Clés widgets temporaires : peuvent être détruites entre pages.
+    x_widget_key = "_perso_x"
+    if x_widget_key not in st.session_state:
+        st.session_state[x_widget_key] = cfg["x"]
+
+    x_index = options.index(st.session_state[x_widget_key]) if st.session_state[x_widget_key] in options else 0
+    x_label = st.selectbox("Abscisse (X)", options, index=x_index, key=x_widget_key)
+
     selections: list[tuple[str, bool]] = []
     for i in range(5):
         c_curve, c_axis = st.columns([3, 1])
         opts = ([none_label] + options) if i > 0 else options
-        idx = opts.index(defaults[i]) if defaults[i] in opts else 0
-        y_sel = c_curve.selectbox(f"Courbe {i + 1}", opts, index=idx, key=f"perso_y{i}")
-        on_right = c_axis.checkbox("Axe droit", key=f"perso_axis{i}")
+
+        y_widget_key = f"_perso_y{i}"
+        axis_widget_key = f"_perso_axis{i}"
+        if y_widget_key not in st.session_state:
+            st.session_state[y_widget_key] = cfg["curves"][i]["label"]
+        if axis_widget_key not in st.session_state:
+            st.session_state[axis_widget_key] = cfg["curves"][i]["right"]
+
+        if st.session_state[y_widget_key] not in opts:
+            st.session_state[y_widget_key] = opts[0]
+        idx = opts.index(st.session_state[y_widget_key])
+
+        y_sel = c_curve.selectbox(f"Courbe {i + 1}", opts, index=idx, key=y_widget_key)
+        on_right = c_axis.checkbox("Axe droit", key=axis_widget_key)
         if y_sel != none_label:
             selections.append((y_sel, on_right))
+
+    # Sauvegarde explicite de la configuration dans une clé persistante.
+    st.session_state[PERSO_CFG_KEY] = {
+        "x": x_label,
+        "curves": [
+            {
+                "label": st.session_state.get(f"_perso_y{i}", none_label),
+                "right": bool(st.session_state.get(f"_perso_axis{i}", False)),
+            }
+            for i in range(5)
+        ],
+    }
 
     if not selections:
         st.info("Sélectionnez au moins une grandeur en ordonnée.", icon="ℹ️")
