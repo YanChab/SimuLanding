@@ -178,6 +178,7 @@ def damper_force_step(
     delta_pc_prev: float,
     delta_pd_prev: float,
     pg_prev: float,
+    dt: float | None = None,
 ) -> dict[str, float]:
     """Calcule un pas local de loi d'amortisseur avec EXACTEMENT le modele moteur.
 
@@ -198,7 +199,7 @@ def damper_force_step(
             qc_bh,
             qc_leak,
             re_leak,
-        ) = calcul_hydrau(p, v, d, delta_pc_prev, pg, sec)
+        ) = calcul_hydrau(p, v, d, delta_pc_prev, pg, sec, dt=dt)
         leak_ratio = abs(qc_leak) / abs(qc_total) if abs(qc_total) > 1.0e-12 else 0.0
     else:
         qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
@@ -236,6 +237,93 @@ def damper_force_step(
         "fhyd": fhyd,
         "ftot": ftot,
     }
+
+
+def damper_force_step_rk4_coupled(
+    p: MLGParamsSI,
+    gas: GasSpring,
+    tab_pos: np.ndarray,
+    tab_sec: np.ndarray,
+    d_start: float,
+    v_start: float,
+    d_end: float,
+    v_end: float,
+    delta_pc_prev: float,
+    delta_pd_prev: float,
+    pg_prev: float,
+) -> dict[str, float]:
+    """Évalue l'amortisseur sur les 4 stages RK4 avec couplage complet.
+
+    Les stages RK4 échantillonnent la loi couplée gaz/hydraulique sur la
+    trajectoire locale du pas, puis on met à jour l'état interne une seule fois
+    en fin de pas (mémoire hydraulique/gaz au niveau du pas de temps global).
+    """
+    c_nodes = (0.0, 0.5, 0.5, 1.0)
+    weights = (1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0)
+
+    weighted = {
+        "ftot": 0.0,
+        "fhyd": 0.0,
+        "ffrijoi": 0.0,
+        "fgas": 0.0,
+        "pc": 0.0,
+        "pd": 0.0,
+        "pg": 0.0,
+        "qc_total": 0.0,
+        "qc_bh": 0.0,
+        "qc_leak": 0.0,
+        "re_leak": 0.0,
+        "leak_ratio": 0.0,
+        "sec": 0.0,
+    }
+    start_vgbp = gas.Vgbp
+    start_vghp = gas.Vghp
+
+    d_span = d_end - d_start
+    v_span = v_end - v_start
+    dt_stage = 0.5 * p.it
+
+    for c_i, w_i in zip(c_nodes, weights):
+        # Chaque stage repart du même état mémoire de début de pas pour éviter
+        # un sur-cumul numérique sur ce solveur couplé hérité du VBA.
+        gas.Vgbp = start_vgbp
+        gas.Vghp = start_vghp
+        d_i = d_start + c_i * d_span
+        v_i = v_start + c_i * v_span
+        stage = damper_force_step(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            d_i,
+            v_i,
+            delta_pc_prev,
+            delta_pd_prev,
+            pg_prev,
+            dt=dt_stage,
+        )
+        for key in weighted:
+            weighted[key] += w_i * stage[key]
+
+    # Mise à jour mémoire en fin de pas pour l'itération suivante.
+    gas.Vgbp = start_vgbp
+    gas.Vghp = start_vghp
+    end_step = damper_force_step(
+        p,
+        gas,
+        tab_pos,
+        tab_sec,
+        d_end,
+        v_end,
+        delta_pc_prev,
+        delta_pd_prev,
+        pg_prev,
+    )
+
+    out = dict(end_step)
+    for key, value in weighted.items():
+        out[key] = value
+    return out
 
 
 def run_mlg(
@@ -366,6 +454,7 @@ def run_mlg(
     delta_pc = delta_pd = 0.0
     qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
     pg_prev = pg
+    v_prev = 0.0
 
     # --- Accumulateurs du bilan énergétique (diagnostic) ------------------ #
     # Énergie cinétique initiale d'impact de la masse suspendue ; sert de
@@ -455,17 +544,32 @@ def run_mlg(
             d = entraxe_init - entraxe
 
             # Ressort gazeux + hydraulique (meme loi que l'export "Loi hydraulique").
-            damp = damper_force_step(
-                p,
-                gas,
-                tab_pos,
-                tab_sec,
-                d,
-                v,
-                delta_pc,
-                delta_pd,
-                pg_prev,
-            )
+            if p.integrator == "rk4":
+                damp = damper_force_step_rk4_coupled(
+                    p,
+                    gas,
+                    tab_pos,
+                    tab_sec,
+                    d_prev,
+                    v_prev,
+                    d,
+                    v,
+                    delta_pc,
+                    delta_pd,
+                    pg_prev,
+                )
+            else:
+                damp = damper_force_step(
+                    p,
+                    gas,
+                    tab_pos,
+                    tab_sec,
+                    d,
+                    v,
+                    delta_pc,
+                    delta_pd,
+                    pg_prev,
+                )
             pg = damp["pg"]
             pc = damp["pc"]
             pd = damp["pd"]
@@ -603,6 +707,7 @@ def run_mlg(
         # Poids (le long de Z, dirigé vers le bas) × déplacement de la masse.
         e_grav_acc += -pms_rlg_z * (depms - depms_prev)
         d_prev = d
+        v_prev = v
         defl_prev = defl
         depms_prev = depms
         omega_prev = omega

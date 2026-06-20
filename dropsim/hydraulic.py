@@ -151,6 +151,7 @@ def calcul_hydrau(
     delta_pc_prev: float,
     pg: float,
     sec_bh: float,
+    dt: float | None = None,
     n_iter: int = 4,
 ) -> tuple[float, float, float, float, float, float]:
     """Calcule (ΔPc, ΔPd, Qc_total, Qc_rainures, Qc_fuite, Re_fuite).
@@ -178,6 +179,7 @@ def calcul_hydrau(
     """
     rho = p.rho
     visc = p.visc
+    dt_eff = p.it if dt is None else dt
 
     if sec_bh <= 0.0:
         raise SimError(
@@ -198,7 +200,7 @@ def calcul_hydrau(
 
     # --- Compression : couplage avec la compressibilité de l'huile -------- #
     if qc_total > 0.0:
-        coupl = p.Sc * (p.course - d) / (p.bulk * p.it)
+        coupl = p.Sc * (p.course - d) / (p.bulk * dt_eff)
         m_delta_pc = delta_pc_prev          # mDeltaPc persistant du pas précédent
         x0 = pg + m_delta_pc                 # xRes(0) = MLG.Pc à l'entrée
         x1 = qc_total                        # xRes(1) = MLG.Qc = Sc·v

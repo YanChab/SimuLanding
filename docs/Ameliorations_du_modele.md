@@ -59,6 +59,10 @@ manuellement (typiquement $10^{-4}$ s).
   - écart de course max ≤ 0,5 mm ;
   - écart d'accélération max ≤ 0,05 g ;
   - résidu énergétique max RK4 ≤ 1,2 × résidu Euler.
+- Une comparaison de convergence par raffinement de pas est couverte dans les
+  tests : passage de $10^{-4}$ s à $5\times10^{-5}$ s pour `euler` et `rk4`,
+  avec contrôle de baisse du résidu énergétique et bornes d'écart coarse/fine
+  sur les grandeurs de synthèse.
 
 **Prochaine sous-étape.**
 - Étendre l'intégration d'ordre supérieur à l'ensemble du pas couplé (ou

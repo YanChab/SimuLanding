@@ -995,11 +995,14 @@ hydrauliques et de butée.
 - `euler` : comportement historique (Euler explicite d'ordre 1) ;
 - `rk4` : intégration d'ordre supérieur activée sur les sous-équations
   cinématiques où l'accélération est tenue constante pendant le pas
-  (translation masse suspendue, rotation balancier, spring-back).
+  (translation masse suspendue, rotation balancier, spring-back), avec
+  évaluation couplée gaz/hydraulique sur 4 stages RK4 le long de la trajectoire
+  locale du pas.
 
-À ce stade, le couplage gaz/hydraulique reste évalué explicitement au pas de
-temps (même topologie de boucle), ce qui signifie que le mode `rk4` n'est pas
-encore un RK4 fully-coupled de toute la chaîne multiphysique.
+La mémoire interne hydraulique/gaz est toutefois réinjectée au niveau du pas
+global (mise à jour en fin de pas), ce qui reste un compromis pragmatique :
+amélioration de la cohérence intra-pas sans basculer vers un solveur implicite
+ou adaptatif fully-coupled sur toutes les variables internes.
 
 ---
 
@@ -1028,9 +1031,9 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
 ## 14. Hypothèses et limites du modèle
 
 - **Intégration explicite** : pas de temps borné par la stabilité ; pas
-  d'adaptation automatique. Le mode `rk4` actuel est partiel (cinématique) et ne
-  remplace pas encore une intégration d'ordre supérieur fully-coupled du
-  couplage gaz/hydraulique.
+  d'adaptation automatique. Le mode `rk4` améliore le couplage intra-pas, mais
+  ne remplace pas encore un schéma fully-coupled implicite/adaptatif sur toutes
+  les variables internes (gaz/hydraulique).
 - **Mécanisme plan** : la rotation du balancier est traitée dans le plan
   $X\!-\!Z$ ; l'obliquité en $Y$ est prise en compte uniquement par projection de
   l'effort d'amortisseur.
