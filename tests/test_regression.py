@@ -77,6 +77,13 @@ def _load_golden() -> dict:
         return json.load(fh)
 
 
+def _first_available_column(df: pd.DataFrame, *names: str) -> str:
+    for name in names:
+        if name in df.columns:
+            return name
+    raise KeyError(f"Aucune des colonnes attendues n'est présente: {names}")
+
+
 def regenerate_golden() -> None:
     """Régénère ``golden_summary.json`` à partir des cas de référence.
 
@@ -184,11 +191,15 @@ def test_curve_stroke_rms_against_excel(reference_curve):
     """Écart RMS sur la course d'amortisseur d(t) vs Excel < 2 % de la course max."""
     result = run_simulation(default_trailing_arm_inputs())
     sim = result.df
+    ref_stroke_col = _first_available_column(
+        reference_curve, "TrailingArm.d (m)", "MLG.d (m)"
+    )
+    sim_stroke_col = _first_available_column(sim, "TrailingArm.d (m)", "MLG.d (m)")
 
     t_ref = reference_curve["Temps (s)"].to_numpy()
-    d_ref = reference_curve["MLG.d (m)"].to_numpy()
+    d_ref = reference_curve[ref_stroke_col].to_numpy()
     t_sim = sim["Temps (s)"].to_numpy()
-    d_sim = sim["MLG.d (m)"].to_numpy()
+    d_sim = sim[sim_stroke_col].to_numpy()
 
     d_sim_on_ref = np.interp(t_ref, t_sim, d_sim)
     rms = float(np.sqrt(np.mean((d_sim_on_ref - d_ref) ** 2)))
