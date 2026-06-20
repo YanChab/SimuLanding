@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from dropsim import default_trailing_arm_inputs, run_simulation
+from dropsim import default_trailing_arm_inputs, default_strait_strut_inputs, run_simulation
 from dropsim.storage import (
     DEFAULT_PROJECT,
     inputs_from_dict,
@@ -19,6 +19,13 @@ def test_inputs_roundtrip():
     inp = default_trailing_arm_inputs()
     restored = inputs_from_dict(inputs_to_dict(inp))
     assert restored == inp
+
+
+def test_strait_strut_inputs_roundtrip():
+    inp = default_strait_strut_inputs()
+    restored = inputs_from_dict(inputs_to_dict(inp))
+    assert restored == inp
+    assert getattr(restored, "model_kind", "") == "strait_strut"
 
 
 def test_save_load_roundtrip(tmp_path):

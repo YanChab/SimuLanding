@@ -6,7 +6,9 @@ dépend que de NumPy et reproduit la méthodologie décrite dans EtatDesLieux.md
 from .errors import SimError, ErrorCollector, ErrorLevel
 from .inputs import (
     TrailingArmInputs,
+    StraitStrutInputs,
     default_trailing_arm_inputs,
+    default_strait_strut_inputs,
     compute_gas_oil_at_temperature,
     TEMP_REF_C,
 )
@@ -26,7 +28,9 @@ __all__ = [
     "ErrorCollector",
     "ErrorLevel",
     "TrailingArmInputs",
+    "StraitStrutInputs",
     "default_trailing_arm_inputs",
+    "default_strait_strut_inputs",
     "compute_gas_oil_at_temperature",
     "TEMP_REF_C",
     "run_simulation",

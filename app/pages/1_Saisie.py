@@ -23,7 +23,14 @@ _APP = Path(__file__).resolve().parent.parent
 if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
-from dropsim import TrailingArmInputs, SimError, default_trailing_arm_inputs, run_simulation  # noqa: E402
+from dropsim import (  # noqa: E402
+    TrailingArmInputs,
+    StraitStrutInputs,
+    SimError,
+    default_trailing_arm_inputs,
+    default_strait_strut_inputs,
+    run_simulation,
+)
 from dropsim.inputs import (  # noqa: E402
     Point3,
     Rainure,
@@ -38,7 +45,11 @@ from theme import apply_theme  # noqa: E402
 apply_theme()
 
 if "inputs" not in st.session_state:
-    st.session_state.inputs = default_trailing_arm_inputs()
+    model_kind = st.session_state.get("model_kind", "trailing_arm")
+    if model_kind == "strait_strut":
+        st.session_state.inputs = default_strait_strut_inputs()
+    else:
+        st.session_state.inputs = default_trailing_arm_inputs()
 
 _LEGACY_OIL_DEFAULTS = {
     "k_huile": 10000.0,
@@ -105,7 +116,36 @@ _migrate_legacy_oil_defaults()
 field_errors: dict[str, str] = st.session_state.get("field_errors", {})
 
 st.title("📝 Saisie des données du train d'atterrissage")
-st.caption("Architecture à balancier (trailing arm) — unités : mm · bar · cc · cSt · MPa · ° · °C")
+_MODEL_LABELS = {
+    "trailing_arm": "TrailingArm (MLG)",
+    "strait_strut": "StraitStrut (NLG)",
+}
+_MODEL_OPTIONS = list(_MODEL_LABELS.keys())
+
+if "model_kind" not in st.session_state:
+    st.session_state.model_kind = getattr(st.session_state.inputs, "model_kind", "trailing_arm")
+
+_selected_model = st.selectbox(
+    "Modèle de train",
+    options=_MODEL_OPTIONS,
+    key="model_kind",
+    format_func=lambda k: _MODEL_LABELS[k],
+    help="NLG Excel est exposé dans l'application sous le nom StraitStrut.",
+)
+
+_current_inputs_kind = getattr(st.session_state.inputs, "model_kind", "trailing_arm")
+if _current_inputs_kind != _selected_model:
+    if _selected_model == "strait_strut":
+        st.session_state.inputs = default_strait_strut_inputs()
+    else:
+        st.session_state.inputs = default_trailing_arm_inputs()
+    st.session_state.pop("field_errors", None)
+    st.session_state.pop("result", None)
+    st.rerun()
+
+st.caption(
+    f"Modèle actif : {_MODEL_LABELS[_selected_model]} — unités : mm · bar · cc · cSt · MPa · ° · °C"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -252,7 +292,7 @@ def _safe_xy(df_table: pd.DataFrame):
     return d.iloc[:, 0].to_numpy(), d.iloc[:, 1].to_numpy()
 
 
-inp: TrailingArmInputs = st.session_state.inputs
+inp: TrailingArmInputs | StraitStrutInputs = st.session_state.inputs
 if not hasattr(inp, "hydraulic_max_iter"):
     inp.hydraulic_max_iter = 64
 
@@ -640,7 +680,7 @@ with rs_col:
 # --------------------------------------------------------------------------- #
 #  Construction d'un TrailingArmInputs depuis les widgets
 # --------------------------------------------------------------------------- #
-def _build_inputs() -> TrailingArmInputs:
+def _build_inputs() -> TrailingArmInputs | StraitStrutInputs:
     def g(field: str) -> float:
         return float(st.session_state[f"f_{field}"])
 
@@ -652,7 +692,11 @@ def _build_inputs() -> TrailingArmInputs:
 
     pts = {r["Point"]: pt(r) for _, r in points_df.iterrows()}
 
-    return TrailingArmInputs(
+    model_kind = str(st.session_state.get("model_kind", "trailing_arm"))
+    model_cls = StraitStrutInputs if model_kind == "strait_strut" else TrailingArmInputs
+
+    return model_cls(
+        model_kind=model_kind,
         masse=g("masse"), vz=g("vz"), vx=g("vx"), lift=g("lift"),
         pitch=g("pitch"), roll=g("roll"), temps_simu=g("temps_simu"),
         it=g("it"), integrator="rk4",
@@ -707,7 +751,10 @@ if reset:
     for key in list(st.session_state.keys()):
         if key.startswith("f_") or key.endswith("_editor"):
             del st.session_state[key]
-    st.session_state.inputs = default_trailing_arm_inputs()
+    if st.session_state.get("model_kind", "trailing_arm") == "strait_strut":
+        st.session_state.inputs = default_strait_strut_inputs()
+    else:
+        st.session_state.inputs = default_trailing_arm_inputs()
     st.session_state.pop("field_errors", None)
     st.session_state.pop("result", None)
     st.rerun()

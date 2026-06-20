@@ -7,14 +7,16 @@ synthèse des résultats. Toute erreur détectée est localisée précisément v
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
 from .engine import OUTPUT_COLUMNS, run_trailing_arm
+from .engine_strait_strut import OUTPUT_COLUMNS_SS, run_strait_strut
 from .errors import ErrorCollector, ErrorLevel, SimError
-from .inputs import TrailingArmInputs
+from .inputs import TrailingArmInputs, StraitStrutInputs
 
 
 @dataclass
@@ -80,7 +82,11 @@ def _negative_pressure_warnings(full: dict[str, np.ndarray]) -> list[SimError]:
     return warnings
 
 
-def run_simulation(inputs: TrailingArmInputs, max_points: int = 1000, progress_callback: callable | None = None) -> SimulationResult:
+def run_simulation(
+    inputs: TrailingArmInputs | StraitStrutInputs,
+    max_points: int = 1000,
+    progress_callback: callable | None = None,
+) -> SimulationResult:
     """Valide, exécute et synthétise une simulation de drop test trailing arm.
 
     ``progress_callback`` est une fonction optionnelle appelée à chaque itération
@@ -122,10 +128,31 @@ def run_simulation(inputs: TrailingArmInputs, max_points: int = 1000, progress_c
         pre.raise_if_any()
 
     # Niveau EXÉCUTION.
-    engine_out = run_trailing_arm(params, progress_callback=progress_callback)
+    is_strait_strut = isinstance(inputs, StraitStrutInputs) or getattr(inputs, "model_kind", "") == "strait_strut"
+    if is_strait_strut:
+        ss = inputs  # type: ignore[assignment]
+        # Angles totaux jambe (rad) = structural (deg→rad) + avion (déjà en rad via to_si)
+        alfap_rad = getattr(ss, "strut_pitch", 0.0) * math.pi / 180.0 + params.pitch
+        alfar_rad = getattr(ss, "strut_roll", 0.0) * math.pi / 180.0 + params.roll
+        engine_out = run_strait_strut(
+            params,
+            progress_callback=progress_callback,
+            seal_precomp_pa=getattr(ss, "seal_precomp_pa", 110_649.0),
+            bague_guide_m=getattr(ss, "bague_guide", 50.0) / 1000.0,
+            bague_piston_m=getattr(ss, "bague_piston", 50.0) / 1000.0,
+            alfap=alfap_rad,
+            alfar=alfar_rad,
+            h_pivot_z_m=getattr(ss, "h_pivot_z", 600.0) / 1000.0,
+            h_guide_top_z_m=getattr(ss, "h_guide_top_z", 500.0) / 1000.0,
+            h_guide_bot_z_m=getattr(ss, "h_guide_bot_z", 200.0) / 1000.0,
+        )
+        col_map = OUTPUT_COLUMNS_SS
+    else:
+        engine_out = run_trailing_arm(params, progress_callback=progress_callback)
+        col_map = OUTPUT_COLUMNS
 
     data = _subsample(engine_out.data, max_points=max_points)
-    df = pd.DataFrame({OUTPUT_COLUMNS[k]: v for k, v in data.items()})
+    df = pd.DataFrame({col_map[k]: v for k, v in data.items() if k in col_map})
     geom = _subsample(engine_out.geometry, max_points=max_points) if engine_out.geometry else {}
     geom_df = pd.DataFrame(geom) if geom else None
     if geom_df is not None:

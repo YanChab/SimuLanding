@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .inputs import TrailingArmInputs, Point3, Rainure
+from .inputs import TrailingArmInputs, StraitStrutInputs, Point3, Rainure
 from .simulation import SimulationResult
 
 # Version du schéma de fichier (incrémentée si le format évolue de façon incompatible).
@@ -39,12 +39,12 @@ DEFAULT_PROJECT = "Général"
 # --------------------------------------------------------------------------- #
 #  Sérialisation des entrées
 # --------------------------------------------------------------------------- #
-def inputs_to_dict(inputs: TrailingArmInputs) -> dict:
+def inputs_to_dict(inputs: TrailingArmInputs | StraitStrutInputs) -> dict:
     """Convertit ``TrailingArmInputs`` en dictionnaire JSON-compatible."""
     return asdict(inputs)
 
 
-def inputs_from_dict(d: dict) -> TrailingArmInputs:
+def inputs_from_dict(d: dict) -> TrailingArmInputs | StraitStrutInputs:
     """Reconstruit ``TrailingArmInputs`` depuis un dictionnaire (robuste aux clés en trop)."""
     known = {f.name for f in fields(TrailingArmInputs)}
     data = {k: v for k, v in d.items() if k in known}
@@ -66,6 +66,9 @@ def inputs_from_dict(d: dict) -> TrailingArmInputs:
     if "mu_curve" in data:
         data["mu_curve"] = [tuple(t) for t in data["mu_curve"]]
 
+    model_kind = data.get("model_kind", "trailing_arm")
+    if model_kind == "strait_strut":
+        return StraitStrutInputs(**data)
     return TrailingArmInputs(**data)
 
 
@@ -114,7 +117,7 @@ def _project_dir(directory: Path | str, project: str | None) -> Path:
 
 
 def bundle(
-    inputs: TrailingArmInputs,
+    inputs: TrailingArmInputs | StraitStrutInputs,
     result: SimulationResult,
     *,
     name: str,
@@ -132,7 +135,7 @@ def bundle(
 
 
 def save_simulation(
-    inputs: TrailingArmInputs,
+    inputs: TrailingArmInputs | StraitStrutInputs,
     result: SimulationResult,
     *,
     name: str,
@@ -153,7 +156,7 @@ def save_simulation(
     return path
 
 
-def load_simulation(path: Path | str) -> tuple[TrailingArmInputs, SimulationResult, dict]:
+def load_simulation(path: Path | str) -> tuple[TrailingArmInputs | StraitStrutInputs, SimulationResult, dict]:
     """Recharge une simulation ; renvoie ``(inputs, result, meta)``.
 
     ``meta`` contient ``name`` et ``saved_at``. Lève ``ValueError`` si le schéma

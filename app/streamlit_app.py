@@ -26,7 +26,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from dropsim import default_trailing_arm_inputs  # noqa: E402
+from dropsim import default_trailing_arm_inputs, default_strait_strut_inputs  # noqa: E402
 from theme import apply_theme  # noqa: E402
 
 st.set_page_config(
@@ -83,8 +83,13 @@ st.markdown(
 )
 
 # Entrées par défaut conservées d'une page à l'autre.
+if "model_kind" not in st.session_state:
+    st.session_state.model_kind = "trailing_arm"
 if "inputs" not in st.session_state:
-    st.session_state.inputs = default_trailing_arm_inputs()
+    if st.session_state.model_kind == "strait_strut":
+        st.session_state.inputs = default_strait_strut_inputs()
+    else:
+        st.session_state.inputs = default_trailing_arm_inputs()
 
 
 # --------------------------------------------------------------------------- #
@@ -96,20 +101,21 @@ def accueil() -> None:
         unsafe_allow_html=True,
     )
     st.title("🛬 SimuLanding — Simulation de drop test")
-    st.subheader("Train d'atterrissage à balancier (Trailing Arm)")
+    st.subheader("Train d'atterrissage: TrailingArm (MLG) ou StraitStrut (NLG)")
 
     st.markdown(
         """
 Cette application remplace le classeur Excel de simulation de chute (*drop test*).
 Elle reproduit **exactement** la méthodologie de calcul d'origine (intégration
 RK4, ressort gazeux double chambre, pertes hydrauliques à section variable,
-cinématique du balancier).
+cinématique de jambe).
 
 **Comment l'utiliser :**
 
-1. Ouvrez la page **Saisie** (bandeau en haut) pour renseigner ou ajuster les
-    données du train d'atterrissage. Les valeurs par défaut correspondent au cas
-    nominal de l'Excel et l'intégrateur est fixé à RK4.
+1. Ouvrez la page **Saisie** (bandeau en haut) pour choisir le modèle
+    (**TrailingArm** ou **StraitStrut**) puis renseigner les données.
+    Les valeurs par défaut correspondent au cas nominal et l'intégrateur est
+    fixé à RK4.
 2. Lancez le calcul : les erreurs éventuelles sont **localisées précisément**
    (champ concerné, cause, conseil de correction).
 3. Consultez la page **Résultats** pour visualiser les courbes et la synthèse.
@@ -132,7 +138,7 @@ cinématique du balancier).
 
     st.caption(
         "Architecture : moteur `dropsim` (Python/NumPy) séparé de l'interface. "
-        "Phase 1 — architecture de train à balancier."
+        "Phase 1 — modèle TrailingArm robuste + démarrage modèle StraitStrut."
     )
 
 

@@ -124,6 +124,7 @@ with st.expander("💾 Sauvegarder / charger une simulation", expanded=result is
                 if c_load.button("📂 Charger", width="stretch"):
                     inputs, loaded, meta = load_simulation(labels[choice])
                     st.session_state.inputs = inputs
+                    st.session_state.model_kind = getattr(inputs, "model_kind", "trailing_arm")
                     st.session_state.result = loaded
                     st.session_state.result_name = meta["name"]
                     st.session_state.current_project = meta.get(
@@ -144,6 +145,7 @@ if result is None:
 
 df = result.df
 COL = OUTPUT_COLUMNS  # clé interne -> libellé de colonne
+_model_kind = getattr(st.session_state.get("inputs"), "model_kind", "trailing_arm")
 
 # Colonne « course » exprimée en mm pour l'affichage.
 course_mm = df[COL["trailing_arm_d"]] * 1000.0
@@ -976,6 +978,10 @@ with st.expander("Séries temporelles (tableau)"):
 st.download_button(
     "⬇️ Exporter les résultats (CSV)",
     data=df.to_csv(index=False).encode("utf-8"),
-    file_name="resultats_trailing_arm.csv",
+    file_name=(
+        "resultats_strait_strut.csv"
+        if _model_kind == "strait_strut"
+        else "resultats_trailing_arm.csv"
+    ),
     mime="text/csv",
 )

@@ -166,6 +166,9 @@ def compute_bulk_modulus_at_temperature(
 # --------------------------------------------------------------------------- #
 @dataclass
 class TrailingArmInputs:
+    # --- Type de modèle --------------------------------------------------- #
+    model_kind: str = "trailing_arm"  # trailing_arm|strait_strut
+
     # --- Conditions de chute ---------------------------------------------- #
     masse: float = 1250.0          # kg  (masse supportée)
     vz: float = 3.05               # m/s (vitesse verticale de chute)
@@ -373,6 +376,16 @@ class TrailingArmInputs:
             ),
             field="hydraulic_max_iter",
             hint="Saisir une valeur entière >= 4.",
+        )
+        c.check(
+            self.model_kind not in {"trailing_arm", "strait_strut"},
+            code="MODEL_KIND_INVALIDE",
+            message=(
+                "Le type de modèle doit être 'trailing_arm' ou 'strait_strut' "
+                f"(reçu : {self.model_kind})."
+            ),
+            field="model_kind",
+            hint="Choisir un type de modèle supporté.",
         )
 
         # Géométrie amortisseur
@@ -713,15 +726,74 @@ class TrailingArmParamsSI:
         return self.NbTrouDiap * self.DTrouDiap ** 2 * math.pi / 4.0
 
 
+@dataclass
+class StraitStrutInputs(TrailingArmInputs):
+    """Entrées du modèle NLG (StraitStrut) — jambe de force directe (pas de balancier).
+
+    La cinématique NLG repose sur deux corps en translation :
+      - Ms  : masse suspendue (fuselage, = ``masse``) ;
+      - Mns : masse non suspendue totale (jambe basse + roue, = ``unsprung_mass``).
+
+    Les champs hérités B/A/C/R/S (repère balancier) ne sont pas utilisés par
+    le moteur StraitStrut ; seuls les champs de géométrie de jambe ci-dessous
+    sont pris en compte.
+
+    Angles de la jambe :
+      ``strut_pitch`` = angle de rake avant/arrière de la jambe (deg, indépendant
+      de l'assiette avion) ; ``strut_roll`` = angle de garde hors-tout (deg).
+      L'angle total utilisé dans la transformation de repère est
+      ``alfap = strut_pitch + pitch``, ``alfar = strut_roll + roll``.
+
+    Géométrie de guidage (hauteurs au-dessus du centre roue, en mm, repère jambe) :
+      ``h_pivot_z``      : pivot / attache fuselage B
+      ``h_guide_top_z``  : bague de guidage haute Gt
+      ``h_guide_bot_z``  : bague de guidage basse Gb
+
+    Friction des bagues :
+      ``bague_guide`` / ``bague_piston`` : longueurs des bagues (mm) utilisées
+      dans le modèle de frottement des bagues issu du VBA ClNLG.
+    """
+
+    model_kind: str = "strait_strut"
+
+    # --- Géométrie de jambe (spécifique NLG) -------------------------------- #
+    strut_pitch: float = 0.0        # deg rake avant/arrière de la jambe
+    strut_roll: float = 0.0         # deg garde hors-tout de la jambe
+
+    h_pivot_z: float = 600.0        # mm hauteur pivot B au-dessus du centre roue
+    h_guide_top_z: float = 500.0    # mm hauteur bague haute Gt au-dessus du centre roue
+    h_guide_bot_z: float = 200.0    # mm hauteur bague basse Gb au-dessus du centre roue
+
+    # --- Friction des bagues de guidage ------------------------------------- #
+    bague_guide: float = 50.0       # mm longueur bague de guidage
+    bague_piston: float = 50.0      # mm longueur bague piston
+
+    # --- Joint : pré-compression fixe (formule NLG VBA ClNLG.FFriJoi) ------- #
+    # La formule NLG inclut un terme de pression de pré-compression du joint
+    # qui n'est pas présent dans la formule MLG : (fh*Pd + seal_precomp) * Sseal
+    seal_precomp_pa: float = 110_649.0  # Pa pression de pré-compression du joint
+
+
 def default_trailing_arm_inputs() -> TrailingArmInputs:
     """Retourne les entrées par défaut (cas nominal trailing arm)."""
     return TrailingArmInputs()
+
+
+def default_strait_strut_inputs() -> StraitStrutInputs:
+    """Retourne les entrées par défaut du modèle NLG (StraitStrut).
+
+    Les valeurs initiales reprennent la base validée du modèle TrailingArm,
+    puis seront spécialisées au fur et à mesure de la migration NLG Excel.
+    """
+    return StraitStrutInputs()
 
 
 __all__ = [
     "Point3",
     "Rainure",
     "TrailingArmInputs",
+    "StraitStrutInputs",
     "TrailingArmParamsSI",
     "default_trailing_arm_inputs",
+    "default_strait_strut_inputs",
 ]
