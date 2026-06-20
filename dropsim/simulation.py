@@ -80,8 +80,11 @@ def _negative_pressure_warnings(full: dict[str, np.ndarray]) -> list[SimError]:
     return warnings
 
 
-def run_simulation(inputs: MLGInputs, max_points: int = 1000) -> SimulationResult:
+def run_simulation(inputs: MLGInputs, max_points: int = 1000, progress_callback: callable | None = None) -> SimulationResult:
     """Valide, exécute et synthétise une simulation de drop test MLG.
+
+    ``progress_callback`` est une fonction optionnelle appelée à chaque itération
+    avec (étape_courante, nombre_total_étapes) pour afficher la progression.
 
     Raises
     ------
@@ -119,7 +122,7 @@ def run_simulation(inputs: MLGInputs, max_points: int = 1000) -> SimulationResul
         pre.raise_if_any()
 
     # Niveau EXÉCUTION.
-    engine_out = run_mlg(params)
+    engine_out = run_mlg(params, progress_callback=progress_callback)
 
     data = _subsample(engine_out.data, max_points=max_points)
     df = pd.DataFrame({OUTPUT_COLUMNS[k]: v for k, v in data.items()})

@@ -287,6 +287,7 @@ with col_chute:
         "hydraulic_error_tol",
         inp.hydraulic_error_tol,
         step=0.01,
+        fmt="%.15g",
         help=(
             "Cible absolue de convergence sur le noyau hydraulique (err <= tol)."
         ),
@@ -727,8 +728,21 @@ if launch:
     else:
         st.session_state.field_errors = {}
         try:
-            with st.spinner("Calcul en cours…"):
-                result = run_simulation(new_inputs)
+            # Créer placeholders pour la progression
+            progress_placeholder = st.empty()
+            status_placeholder = st.empty()
+            
+            def update_progress(current, total):
+                percentage = (current / total) * 100
+                progress_placeholder.progress(current / total)
+                status_placeholder.text(f"Progression: {percentage:.1f}% ({current}/{total})")
+            
+            result = run_simulation(new_inputs, progress_callback=update_progress)
+            
+            # Nettoyer les placeholders
+            progress_placeholder.empty()
+            status_placeholder.empty()
+            
             st.session_state.result = result
             col_msg.success(
                 "Calcul terminé. Consultez la page **Résultats**.", icon="✅"

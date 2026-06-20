@@ -593,12 +593,16 @@ def run_mlg(
     p: MLGParamsSI,
     collector: ErrorCollector | None = None,
     section_override: tuple[np.ndarray, np.ndarray] | None = None,
+    progress_callback: callable | None = None,
 ) -> EngineOutput:
     """Exécute la simulation de drop test du train à balancier.
 
     ``section_override`` permet d'imposer une table de section ``(tab_pos, tab_sec)``
     (en m et m²) à la place de celle recalculée par :func:`build_section_table`.
     Réservé à la validation (comparaison avec une référence Excel mise en cache).
+    
+    ``progress_callback`` est une fonction optionnelle appelée à chaque itération
+    avec (étape_courante, nombre_total_étapes) pour afficher la progression.
     """
     c = collector or ErrorCollector()
 
@@ -754,6 +758,10 @@ def run_mlg(
 
     n_steps = n_it
     for i in range(n_out):
+        # Appel au callback de progression
+        if progress_callback:
+            progress_callback(i + 1, n_out)
+        
         try:
             # Dynamique de la masse suspendue (TA/TB du pas précédent)
             accms = (1.0 / Ms) * (-ta_z - tb_z - pms_rlg_z)

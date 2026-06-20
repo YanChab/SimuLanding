@@ -314,10 +314,13 @@ with tab_eff_c:
     st.plotly_chart(
         line(
             course_mm,
-            [("Fz (pneu/sol)", df[COL["tyre_ftyre"]])],
-            "Effort vertical en fonction de la course",
+            [
+                ("Fz (pneu/sol)", df[COL["tyre_ftyre"]]),
+                ("Fx (horizontal)", df[COL["tr_x"]]),
+            ],
+            "Effort en fonction de la course",
             "Course amortisseur (mm)",
-            "Fz (N)",
+            "Effort (N)",
         ),
         width="stretch",
         config={"responsive": True},
