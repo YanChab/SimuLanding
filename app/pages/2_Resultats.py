@@ -21,6 +21,7 @@ if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
 from dropsim.engine import OUTPUT_COLUMNS  # noqa: E402
+from dropsim.geometry import deter_pos_bal_a, deter_pos_bal_r, rotate_about  # noqa: E402
 from dropsim import (  # noqa: E402
     save_simulation,
     load_simulation,
@@ -146,6 +147,70 @@ COL = OUTPUT_COLUMNS  # clé interne -> libellé de colonne
 
 # Colonne « course » exprimée en mm pour l'affichage.
 course_mm = df[COL["mlg_d"]] * 1000.0
+
+
+def _compute_kinematic_curve(inputs, n_pts: int = 401) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Calcule la cinématique pure (indépendante du drop test) sur toute la course.
+
+    Retourne ``(course_amort_mm, course_roue_mm, ratio)`` où :
+    - ``course_amort_mm`` est la course amortisseur imposée sur [0, course],
+    - ``course_roue_mm`` est le déplacement vertical du centre roue (Rz - Rz0),
+    - ``ratio`` = d(course_amortisseur) / d(course_roue).
+    """
+    if inputs is None:
+        return None
+
+    p = inputs.to_si()
+
+    A = p.A.astype(float).copy()
+    B = p.B.astype(float).copy()
+    C = p.C.astype(float).copy()
+    R = p.R.astype(float).copy()
+
+    # Même traitement d'attitude que dans le moteur pour garder une cohérence géométrique.
+    S = R.copy()
+    S[2] = R[2] - p.unload_radius
+    A = rotate_about(A, S, p.pitch, p.roll)
+    B = rotate_about(B, S, p.pitch, p.roll)
+    C = rotate_about(C, S, p.pitch, p.roll)
+    R = rotate_about(R, S, p.pitch, p.roll)
+
+    entraxe_init = float(np.linalg.norm(C - A))
+    lg_ab = float(np.hypot(B[0] - A[0], B[2] - A[2]))
+    lg_rb = float(np.hypot(B[0] - R[0], B[2] - R[2]))
+    lg_ra = float(np.hypot(A[0] - R[0], A[2] - R[2]))
+    dy_ca = float(C[1] - A[1])
+
+    # Domaine réellement calculable géométriquement.
+    d_max_geom = max(0.0, min(float(p.course), entraxe_init - abs(dy_ca) - 1.0e-9))
+    if d_max_geom <= 0.0:
+        return None
+
+    d_vals = np.linspace(0.0, d_max_geom, n_pts)
+    rz_vals = np.zeros_like(d_vals)
+    rz0 = float(R[2])
+
+    # Continuité numérique : on réutilise A/R du point précédent comme amorce Newton.
+    A_cur = A.copy()
+    R_cur = R.copy()
+    for i, d in enumerate(d_vals):
+        entraxe = entraxe_init - float(d)
+        deter_pos_bal_a(A_cur, B, C, entraxe, lg_ab)
+        deter_pos_bal_r(R_cur, A_cur, B, lg_ra, lg_rb)
+        rz_vals[i] = R_cur[2]
+
+    course_amort_mm = d_vals * 1000.0
+    course_roue_mm = (rz_vals - rz0) * 1000.0
+
+    d_course_amort = np.gradient(course_amort_mm)
+    d_course_roue = np.gradient(course_roue_mm)
+    ratio = np.divide(
+        d_course_amort,
+        d_course_roue,
+        out=np.full_like(d_course_roue, np.nan),
+        where=np.abs(d_course_roue) > 1.0e-12,
+    )
+    return course_amort_mm, course_roue_mm, ratio
 
 
 # --------------------------------------------------------------------------- #
@@ -278,13 +343,14 @@ def _sanitize_perso_cfg(cfg: dict, options: list[str], none_label: str) -> dict:
 #  Courbes — un seul graphe par onglet
 # --------------------------------------------------------------------------- #
 with col_graphs:
-    tab_eff_t, tab_eff_c, tab_press, tab_conv, tab_cine, tab_acc, tab_torseur, tab_energie, tab_perso, tab_anim = st.tabs(
+    tab_eff_t, tab_eff_c, tab_press, tab_conv, tab_cine, tab_ratio, tab_acc, tab_torseur, tab_energie, tab_perso, tab_anim = st.tabs(
         [
             "Efforts (temps)",
             "Effort / course",
             "Pressions",
             "Conv. hydraulique",
             "Course & déflexion",
+            "Ratio cinématique",
             "Accél. & vitesse",
             "Torseur B & C",
             "Bilan énergétique",
@@ -422,6 +488,72 @@ with tab_cine:
         width="stretch",
         config={"responsive": True},
     )
+
+with tab_ratio:
+    inputs_for_kin = st.session_state.get("inputs")
+    kin_curve = _compute_kinematic_curve(inputs_for_kin)
+
+    if kin_curve is None:
+        st.info(
+            "Données de ratio cinématique indisponibles pour ce résultat "
+            "(entrées introuvables ou géométrie hors domaine). "
+            "Chargez/relancez une simulation pour afficher cet onglet."
+        )
+    else:
+        course_amort_mm, course_roue_mm, kin_ratio = kin_curve
+        finite_ratio = kin_ratio[np.isfinite(kin_ratio)]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Ratio moyen", f"{float(np.mean(finite_ratio)):.3f}")
+        c2.metric("Ratio max", f"{float(np.max(finite_ratio)):.3f}")
+        c3.metric("Ratio min", f"{float(np.min(finite_ratio)):.3f}")
+
+        fig_ratio = go.Figure()
+        fig_ratio.add_trace(
+            go.Scatter(
+                x=course_amort_mm,
+                y=kin_ratio,
+                mode="lines",
+                name="Ratio cinématique (course amortisseur / course roue)",
+                yaxis="y",
+            )
+        )
+        fig_ratio.add_trace(
+            go.Scatter(
+                x=course_amort_mm,
+                y=course_roue_mm,
+                mode="lines",
+                name="Course roue",
+                yaxis="y2",
+            )
+        )
+        fig_ratio.update_layout(
+            title=dict(
+                text="Ratio cinématique et course roue en fonction de la course amortisseur",
+                y=0.98,
+                yanchor="top",
+            ),
+            margin=dict(l=10, r=10, t=80, b=55),
+            legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
+            height=GRAPH_HEIGHT,
+            plot_bgcolor=GRAPH_PAPER_BG,
+            paper_bgcolor="white",
+            xaxis=_grid_axis("Course amortisseur (mm)"),
+            yaxis=_grid_axis("Ratio cinématique (-)"),
+            yaxis2={
+                **_grid_axis("Course roue (mm)"),
+                "overlaying": "y",
+                "side": "right",
+                "showgrid": False,
+                "zeroline": False,
+                "minor": {"showgrid": False},
+            },
+        )
+
+        st.plotly_chart(
+            fig_ratio,
+            width="stretch",
+            config={"responsive": True},
+        )
 
 with tab_acc:
     st.plotly_chart(
