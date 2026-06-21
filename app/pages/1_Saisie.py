@@ -300,7 +300,7 @@ if not hasattr(inp, "hydraulic_max_iter"):
     inp.hydraulic_max_iter = 64
 
 # --------------------------------------------------------------------------- #
-#  1) Conditions de chute  +  2) Balancier et géométrie (côte à côte)
+#  1) Conditions de chute  +  2) Géométrie du modèle actif (côte à côte)
 # --------------------------------------------------------------------------- #
 col_chute, col_balancier = st.columns([2, 5])
 
@@ -354,83 +354,98 @@ with col_chute:
     )
 
 with col_balancier:
-    st.header("Balancier et géométrie")
-    num_table([
-        ("Inertie balancier Jyy (kg·m²)", "jyy", inp.jyy),
-    ], "jyy_editor")
+    points_df = None
+    if _selected_model == "strait_strut":
+        st.header("Géométrie de jambe StraitStrut")
+        st.caption("Prérempli à partir des valeurs extraites de l'onglet NLG du DROSIM.")
+        num_grid([
+            ("Rake jambe / strut pitch (°)", "strut_pitch", inp.strut_pitch),
+            ("Roll jambe / strut roll (°)", "strut_roll", inp.strut_roll),
+            ("Hauteur pivot B (mm)", "h_pivot_z", inp.h_pivot_z),
+            ("Hauteur bague haute Gt (mm)", "h_guide_top_z", inp.h_guide_top_z),
+            ("Hauteur bague basse Gb (mm)", "h_guide_bot_z", inp.h_guide_bot_z),
+            ("Longueur bague de guidage (mm)", "bague_guide", inp.bague_guide),
+            ("Longueur bague piston (mm)", "bague_piston", inp.bague_piston),
+            ("Précontrainte joint (Pa)", "seal_precomp_pa", inp.seal_precomp_pa),
+        ], 4)
+    else:
+        st.header("Balancier et géométrie")
+        num_table([
+            ("Inertie balancier Jyy (kg·m²)", "jyy", inp.jyy),
+        ], "jyy_editor")
 
-    st.markdown("**Points (mm, repère avion)**")
-    points_df = st.data_editor(
-        pd.DataFrame(
-            {
-                "Point": ["B", "A", "C", "R", "S"],
-                "X": [inp.B.x, inp.A.x, inp.C.x, inp.R.x, inp.S.x],
-                "Y": [inp.B.y, inp.A.y, inp.C.y, inp.R.y, inp.S.y],
-                "Z": [inp.B.z, inp.A.z, inp.C.z, inp.R.z, inp.S.z],
-            }
-        ),
-        column_config={
-            "X": st.column_config.NumberColumn("X", alignment="center"),
-            "Y": st.column_config.NumberColumn("Y", alignment="center"),
-            "Z": st.column_config.NumberColumn("Z", alignment="center"),
-        },
-        width="stretch",
-        hide_index=True,
-        disabled=["Point"],
-        height=222,
-        key="points_editor",
-    )
-    pg_col, pg_yz = st.columns([1, 1])
-    with pg_col:
-        try:
-            pdict = {r["Point"]: (float(r["X"]), float(r["Z"])) for _, r in points_df.iterrows()}
-            # Amortisseur C-A, bras balancier A-B-R, liaison roue R-S.
-            seg_x = [pdict["C"][0], pdict["A"][0], None, pdict["A"][0], pdict["B"][0],
-                     pdict["R"][0], None, pdict["R"][0], pdict["S"][0]]
-            seg_z = [pdict["C"][1], pdict["A"][1], None, pdict["A"][1], pdict["B"][1],
-                     pdict["R"][1], None, pdict["R"][1], pdict["S"][1]]
-            fig_pts = go.Figure()
-            fig_pts.add_trace(go.Scatter(x=seg_x, y=seg_z, mode="lines",
-                                         line=dict(color="#2c3e50", width=3), name="Liaisons"))
-            fig_pts.add_trace(go.Scatter(
-                x=[v[0] for v in pdict.values()], y=[v[1] for v in pdict.values()],
-                mode="markers+text", text=list(pdict.keys()), textposition="top center",
-                marker=dict(size=9, color="#e74c3c"), name="Points"))
-            fig_pts.update_layout(
-                height=210, margin=dict(l=8, r=8, t=26, b=8),
-                plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
-                title=dict(text="Vue X-Z (profil)", x=0.5, font=dict(size=12)),
-                xaxis=_mini_axis("X (mm)"),
-                yaxis=_mini_axis("Z (mm)") | dict(scaleanchor="x", scaleratio=1.0),
-            )
-            st.plotly_chart(fig_pts, width="stretch")
-        except (KeyError, ValueError, TypeError):
-            st.caption("Géométrie incomplète — graphe indisponible.")
-    with pg_yz:
-        try:
-            pyz = {r["Point"]: (float(r["Y"]), float(r["Z"])) for _, r in points_df.iterrows()}
-            # Amortisseur C-A, bras balancier A-B-R, liaison roue R-S (plan Y-Z).
-            seg_y = [pyz["C"][0], pyz["A"][0], None, pyz["A"][0], pyz["B"][0],
-                     pyz["R"][0], None, pyz["R"][0], pyz["S"][0]]
-            seg_z2 = [pyz["C"][1], pyz["A"][1], None, pyz["A"][1], pyz["B"][1],
-                      pyz["R"][1], None, pyz["R"][1], pyz["S"][1]]
-            fig_yz = go.Figure()
-            fig_yz.add_trace(go.Scatter(x=seg_y, y=seg_z2, mode="lines",
-                                        line=dict(color="#2c3e50", width=3), name="Liaisons"))
-            fig_yz.add_trace(go.Scatter(
-                x=[v[0] for v in pyz.values()], y=[v[1] for v in pyz.values()],
-                mode="markers+text", text=list(pyz.keys()), textposition="top center",
-                marker=dict(size=9, color="#e74c3c"), name="Points"))
-            fig_yz.update_layout(
-                title=dict(text="Vue Y-Z (face)", x=0.5, font=dict(size=12)),
-                height=210, margin=dict(l=8, r=8, t=26, b=8),
-                plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
-                xaxis=_mini_axis("Y (mm)"),
-                yaxis=_mini_axis("Z (mm)") | dict(scaleanchor="x", scaleratio=1.0),
-            )
-            st.plotly_chart(fig_yz, width="stretch")
-        except (KeyError, ValueError, TypeError):
-            st.caption("Géométrie incomplète — graphe indisponible.")
+        st.markdown("**Points (mm, repère avion)**")
+        points_df = st.data_editor(
+            pd.DataFrame(
+                {
+                    "Point": ["B", "A", "C", "R", "S"],
+                    "X": [inp.B.x, inp.A.x, inp.C.x, inp.R.x, inp.S.x],
+                    "Y": [inp.B.y, inp.A.y, inp.C.y, inp.R.y, inp.S.y],
+                    "Z": [inp.B.z, inp.A.z, inp.C.z, inp.R.z, inp.S.z],
+                }
+            ),
+            column_config={
+                "X": st.column_config.NumberColumn("X", alignment="center"),
+                "Y": st.column_config.NumberColumn("Y", alignment="center"),
+                "Z": st.column_config.NumberColumn("Z", alignment="center"),
+            },
+            width="stretch",
+            hide_index=True,
+            disabled=["Point"],
+            height=222,
+            key="points_editor",
+        )
+        pg_col, pg_yz = st.columns([1, 1])
+        with pg_col:
+            try:
+                pdict = {r["Point"]: (float(r["X"]), float(r["Z"])) for _, r in points_df.iterrows()}
+                # Amortisseur C-A, bras balancier A-B-R, liaison roue R-S.
+                seg_x = [pdict["C"][0], pdict["A"][0], None, pdict["A"][0], pdict["B"][0],
+                         pdict["R"][0], None, pdict["R"][0], pdict["S"][0]]
+                seg_z = [pdict["C"][1], pdict["A"][1], None, pdict["A"][1], pdict["B"][1],
+                         pdict["R"][1], None, pdict["R"][1], pdict["S"][1]]
+                fig_pts = go.Figure()
+                fig_pts.add_trace(go.Scatter(x=seg_x, y=seg_z, mode="lines",
+                                             line=dict(color="#2c3e50", width=3), name="Liaisons"))
+                fig_pts.add_trace(go.Scatter(
+                    x=[v[0] for v in pdict.values()], y=[v[1] for v in pdict.values()],
+                    mode="markers+text", text=list(pdict.keys()), textposition="top center",
+                    marker=dict(size=9, color="#e74c3c"), name="Points"))
+                fig_pts.update_layout(
+                    height=210, margin=dict(l=8, r=8, t=26, b=8),
+                    plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
+                    title=dict(text="Vue X-Z (profil)", x=0.5, font=dict(size=12)),
+                    xaxis=_mini_axis("X (mm)"),
+                    yaxis=_mini_axis("Z (mm)") | dict(scaleanchor="x", scaleratio=1.0),
+                )
+                st.plotly_chart(fig_pts, width="stretch")
+            except (KeyError, ValueError, TypeError):
+                st.caption("Géométrie incomplète — graphe indisponible.")
+        with pg_yz:
+            try:
+                pyz = {r["Point"]: (float(r["Y"]), float(r["Z"])) for _, r in points_df.iterrows()}
+                # Amortisseur C-A, bras balancier A-B-R, liaison roue R-S (plan Y-Z).
+                seg_y = [pyz["C"][0], pyz["A"][0], None, pyz["A"][0], pyz["B"][0],
+                         pyz["R"][0], None, pyz["R"][0], pyz["S"][0]]
+                seg_z2 = [pyz["C"][1], pyz["A"][1], None, pyz["A"][1], pyz["B"][1],
+                          pyz["R"][1], None, pyz["R"][1], pyz["S"][1]]
+                fig_yz = go.Figure()
+                fig_yz.add_trace(go.Scatter(x=seg_y, y=seg_z2, mode="lines",
+                                            line=dict(color="#2c3e50", width=3), name="Liaisons"))
+                fig_yz.add_trace(go.Scatter(
+                    x=[v[0] for v in pyz.values()], y=[v[1] for v in pyz.values()],
+                    mode="markers+text", text=list(pyz.keys()), textposition="top center",
+                    marker=dict(size=9, color="#e74c3c"), name="Points"))
+                fig_yz.update_layout(
+                    title=dict(text="Vue Y-Z (face)", x=0.5, font=dict(size=12)),
+                    height=210, margin=dict(l=8, r=8, t=26, b=8),
+                    plot_bgcolor=_PAPER_BG, paper_bgcolor="white", showlegend=False,
+                    xaxis=_mini_axis("Y (mm)"),
+                    yaxis=_mini_axis("Z (mm)") | dict(scaleanchor="x", scaleratio=1.0),
+                )
+                st.plotly_chart(fig_yz, width="stretch")
+            except (KeyError, ValueError, TypeError):
+                st.caption("Géométrie incomplète — graphe indisponible.")
 
 # --------------------------------------------------------------------------- #
 #  3) Pneu et spring-back
@@ -693,10 +708,32 @@ def _build_inputs() -> TrailingArmInputs | StraitStrutInputs:
     def pt(row) -> Point3:
         return Point3(float(row["X"]), float(row["Y"]), float(row["Z"]))
 
-    pts = {r["Point"]: pt(r) for _, r in points_df.iterrows()}
-
     model_kind = str(st.session_state.get("model_kind", "trailing_arm"))
     model_cls = StraitStrutInputs if model_kind == "strait_strut" else TrailingArmInputs
+
+    if model_kind == "strait_strut":
+        pts = {
+            "B": inp.B,
+            "A": inp.A,
+            "C": inp.C,
+            "R": inp.R,
+            "S": inp.S,
+        }
+    else:
+        pts = {r["Point"]: pt(r) for _, r in points_df.iterrows()}
+
+    extra_kwargs = {}
+    if model_kind == "strait_strut":
+        extra_kwargs.update(
+            strut_pitch=g("strut_pitch"),
+            strut_roll=g("strut_roll"),
+            h_pivot_z=g("h_pivot_z"),
+            h_guide_top_z=g("h_guide_top_z"),
+            h_guide_bot_z=g("h_guide_bot_z"),
+            bague_guide=g("bague_guide"),
+            bague_piston=g("bague_piston"),
+            seal_precomp_pa=g("seal_precomp_pa"),
+        )
 
     return model_cls(
         model_kind=model_kind,
@@ -739,6 +776,7 @@ def _build_inputs() -> TrailingArmInputs | StraitStrutInputs:
             Rainure(float(a), float(b), float(c))
             for a, b, c in rainures_df.itertuples(index=False)
         ],
+        **extra_kwargs,
     )
 
 

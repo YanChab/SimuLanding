@@ -14,32 +14,32 @@
     "summary_rows": [
       [
         "Fx Spin up",
-        4130.049135068552,
+        8296.79902831911,
         "N"
       ],
       [
         "Fz Spin up",
-        22532.28280655414,
-        "N"
-      ],
-      [
-        "Stroke spin up",
-        53.000148218778,
-        "mm"
-      ],
-      [
-        "Fx Spring back",
-        -8296.79902831911,
-        "N"
-      ],
-      [
-        "Fz Spring back",
         17090.4575491981,
         "N"
       ],
       [
-        "Stroke Spring back",
+        "Stroke spin up",
         22.27119557233985,
+        "mm"
+      ],
+      [
+        "Fx Spring back",
+        -4130.049135068552,
+        "N"
+      ],
+      [
+        "Fz Spring back",
+        22532.28280655414,
+        "N"
+      ],
+      [
+        "Stroke Spring back",
+        53.000148218778,
         "mm"
       ],
       [
@@ -111,32 +111,32 @@
     "summary_rows": [
       [
         "Fx Spin up",
-        4136.453504791368,
+        8341.491850326649,
         "N"
       ],
       [
         "Fz Spin up",
-        22938.449425706345,
-        "N"
-      ],
-      [
-        "Stroke spin up",
-        51.82747152836477,
-        "mm"
-      ],
-      [
-        "Fx Spring back",
-        -8341.491850326649,
-        "N"
-      ],
-      [
-        "Fz Spring back",
         17240.56013317735,
         "N"
       ],
       [
-        "Stroke Spring back",
+        "Stroke spin up",
         21.85727461402709,
+        "mm"
+      ],
+      [
+        "Fx Spring back",
+        -4136.453504791368,
+        "N"
+      ],
+      [
+        "Fz Spring back",
+        22938.449425706345,
+        "N"
+      ],
+      [
+        "Stroke Spring back",
+        51.82747152836477,
         "mm"
       ],
       [
@@ -208,32 +208,32 @@
     "summary_rows": [
       [
         "Fx Spin up",
-        4122.675807903533,
+        8313.005909887732,
         "N"
       ],
       [
         "Fz Spin up",
-        22874.32930332321,
-        "N"
-      ],
-      [
-        "Stroke spin up",
-        53.23385079116294,
-        "mm"
-      ],
-      [
-        "Fx Spring back",
-        -8313.005909887732,
-        "N"
-      ],
-      [
-        "Fz Spring back",
         17170.913128931257,
         "N"
       ],
       [
-        "Stroke Spring back",
+        "Stroke spin up",
         22.317419574438908,
+        "mm"
+      ],
+      [
+        "Fx Spring back",
+        -4122.675807903533,
+        "N"
+      ],
+      [
+        "Fz Spring back",
+        22874.32930332321,
+        "N"
+      ],
+      [
+        "Stroke Spring back",
+        53.23385079116294,
         "mm"
       ],
       [

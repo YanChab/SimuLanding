@@ -360,10 +360,15 @@ def run_strait_strut(
 
         # Effort pneu vertical
         tyre_ftyre_i = max(0.0, f_tyre(tyre_defl_val, tyre_defl_tbl, tyre_load_tbl))
-        # Effort horizontal spring-back (repère sol)
-        fx_spring = -p.kx * tyre_depx - p.cx * tyre_vx
-        # Torseur sol au contact : (Fx, 0, Fz)
-        tr_sol = np.array([fx_spring, 0.0, tyre_ftyre_i])
+        # Force ressort/amortisseur horizontal APPLIQUEE A LA ROUE (repère sol).
+        # La convention interne historique du moteur utilise ce signe pour les
+        # projections repère sol ↔ repère jambe. En revanche, les sorties
+        # utilisateur ``tr_x`` / ``reaction_h`` suivent la convention Excel et
+        # TrailingArm : réaction transmise à la structure, donc signe opposé.
+        fx_spring_wheel = -p.kx * tyre_depx - p.cx * tyre_vx
+        tr_x = -fx_spring_wheel
+        # Torseur utilisé par la dynamique interne (convention historique).
+        tr_sol = np.array([fx_spring_wheel, 0.0, tyre_ftyre_i])
         # Conversion en repère jambe pour les efforts de guidage
         tr_lg = R_sol_to_lg @ tr_sol
         tr_lg_x = float(tr_lg[0])  # composante latérale (pour guide force)
@@ -397,7 +402,7 @@ def run_strait_strut(
         fspin = mu_val * tyre_ftyre_i * math.copysign(1.0, slip) if tyre_ftyre_i > 0 else 0.0
         tyre_alpha_i = (fspin * r_eff_val) / p.wheel_inertia if tyre_ftyre_i > 0 else 0.0
         # Spring-back : force de rappel horizontal (sol) -> accélération roue
-        acc_tyre_x = (fx_spring + fspin) / p.wheelmass
+        acc_tyre_x = (fx_spring_wheel + fspin) / p.wheelmass
 
         # Torseur à l'attache fuselage B
         tb_res_x = float(tb_sol_cur[0])
@@ -463,9 +468,9 @@ def run_strait_strut(
         out["tyre_omega"][i] = tyre_omega
         out["tyre_mu"][i] = mu_val
         out["tyre_slip"][i] = slip
-        out["tr_x"][i] = float(tr_sol[0])
+        out["tr_x"][i] = tr_x
         out["reaction_v"][i] = tyre_ftyre_i
-        out["reaction_h"][i] = abs(float(tr_sol[0]))
+        out["reaction_h"][i] = tr_x
         out["xgt"][i] = xgt
         out["xgb"][i] = xgb
         out["tors_res_x"][i] = tb_res_x

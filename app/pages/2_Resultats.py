@@ -21,6 +21,7 @@ if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
 from dropsim.engine import OUTPUT_COLUMNS  # noqa: E402
+from dropsim.engine_strait_strut import OUTPUT_COLUMNS_SS  # noqa: E402
 from dropsim.geometry import deter_pos_bal_a, deter_pos_bal_r, rotate_about  # noqa: E402
 from dropsim import (  # noqa: E402
     save_simulation,
@@ -144,8 +145,8 @@ if result is None:
     st.stop()
 
 df = result.df
-COL = OUTPUT_COLUMNS  # clé interne -> libellé de colonne
 _model_kind = getattr(st.session_state.get("inputs"), "model_kind", "trailing_arm")
+COL = OUTPUT_COLUMNS_SS if _model_kind == "strait_strut" else OUTPUT_COLUMNS
 
 # Colonne « course » exprimée en mm pour l'affichage.
 course_mm = df[COL["trailing_arm_d"]] * 1000.0
@@ -492,70 +493,76 @@ with tab_cine:
     )
 
 with tab_ratio:
-    inputs_for_kin = st.session_state.get("inputs")
-    kin_curve = _compute_kinematic_curve(inputs_for_kin)
-
-    if kin_curve is None:
+    if _model_kind == "strait_strut":
         st.info(
-            "Données de ratio cinématique indisponibles pour ce résultat "
-            "(entrées introuvables ou géométrie hors domaine). "
-            "Chargez/relancez une simulation pour afficher cet onglet."
+            "Le ratio cinématique balancier n'est pas applicable au modèle "
+            "StraitStrut (jambe de force directe)."
         )
     else:
-        course_amort_mm, course_roue_mm, kin_ratio = kin_curve
-        finite_ratio = kin_ratio[np.isfinite(kin_ratio)]
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Ratio moyen", f"{float(np.mean(finite_ratio)):.3f}")
-        c2.metric("Ratio max", f"{float(np.max(finite_ratio)):.3f}")
-        c3.metric("Ratio min", f"{float(np.min(finite_ratio)):.3f}")
+        inputs_for_kin = st.session_state.get("inputs")
+        kin_curve = _compute_kinematic_curve(inputs_for_kin)
 
-        fig_ratio = go.Figure()
-        fig_ratio.add_trace(
-            go.Scatter(
-                x=course_amort_mm,
-                y=kin_ratio,
-                mode="lines",
-                name="Ratio cinématique (course amortisseur / course roue)",
-                yaxis="y",
+        if kin_curve is None:
+            st.info(
+                "Données de ratio cinématique indisponibles pour ce résultat "
+                "(entrées introuvables ou géométrie hors domaine). "
+                "Chargez/relancez une simulation pour afficher cet onglet."
             )
-        )
-        fig_ratio.add_trace(
-            go.Scatter(
-                x=course_amort_mm,
-                y=course_roue_mm,
-                mode="lines",
-                name="Course roue",
-                yaxis="y2",
-            )
-        )
-        fig_ratio.update_layout(
-            title=dict(
-                text="Ratio cinématique et course roue en fonction de la course amortisseur",
-                y=0.98,
-                yanchor="top",
-            ),
-            margin=dict(l=10, r=10, t=80, b=55),
-            legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
-            height=GRAPH_HEIGHT,
-            plot_bgcolor=GRAPH_PAPER_BG,
-            paper_bgcolor="white",
-            xaxis=_grid_axis("Course amortisseur (mm)"),
-            yaxis=_grid_axis("Ratio cinématique (-)"),
-            yaxis2={
-                **_grid_axis("Course roue (mm)"),
-                "overlaying": "y",
-                "side": "right",
-                "showgrid": False,
-                "zeroline": False,
-                "minor": {"showgrid": False},
-            },
-        )
+        else:
+            course_amort_mm, course_roue_mm, kin_ratio = kin_curve
+            finite_ratio = kin_ratio[np.isfinite(kin_ratio)]
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Ratio moyen", f"{float(np.mean(finite_ratio)):.3f}")
+            c2.metric("Ratio max", f"{float(np.max(finite_ratio)):.3f}")
+            c3.metric("Ratio min", f"{float(np.min(finite_ratio)):.3f}")
 
-        st.plotly_chart(
-            fig_ratio,
-            width="stretch",
-            config={"responsive": True},
-        )
+            fig_ratio = go.Figure()
+            fig_ratio.add_trace(
+                go.Scatter(
+                    x=course_amort_mm,
+                    y=kin_ratio,
+                    mode="lines",
+                    name="Ratio cinématique (course amortisseur / course roue)",
+                    yaxis="y",
+                )
+            )
+            fig_ratio.add_trace(
+                go.Scatter(
+                    x=course_amort_mm,
+                    y=course_roue_mm,
+                    mode="lines",
+                    name="Course roue",
+                    yaxis="y2",
+                )
+            )
+            fig_ratio.update_layout(
+                title=dict(
+                    text="Ratio cinématique et course roue en fonction de la course amortisseur",
+                    y=0.98,
+                    yanchor="top",
+                ),
+                margin=dict(l=10, r=10, t=80, b=55),
+                legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
+                height=GRAPH_HEIGHT,
+                plot_bgcolor=GRAPH_PAPER_BG,
+                paper_bgcolor="white",
+                xaxis=_grid_axis("Course amortisseur (mm)"),
+                yaxis=_grid_axis("Ratio cinématique (-)"),
+                yaxis2={
+                    **_grid_axis("Course roue (mm)"),
+                    "overlaying": "y",
+                    "side": "right",
+                    "showgrid": False,
+                    "zeroline": False,
+                    "minor": {"showgrid": False},
+                },
+            )
+
+            st.plotly_chart(
+                fig_ratio,
+                width="stretch",
+                config={"responsive": True},
+            )
 
 with tab_acc:
     st.plotly_chart(
@@ -574,25 +581,39 @@ with tab_acc:
     )
 
 with tab_torseur:
-    st.caption(
-        "Torseur d'effort transmis par le train à la masse suspendue via ses "
-        "deux attaches : **C** (tête d'amortisseur) est une **rotule** — elle ne "
-        "transmet qu'un **effort**, sans moment ; **B** (pivot du balancier) est "
-        "un **pivot d'axe Y** — il reprend l'**effort** et les **moments autour "
-        "de X et Z** (l'axe Y étant libre en rotation, aucun moment n'y est "
-        "transmis). La résultante (somme des deux efforts) est égale à la "
-        "réaction sol."
-    )
-
-    torseur_keys = [
-        "tors_res_norm",
-        "torsC_fx",
-        "torsC_fz",
-        "torsB_fx",
-        "torsB_fz",
-        "torsB_mx",
-        "torsB_mz",
-    ]
+    if _model_kind == "strait_strut":
+        st.caption(
+            "Pour le modèle **StraitStrut**, le torseur transmis au fuselage est "
+            "rapporté à l'attache **B** de la jambe. Le moteur exporte la "
+            "résultante globale et les efforts/moments repris en B ; il n'y a pas "
+            "de torseur séparé en **C** comme sur le modèle à balancier."
+        )
+        torseur_keys = [
+            "tors_res_norm",
+            "torsB_fx",
+            "torsB_fz",
+            "torsB_mx",
+            "torsB_mz",
+        ]
+    else:
+        st.caption(
+            "Torseur d'effort transmis par le train à la masse suspendue via ses "
+            "deux attaches : **C** (tête d'amortisseur) est une **rotule** — elle ne "
+            "transmet qu'un **effort**, sans moment ; **B** (pivot du balancier) est "
+            "un **pivot d'axe Y** — il reprend l'**effort** et les **moments autour "
+            "de X et Z** (l'axe Y étant libre en rotation, aucun moment n'y est "
+            "transmis). La résultante (somme des deux efforts) est égale à la "
+            "réaction sol."
+        )
+        torseur_keys = [
+            "tors_res_norm",
+            "torsC_fx",
+            "torsC_fz",
+            "torsB_fx",
+            "torsB_fz",
+            "torsB_mx",
+            "torsB_mz",
+        ]
     missing_cols = [COL[k] for k in torseur_keys if COL[k] not in df.columns]
 
     if missing_cols:
@@ -609,16 +630,24 @@ with tab_torseur:
         m1.metric("‖Résultante‖ max", f"{_amax('tors_res_norm'):.0f} N")
         m2.metric("|Moment au pivot B| max", f"{max(_amax('torsB_mx'), _amax('torsB_mz')):.0f} N·m")
 
+        effort_series = [
+            ("Effort pivot B — X", df[COL["torsB_fx"]]),
+            ("Effort pivot B — Z", df[COL["torsB_fz"]]),
+        ]
+        effort_title = "Efforts de liaison au pivot B"
+        if _model_kind != "strait_strut":
+            effort_series = [
+                ("Effort rotule C — X", df[COL["torsC_fx"]]),
+                ("Effort rotule C — Z", df[COL["torsC_fz"]]),
+                *effort_series,
+            ]
+            effort_title = "Efforts de liaison aux attaches C (rotule) et B (pivot)"
+
         st.plotly_chart(
             line(
                 t,
-                [
-                    ("Effort rotule C — X", df[COL["torsC_fx"]]),
-                    ("Effort rotule C — Z", df[COL["torsC_fz"]]),
-                    ("Effort pivot B — X", df[COL["torsB_fx"]]),
-                    ("Effort pivot B — Z", df[COL["torsB_fz"]]),
-                ],
-                "Efforts de liaison aux attaches C (rotule) et B (pivot)",
+                effort_series,
+                effort_title,
                 "Temps (s)",
                 "Effort (N)",
             ),

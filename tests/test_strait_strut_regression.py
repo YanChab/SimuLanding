@@ -122,6 +122,8 @@ def test_golden_file_present(golden):
 
 
 @pytest.mark.parametrize("case_name", list(REGRESSION_CASES))
+@pytest.mark.slow
+@pytest.mark.regression
 def test_golden_summary(case_name, golden):
     ref = golden[case_name]
     result = run_simulation(_inputs_for(REGRESSION_CASES[case_name]))
@@ -137,6 +139,8 @@ def test_golden_summary(case_name, golden):
 
 
 @pytest.mark.parametrize("case_name", list(REGRESSION_CASES))
+@pytest.mark.slow
+@pytest.mark.regression
 def test_golden_summary_rows(case_name, golden):
     ref_rows = golden[case_name]["summary_rows"]
     result = run_simulation(_inputs_for(REGRESSION_CASES[case_name]))
@@ -178,6 +182,8 @@ def test_basic_physical_bounds_hold():
     assert s["Course max (mm)"] <= default_strait_strut_inputs().course + 20.0
 
 
+@pytest.mark.slow
+@pytest.mark.regression
 def test_excel_reference_curve_rms(reference_curve):
     if reference_curve is None:
         pytest.skip("Référence NLG absente: _extract/reference/Results_NLG.csv")

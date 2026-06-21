@@ -120,6 +120,8 @@ def test_golden_file_present(golden):
 
 
 @pytest.mark.parametrize("case_name", list(REGRESSION_CASES))
+@pytest.mark.slow
+@pytest.mark.regression
 def test_golden_summary(case_name, golden):
     ref = golden[case_name]
     result = run_simulation(_precise_inputs_for(REGRESSION_CASES[case_name]))
@@ -139,6 +141,8 @@ def test_golden_summary(case_name, golden):
 
 
 @pytest.mark.parametrize("case_name", list(REGRESSION_CASES))
+@pytest.mark.slow
+@pytest.mark.regression
 def test_golden_summary_rows(case_name, golden):
     ref_rows = golden[case_name]["summary_rows"]
     result = run_simulation(_precise_inputs_for(REGRESSION_CASES[case_name]))
@@ -165,6 +169,8 @@ def reference_curve() -> pd.DataFrame | None:
 
 
 @pytest.mark.skipif(not os.path.exists(REF_CSV), reason="CSV de référence absent")
+@pytest.mark.slow
+@pytest.mark.regression
 def test_curve_fz_rms_against_excel(reference_curve):
     """Écart RMS sur toute la courbe d'effort vertical Fz(t) vs Excel < 2 %.
 
@@ -187,6 +193,8 @@ def test_curve_fz_rms_against_excel(reference_curve):
 
 
 @pytest.mark.skipif(not os.path.exists(REF_CSV), reason="CSV de référence absent")
+@pytest.mark.slow
+@pytest.mark.regression
 def test_curve_stroke_rms_against_excel(reference_curve):
     """Écart RMS sur la course d'amortisseur d(t) vs Excel < 2 % de la course max."""
     result = run_simulation(default_trailing_arm_inputs())

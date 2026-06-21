@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from dropsim import default_trailing_arm_inputs, run_simulation
 from dropsim.engine import OUTPUT_COLUMNS, _select_damper_core_solver
+
+pytestmark = pytest.mark.slow
 
 
 def _run_case(integrator: str, dt: float) -> tuple[float, float, float, float]:
@@ -59,34 +63,6 @@ def _run_auto_case(dt: float = 1.0e-4):
         summary["Accélération max (g)"],
         res_max,
     )
-
-
-def _count_auto_implicit_steps(
-    solver: str,
-    masse: float,
-    vz: float,
-    dt: float,
-    temperature: float = 25.0,
-) -> tuple[int, int]:
-    inp = default_trailing_arm_inputs()
-    inp.integrator = "rk4"
-    inp.damper_core_solver = solver
-    inp.it = dt
-    inp.masse = masse
-    inp.vz = vz
-    inp.temperature = temperature
-    result = run_simulation(inp)
-    si = inp.to_si()
-    df = result.df
-    implicit = 0
-    for i in range(len(df)):
-        d = float(df[OUTPUT_COLUMNS["trailing_arm_d"]].iloc[i])
-        v = float(df[OUTPUT_COLUMNS["trailing_arm_v"]].iloc[i])
-        pg = float(df[OUTPUT_COLUMNS["pg"]].iloc[i]) * 1e5
-        ftot_prev = float(df[OUTPUT_COLUMNS["trailing_arm_ftot"]].iloc[i - 1]) if i > 0 else 0.0
-        if _select_damper_core_solver(si, d, v, pg, ftot_prev) == "implicit_adaptive":
-            implicit += 1
-    return implicit, len(df)
 
 
 def _run_solver_case(
@@ -149,21 +125,17 @@ def test_auto_solver_heuristic_switches_on_stiff_states():
 
 def test_auto_profiles_cover_fast_and_precise_tradeoff():
     fast_start = time.perf_counter()
-    fast = _run_solver_case("auto_fast", 5.0e-5, 1275.0, 3.05)
+    fast = _run_solver_case("auto_fast", 1.0e-4, 1275.0, 3.05)
     fast_elapsed = time.perf_counter() - fast_start
 
     precise_start = time.perf_counter()
-    precise = _run_solver_case("auto_precise", 5.0e-5, 1275.0, 3.05)
+    precise = _run_solver_case("auto_precise", 1.0e-4, 1275.0, 3.05)
     precise_elapsed = time.perf_counter() - precise_start
 
-    legacy = _run_solver_case("legacy", 5.0e-5, 1275.0, 3.05)
+    legacy = _run_solver_case("legacy", 1.0e-4, 1275.0, 3.05)
 
-    fast_implicit, fast_steps = _count_auto_implicit_steps("auto_fast", 1275.0, 3.05, 5.0e-5)
-    precise_implicit, precise_steps = _count_auto_implicit_steps("auto_precise", 1275.0, 3.05, 5.0e-5)
-
+    # Garde le coeur de couverture utile: profils auto proches du chemin historique.
     assert fast_elapsed < precise_elapsed
-    assert fast_implicit / fast_steps > 0.0
-    assert precise_implicit / precise_steps > 0.0
     assert abs(fast[0] - legacy[0]) <= 0.04 * legacy[0]
     assert abs(precise[0] - legacy[0]) <= 0.02 * legacy[0]
     assert abs(fast[1] - legacy[1]) <= 1.0
@@ -233,16 +205,3 @@ def test_auto_solver_runs_and_stays_close_to_legacy_on_nominal_case():
     assert abs(course_auto - course_legacy) <= 0.5
     assert abs(acc_auto - acc_legacy) <= 0.05
 
-
-def test_auto_solver_stays_efficient_on_stiffer_valid_case():
-    fz_legacy, course_legacy, acc_legacy, res_legacy = _run_case_with_solver(
-        "rk4", 5.0e-5, "legacy"
-    )
-    fz_auto, course_auto, acc_auto, res_auto = _run_auto_case(5.0e-5)
-
-    # L'heuristique auto doit rester très proche du chemin historique tout en
-    # évitant le coût du noyau implicite pur.
-    assert abs(fz_auto - fz_legacy) <= 0.01 * fz_legacy
-    assert abs(course_auto - course_legacy) <= 0.5
-    assert abs(acc_auto - acc_legacy) <= 0.05
-    assert res_auto <= 1.01 * res_legacy

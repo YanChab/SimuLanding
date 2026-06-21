@@ -46,5 +46,19 @@ streamlit run app/streamlit_app.py
 ## Tests de validation
 
 ```powershell
-pytest tests/
+# Suite complète (pré-commit / CI locale)
+pytest -q
+
+# Mode rapide local (exclut les tests les plus coûteux)
+pytest -q -m "not slow" -n auto
+
+# Suite complète parallélisée
+pytest -q -n auto
+
+# Profil des tests lents (diagnostic perf)
+pytest -q --durations=15
 ```
+
+Les tests coûteux sont marqués `slow` (intégrateur + régressions lourdes),
+ce qui permet de garder une boucle de développement rapide sans perdre la
+couverture complète avant livraison.
