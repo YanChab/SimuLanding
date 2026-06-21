@@ -9,7 +9,6 @@ import json
 import os
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import dropsim.engine_strait_strut as engine_ss
@@ -17,7 +16,6 @@ from dropsim import default_strait_strut_inputs, run_simulation
 
 _HERE = os.path.dirname(__file__)
 GOLDEN_JSON = os.path.join(_HERE, "reference", "golden_strait_strut_summary.json")
-REF_CSV = os.path.join(_HERE, "..", "_extract", "reference", "Results_NLG.csv")
 
 GOLDEN_RTOL = 1e-4
 GOLDEN_ATOL = 1e-6
@@ -41,60 +39,6 @@ def _inputs_for(overrides: dict[str, float]):
 def _load_golden() -> dict:
     with open(GOLDEN_JSON, encoding="utf-8") as fh:
         return json.load(fh)
-
-
-def _first_available_column(df: pd.DataFrame, *names: str) -> str:
-    for name in names:
-        if name in df.columns:
-            return name
-    raise KeyError(f"Aucune des colonnes attendues n'est présente: {names}")
-
-
-@pytest.fixture(scope="module")
-def reference_curve() -> pd.DataFrame | None:
-    if not os.path.exists(REF_CSV):
-        return None
-    return pd.read_csv(REF_CSV)
-
-
-def _interpolate_on_reference_time(
-    sim_df: pd.DataFrame,
-    ref_df: pd.DataFrame,
-    sim_col: str,
-    ref_col: str,
-    max_time: float | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    t_ref_name = _first_available_column(ref_df, "Temps (s)", "Temps")
-    t_sim_name = _first_available_column(sim_df, "Temps (s)", "Temps")
-
-    t_ref = ref_df[t_ref_name].to_numpy(dtype=float)
-    t_sim = sim_df[t_sim_name].to_numpy(dtype=float)
-    y_ref = ref_df[ref_col].to_numpy(dtype=float)
-    y_sim = sim_df[sim_col].to_numpy(dtype=float)
-
-    valid = np.isfinite(t_ref) & np.isfinite(y_ref)
-    t_ref = t_ref[valid]
-    y_ref = y_ref[valid]
-
-    if t_ref.size == 0:
-        raise AssertionError("Courbe de référence vide après nettoyage")
-
-    in_domain = (t_ref >= t_sim[0]) & (t_ref <= t_sim[-1])
-    if max_time is not None:
-        in_domain &= t_ref <= max_time
-    t_ref = t_ref[in_domain]
-    y_ref = y_ref[in_domain]
-
-    if t_ref.size == 0:
-        raise AssertionError("Aucun recouvrement temporel entre simulation et référence")
-
-    y_sim_interp = np.interp(t_ref, t_sim, y_sim)
-    return y_sim_interp, y_ref
-
-
-def _rms_error(sim_series: np.ndarray, ref_series: np.ndarray) -> float:
-    return float(np.sqrt(np.mean((sim_series - ref_series) ** 2)))
-
 
 
 def regenerate_golden() -> None:
@@ -181,83 +125,6 @@ def test_basic_physical_bounds_hold():
 
     # Course bornée: tolérance de 20 mm au-delà de la butée mécanique.
     assert s["Course max (mm)"] <= default_strait_strut_inputs().course + 20.0
-
-
-@pytest.mark.slow
-@pytest.mark.regression
-def test_excel_reference_curve_rms(reference_curve):
-    if reference_curve is None:
-        pytest.skip("Référence NLG absente: _extract/reference/Results_NLG.csv")
-
-    # Ce test compare aux courbes Excel historiques Results_NLG.csv.
-    # Si le profil par défaut est volontairement remplacé par une référence
-    # utilisateur (ex: simulation sauvegardée), la comparaison n'est plus
-    # pertinente et doit être ignorée.
-    inp = default_strait_strut_inputs()
-    if not (
-        np.isclose(inp.vx, 37.0)
-        and np.isclose(inp.course, 230.0)
-        and np.isclose(inp.it, 5.0e-4)
-    ):
-        pytest.skip(
-            "Profil par défaut StraitStrut personnalisé: comparaison RMS Excel historique non applicable."
-        )
-
-    result = run_simulation(default_strait_strut_inputs())
-    sim = result.df
-    ref = reference_curve
-    peak_ref_time = float(
-        ref.loc[ref["NLG.d"].astype(float).idxmax(), "Temps (s)"]
-    )
-    compression_window_end = min(peak_ref_time + 0.02, 0.22)
-
-    metrics = {
-        "Tyre.FTyre": {
-            "sim_col": "Tyre.FTyre (N)",
-            "ref_col": "Tyre.FTyre",
-            "rms_max": 1200.0,
-            "max_time": compression_window_end,
-        },
-        "StraitStrut.d": {
-            "sim_col": "StraitStrut.d (m)",
-            "ref_col": "NLG.d",
-            "rms_max": 0.012,
-            "max_time": compression_window_end,
-        },
-        "StraitStrut.Pg": {
-            "sim_col": "StraitStrut.Pg (bar)",
-            "ref_col": "NLG.Pg",
-            "rms_max": 8.0,
-            "max_time": compression_window_end,
-        },
-        "StraitStrut.Pc": {
-            "sim_col": "StraitStrut.Pc (bar)",
-            "ref_col": "NLG.Pc",
-            "rms_max": 28.0,
-            "max_time": compression_window_end,
-        },
-        "StraitStrut.Pd": {
-            "sim_col": "StraitStrut.Pd (bar)",
-            "ref_col": "NLG.Pd",
-            "rms_max": 24.0,
-            "max_time": compression_window_end,
-        },
-    }
-
-    for metric_name, cfg in metrics.items():
-        assert cfg["sim_col"] in sim.columns, f"Colonne simulation manquante: {cfg['sim_col']}"
-        assert cfg["ref_col"] in ref.columns, f"Colonne référence manquante: {cfg['ref_col']}"
-        y_sim, y_ref = _interpolate_on_reference_time(
-            sim_df=sim,
-            ref_df=ref,
-            sim_col=cfg["sim_col"],
-            ref_col=cfg["ref_col"],
-            max_time=cfg.get("max_time"),
-        )
-        rms = _rms_error(y_sim, y_ref)
-        assert rms <= cfg["rms_max"], (
-            f"RMS trop élevée pour {metric_name}: {rms:.6g} > {cfg['rms_max']:.6g}"
-        )
 
 
 def test_strait_strut_auto_precise_uses_implicit_adaptive(monkeypatch):

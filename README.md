@@ -3,7 +3,12 @@
 Application de simulation de drop test (essai de chute) pour trains d'atterrissage,
 remplaçant le fichier Excel `DROSIM_SA61-_#Simulation drop test avion complet.xlsm`.
 
-Phase 1 : train d'atterrissage **principal à balancier (MLG)**.
+Le projet couvre aujourd'hui deux modèles :
+- **TrailingArm (MLG)** ;
+- **StraitStrut (NLG)**.
+
+Pour StraitStrut, le profil par défaut est aligné sur la simulation de
+référence projet **Strait Strut Reference**.
 
 ## Architecture
 
@@ -17,7 +22,8 @@ dropsim/      Moteur de calcul Python pur (NumPy), indépendant de l'UI.
   gas.py          Ressort gazeux double chambre (Newton-Raphson)
   hydraulic.py    Pertes de charge hydrauliques (Cd, ΔP)
   tyre.py         Modèle de pneu (déflexion, μ, spin-up, spring-back)
-  engine.py       Boucle d'intégration temporelle (Euler explicite fidèle)
+  engine.py       Boucle d'intégration temporelle TrailingArm
+  engine_strait_strut.py  Boucle d'intégration temporelle StraitStrut
   simulation.py   Point d'entrée haut niveau (run_simulation)
 
 app/          Interface Streamlit
@@ -25,8 +31,8 @@ app/          Interface Streamlit
   pages/1_Saisie.py       Saisie des données du train
   pages/2_Resultats.py    Courbes de résultats
 
-tests/        Tests de validation vs la référence Excel
-_extract/     Données extraites de l'Excel (VBA, référence Results_MLG.csv)
+tests/        Tests de non-régression (goldens projet)
+_extract/     Données extraites historiques (VBA et exports Excel)
 ```
 
 ## Installation
@@ -61,4 +67,5 @@ pytest -q --durations=15
 
 Les tests coûteux sont marqués `slow` (intégrateur + régressions lourdes),
 ce qui permet de garder une boucle de développement rapide sans perdre la
-couverture complète avant livraison.
+couverture complète avant livraison. La non-régression StraitStrut est
+basée sur la référence projet (`tests/reference/golden_strait_strut_summary.json`).

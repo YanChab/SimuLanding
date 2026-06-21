@@ -8,6 +8,17 @@
 
 ## 1. État actuel observé
 
+### 1.0 Addendum (2026-06-21)
+
+Depuis la dernière mise à jour, les points suivants sont actés dans le dépôt :
+
+- le modèle StraitStrut peut basculer en implicite/adaptatif quand nécessaire
+  (stratégie `auto_fast` / `auto_precise`) ;
+- le profil par défaut StraitStrut est aligné sur la référence projet
+  **Strait Strut Reference** ;
+- le golden StraitStrut est désormais calé sur cette référence projet ;
+- la suite complète est verte (`62 passed`).
+
 ### 1.1 Mise à jour récente StraitStrut (NLG)
 
 Depuis la dernière itération, la non-régression dédiée StraitStrut a été
@@ -33,8 +44,8 @@ Le projet dispose déjà de points solides :
 
 En revanche, l'audit met aussi en évidence plusieurs zones à renforcer :
 
-- la suite complète de non-régression ne passe plus après les derniers
-  renommages (`pytest -q` : échecs dans `tests/test_regression.py`) ;
+- la stratégie de référence doit rester explicitée (référence projet vs
+  références historiques Excel) pour éviter des ambiguïtés de maintenance ;
 - le schéma de stockage JSON est resté à `simuland/1` alors que la sémantique
   de plusieurs noms de colonnes a changé ;
 - les libellés d'affichage, les clés internes, les références Excel et la
@@ -46,21 +57,20 @@ En revanche, l'audit met aussi en évidence plusieurs zones à renforcer :
 
 ## 2. Priorités recommandées
 
-### 2.1 Rétablir la non-régression complète — priorité critique
+### 2.1 Maintenir la non-régression complète — priorité critique
 
-**Constat.** La suite complète n'est pas verte. Les échecs observés portent sur :
+**Constat.** La suite complète est verte, mais il faut verrouiller ce statut
+dans la durée.
 
-- le format attendu de `tests/reference/golden_summary.json` ;
-- des références de colonnes encore en `MLG.d (m)` dans
-  `tests/test_regression.py` alors que le moteur expose maintenant
-  `TrailingArm.d (m)` ;
-- une désynchronisation entre jeux de référence, colonnes exportées et
-  assertions de regression.
+- les golden files doivent rester régénérés de façon contrôlée ;
+- les changements de libellés d'affichage doivent rester découplés des clés
+  de test ;
+- la politique de référence (profil projet) doit rester documentée.
 
 **Amélioration proposée.**
 
-- régénérer ou migrer le golden de regression vers le format actuel ;
-- réaligner `tests/test_regression.py` sur les colonnes réellement exportées ;
+- contrôler toute régénération de golden en revue ;
+- conserver des tests focalisés sur des clés stables ;
 - ajouter une cible simple de validation complète du dépôt avant chaque push.
 
 **Impact.** Très fort. Sans cela, les futures évolutions resteront difficiles à

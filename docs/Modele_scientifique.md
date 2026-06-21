@@ -5,6 +5,10 @@
 > (`DropCalcul`, classe `ClMLG`) du classeur Excel
 > *DROSIM_SA61 — Simulation drop test avion complet*.
 
+> Mise à jour 2026-06-21 : pour le modèle StraitStrut (NLG), le profil par
+> défaut est aligné sur la référence projet **Strait Strut Reference** et la
+> non-régression associée repose sur le golden projet.
+
 ---
 
 ## 1. Objet et principe général
@@ -1050,8 +1054,9 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
   d'adaptation automatique. Le mode `rk4` améliore le couplage intra-pas, mais
   ne remplace pas encore un schéma fully-coupled implicite/adaptatif sur toutes
   les variables internes (gaz/hydraulique).
-- **Mode implicite/adaptatif noyau** : activable pour étude numérique, mais non
-  retenu comme défaut à ce stade (coût CPU supérieur sur le cas nominal).
+- **Mode implicite/adaptatif noyau** : activé automatiquement selon la
+  stratégie hybride (`auto_fast` / `auto_precise`) dans les zones raides ;
+  l'usage dépend du cas et du profil choisi.
 - **Mode hybride automatique** : compromis pragmatique entre coût et robustesse;
   il n'est qu'une heuristique locale, pas une garantie de coût minimal global,
   mais son réglage actuel ramène le coût quasiment au niveau du chemin
