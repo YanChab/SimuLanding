@@ -14,9 +14,69 @@ import numpy as np
 import pandas as pd
 
 from .engine import OUTPUT_COLUMNS, run_trailing_arm
+from .engine_aircraft import OUTPUT_COLUMNS_AC, run_aircraft
 from .engine_strait_strut import OUTPUT_COLUMNS_SS, run_strait_strut
 from .errors import ErrorCollector, ErrorLevel, SimError
-from .inputs import TrailingArmInputs, StraitStrutInputs
+from .inputs import AircraftInputs, TrailingArmInputs, StraitStrutInputs
+
+
+AIRCRAFT_LEGACY_COLUMN_KEYS: tuple[str, ...] = (
+    "temps",
+    "aircraft_cg_z",
+    "aircraft_cg_vz",
+    "aircraft_cg_az",
+    "aircraft_pitch",
+    "aircraft_pitch_rate",
+    "aircraft_pitch_acc",
+    "aircraft_fz_total",
+    "aircraft_fz_nlg",
+    "aircraft_fz_mlg_left",
+    "aircraft_fz_mlg_right",
+    "aircraft_mx_total",
+    "nlg_stroke",
+    "nlg_velocity",
+    "nlg_ftot",
+    "nlg_pg",
+    "nlg_pc",
+    "nlg_pd",
+    "nlg_tyre_defl",
+    "mlg_left_stroke",
+    "mlg_left_velocity",
+    "mlg_left_ftot",
+    "mlg_left_pg",
+    "mlg_left_pc",
+    "mlg_left_pd",
+    "mlg_left_tyre_defl",
+    "mlg_left_fx",
+    "mlg_right_stroke",
+    "mlg_right_velocity",
+    "mlg_right_ftot",
+    "mlg_right_pg",
+    "mlg_right_pc",
+    "mlg_right_pd",
+    "mlg_right_tyre_defl",
+    "mlg_right_fx",
+)
+
+
+def _aircraft_df_from_data(data: dict[str, np.ndarray]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            OUTPUT_COLUMNS_AC[k]: data[k]
+            for k in AIRCRAFT_LEGACY_COLUMN_KEYS
+            if k in data and k in OUTPUT_COLUMNS_AC
+        }
+    )
+
+
+def _aircraft_full_df_from_data(data: dict[str, np.ndarray]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            OUTPUT_COLUMNS_AC[k]: data[k]
+            for k in OUTPUT_COLUMNS_AC
+            if k in data
+        }
+    )
 
 
 @dataclass
@@ -29,11 +89,13 @@ class SimulationResult:
     warnings: list[SimError] = field(default_factory=list)
     geometry: pd.DataFrame | None = None  # positions des points (mm) pour l'animation
     summary_rows: list[tuple[str, float, str]] = field(default_factory=list)
-    # (libellé, valeur, unité) — reproduit la zone B46:C61 de « Summary MLG ».
+    full_df: pd.DataFrame | None = None  # colonnes complètes (mode avion)
 
 
 def _subsample(data: dict[str, np.ndarray], max_points: int = 1000) -> dict[str, np.ndarray]:
-    """Sous-échantillonne les séries à ``max_points`` points (comme l'affichage Excel)."""
+    """Réduit le nombre de points pour l'affichage sans changer la dynamique."""
+    if not data:
+        return {}
     n = len(next(iter(data.values())))
     if n <= max_points:
         return data
@@ -60,8 +122,7 @@ def _negative_pressure_warnings(full: dict[str, np.ndarray]) -> list[SimError]:
         min_val = float(series[idx_min])
         if min_val >= 0.0:
             continue
-
-        t_s = float(temps[idx_min]) if temps is not None and len(temps) > idx_min else float("nan")
+        t_s = float(temps[idx_min]) if temps is not None and idx_min < len(temps) else float("nan")
         warnings.append(
             SimError(
                 code="PRESSION_NEGATIVE",
@@ -82,8 +143,59 @@ def _negative_pressure_warnings(full: dict[str, np.ndarray]) -> list[SimError]:
     return warnings
 
 
+def _build_aircraft_result(
+    engine_out,
+    *,
+    max_points: int,
+) -> SimulationResult:
+    data = _subsample(engine_out.data, max_points=max_points)
+    df = _aircraft_df_from_data(data)
+    full_df = _aircraft_full_df_from_data(data)
+    geom = _subsample(engine_out.geometry, max_points=max_points) if engine_out.geometry else {}
+    geom_df = pd.DataFrame(geom) if geom else None
+    if geom_df is not None:
+        geom_df.insert(0, "temps", data["temps"])
+    full = engine_out.data
+    summary = {
+        "Course max NLG (mm)": float(np.max(full["nlg_stroke"]) * 1000.0),
+        "Course max MLG gauche (mm)": float(np.max(full["mlg_left_stroke"]) * 1000.0),
+        "Course max MLG droite (mm)": float(np.max(full["mlg_right_stroke"]) * 1000.0),
+        "Effort vertical total max Fz (N)": float(np.max(full["aircraft_fz_total"])),
+        "Moment de tangage max (N.m)": float(np.max(np.abs(full["aircraft_mx_total"]))),
+        "Accélération CG max (g)": float(np.max(np.abs(full["aircraft_cg_az"])) / 9.81),
+        "Nombre de pas": int(engine_out.n_steps),
+    }
+    warnings = list(engine_out.warnings)
+    warnings.extend(_negative_pressure_warnings(full))
+    return SimulationResult(
+        df=df,
+        summary=summary,
+        n_steps=engine_out.n_steps,
+        warnings=warnings,
+        geometry=geom_df,
+        summary_rows=[],
+        full_df=full_df,
+    )
+
+
+def run_aircraft_simulation(
+    inputs: AircraftInputs,
+    max_points: int = 1000,
+    progress_callback: callable | None = None,
+) -> SimulationResult:
+    """Chemin dédié au mode avion complet, sans dispatch générique."""
+    collector = ErrorCollector()
+    inputs.validate(collector)
+    if collector.has_errors:
+        collector.raise_if_any()
+
+    params = inputs.to_si()
+    engine_out = run_aircraft(params, progress_callback=progress_callback)
+    return _build_aircraft_result(engine_out, max_points=max_points)
+
+
 def run_simulation(
-    inputs: TrailingArmInputs | StraitStrutInputs,
+    inputs: AircraftInputs | TrailingArmInputs | StraitStrutInputs,
     max_points: int = 1000,
     progress_callback: callable | None = None,
 ) -> SimulationResult:
@@ -107,29 +219,48 @@ def run_simulation(
     params = inputs.to_si()
 
     # Niveau PRÉ-CALCUL : cohérence des sections dérivées.
-    pre = ErrorCollector()
-    pre.check(
-        params.Sc <= 0,
-        code="SECTION_COMPRESSION_INVALIDE",
-        message="La section de compression est nulle ou négative.",
-        level=ErrorLevel.PRECALCUL,
-        field="Dpis",
-        hint="Vérifier Dpis et Dbh (Dpis doit être > Dbh).",
+    is_aircraft = (
+        getattr(inputs, "model_kind", "") == "aircraft"
+        or (
+            hasattr(inputs, "body")
+            and hasattr(inputs, "simulation")
+            and hasattr(inputs, "drop")
+            and hasattr(inputs, "layout")
+            and hasattr(inputs, "nlg")
+            and hasattr(inputs, "mlg")
+        )
+        or (
+            getattr(params, "nlg", None) is not None
+            and getattr(params, "mlg", None) is not None
+        )
     )
-    pre.check(
-        params.Sd <= 0,
-        code="SECTION_DETENTE_INVALIDE",
-        message="La section de détente est nulle ou négative.",
-        level=ErrorLevel.PRECALCUL,
-        field="Dpis",
-        hint="Vérifier Dpis et Dt (Dpis doit être > Dt).",
-    )
-    if pre.has_errors:
-        pre.raise_if_any()
+    if hasattr(params, "Sc") and hasattr(params, "Sd"):
+        pre = ErrorCollector()
+        pre.check(
+            params.Sc <= 0,
+            code="SECTION_COMPRESSION_INVALIDE",
+            message="La section de compression est nulle ou négative.",
+            level=ErrorLevel.PRECALCUL,
+            field="Dpis",
+            hint="Vérifier Dpis et Dbh (Dpis doit être > Dbh).",
+        )
+        pre.check(
+            params.Sd <= 0,
+            code="SECTION_DETENTE_INVALIDE",
+            message="La section de détente est nulle ou négative.",
+            level=ErrorLevel.PRECALCUL,
+            field="Dpis",
+            hint="Vérifier Dpis et Dt (Dpis doit être > Dt).",
+        )
+        if pre.has_errors:
+            pre.raise_if_any()
 
     # Niveau EXÉCUTION.
-    is_strait_strut = isinstance(inputs, StraitStrutInputs) or getattr(inputs, "model_kind", "") == "strait_strut"
-    if is_strait_strut:
+    is_strait_strut = getattr(inputs, "model_kind", "") == "strait_strut" and not is_aircraft
+    if is_aircraft:
+        engine_out = run_aircraft(params, progress_callback=progress_callback)
+        col_map = OUTPUT_COLUMNS_AC
+    elif is_strait_strut:
         ss = inputs  # type: ignore[assignment]
         # Angles totaux jambe (rad) = structural (deg→rad) + avion (déjà en rad via to_si)
         alfap_rad = getattr(ss, "strut_pitch", 0.0) * math.pi / 180.0 + params.pitch
@@ -152,24 +283,40 @@ def run_simulation(
         col_map = OUTPUT_COLUMNS
 
     data = _subsample(engine_out.data, max_points=max_points)
-    df = pd.DataFrame({col_map[k]: v for k, v in data.items() if k in col_map})
+    if is_aircraft:
+        df = _aircraft_df_from_data(data)
+        full_df = _aircraft_full_df_from_data(data)
+    else:
+        df = pd.DataFrame({col_map[k]: v for k, v in data.items() if k in col_map})
+        full_df = None
     geom = _subsample(engine_out.geometry, max_points=max_points) if engine_out.geometry else {}
     geom_df = pd.DataFrame(geom) if geom else None
     if geom_df is not None:
         geom_df.insert(0, "temps", data["temps"])
     full = engine_out.data
-    summary = {
-        "Course max (mm)": float(np.max(full["trailing_arm_d"]) * 1000.0),
-        "Effort vertical max Fz (N)": float(np.max(full["tyre_ftyre"])),
-        "Effort horizontal max Fx (N)": float(np.max(np.abs(full["tr_x"]))),
-        "Effort amortisseur max (N)": float(np.max(np.abs(full["trailing_arm_ftot"]))),
-        "Pression gaz max (bar)": float(np.max(full["pg"])),
-        "Pression compression max (bar)": float(np.max(full["pc"])),
-        "Accélération max (g)": float(np.max(np.abs(full["accms"])) / 9.81),
-        "Nombre de pas": int(engine_out.n_steps),
-    }
-
-    summary_rows = _build_summary_rows(full, inputs)
+    if is_aircraft:
+        summary = {
+            "Course max NLG (mm)": float(np.max(full["nlg_stroke"]) * 1000.0),
+            "Course max MLG gauche (mm)": float(np.max(full["mlg_left_stroke"]) * 1000.0),
+            "Course max MLG droite (mm)": float(np.max(full["mlg_right_stroke"]) * 1000.0),
+            "Effort vertical total max Fz (N)": float(np.max(full["aircraft_fz_total"])),
+            "Moment de tangage max (N.m)": float(np.max(np.abs(full["aircraft_mx_total"]))),
+            "Accélération CG max (g)": float(np.max(np.abs(full["aircraft_cg_az"])) / 9.81),
+            "Nombre de pas": int(engine_out.n_steps),
+        }
+        summary_rows: list[tuple[str, float, str]] = []
+    else:
+        summary = {
+            "Course max (mm)": float(np.max(full["trailing_arm_d"]) * 1000.0),
+            "Effort vertical max Fz (N)": float(np.max(full["tyre_ftyre"])),
+            "Effort horizontal max Fx (N)": float(np.max(np.abs(full["tr_x"]))),
+            "Effort amortisseur max (N)": float(np.max(np.abs(full["trailing_arm_ftot"]))),
+            "Pression gaz max (bar)": float(np.max(full["pg"])),
+            "Pression compression max (bar)": float(np.max(full["pc"])),
+            "Accélération max (g)": float(np.max(np.abs(full["accms"])) / 9.81),
+            "Nombre de pas": int(engine_out.n_steps),
+        }
+        summary_rows = _build_summary_rows(full, inputs)
 
     warnings = list(engine_out.warnings)
     warnings.extend(_negative_pressure_warnings(full))
@@ -181,6 +328,7 @@ def run_simulation(
         warnings=warnings,
         geometry=geom_df,
         summary_rows=summary_rows,
+        full_df=full_df,
     )
 
 

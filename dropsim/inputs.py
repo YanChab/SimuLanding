@@ -11,7 +11,7 @@ nominal (m = 1250 kg, Vz = 3.05 m/s, Vx = 39 m/s).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import units as U
 from .errors import ErrorCollector, ErrorLevel
@@ -915,12 +915,289 @@ def default_strait_strut_inputs() -> StraitStrutInputs:
     )
 
 
+@dataclass
+class AircraftBodyInputs:
+    """Paramètres globaux du fuselage pour la simulation avion complet."""
+
+    masse: float = 2_500.0
+    jyy: float = 600_000.0
+    lift: float = 0.67
+    cg: Point3 = field(default_factory=lambda: Point3(5_062.0, 0.0, 1_807.0))
+
+
+@dataclass
+class AircraftSimulationInputs:
+    """Paramètres numériques globaux du mode avion complet."""
+
+    temps_simu: float = 0.5
+    it: float = 5.0e-5
+    integrator: str = "rk4"
+    damper_core_solver: str = "auto_fast"
+    hydraulic_error_tol: float = 1.0e-5
+    hydraulic_max_iter: int = 10000
+    temperature: float = 25.0
+
+
+@dataclass
+class AircraftDropConfig:
+    """Configuration initiale de chute de l'avion complet."""
+
+    vz: float = 3.05
+    vx: float = 36.0
+    pitch: float = -0.25
+    pitch_rate_deg_s: float = 0.0
+
+
+@dataclass
+class AircraftGearLayoutInputs:
+    """Implantation simplifiée des trains dans le repère avion (mm)."""
+
+    nlg_station: Point3 = field(default_factory=lambda: Point3(2_710.0, 0.0, 381.0))
+    mlg_left_station: Point3 = field(default_factory=lambda: Point3(5_675.0, -1_350.0, 292.0))
+    mlg_right_station: Point3 = field(default_factory=lambda: Point3(5_675.0, 1_350.0, 292.0))
+
+
+@dataclass
+class AircraftParamsSI:
+    """Paramètres avion complet convertis en SI pour le futur moteur global."""
+
+    masse: float
+    jyy: float
+    lift: float
+    cg: "object"
+    temps_simu: float
+    it: float
+    integrator: str
+    damper_core_solver: str
+    hydraulic_error_tol: float
+    hydraulic_max_iter: int
+    temperature: float
+    vz: float
+    vx: float
+    pitch: float
+    pitch_rate: float
+    nlg_station: "object"
+    mlg_left_station: "object"
+    mlg_right_station: "object"
+    nlg_strut_pitch: float
+    nlg_strut_roll: float
+    nlg_h_pivot_z: float
+    nlg_h_guide_top_z: float
+    nlg_h_guide_bot_z: float
+    nlg_bague_guide: float
+    nlg_bague_piston: float
+    nlg_seal_precomp_pa: float
+    nlg: TrailingArmParamsSI
+    mlg: TrailingArmParamsSI
+
+    @property
+    def Sc(self) -> float:
+        """Compatibilité avec les anciens pré-contrôles train isolé."""
+        return self.mlg.Sc
+
+    @property
+    def Sd(self) -> float:
+        """Compatibilité avec les anciens pré-contrôles train isolé."""
+        return self.mlg.Sd
+
+
+@dataclass
+class AircraftInputs:
+    """Entrées haut niveau du mode avion complet.
+
+    V1 : fuselage rigide 2 DDL (translation verticale + tangage), avec
+    1 NLG StraitStrut et 2 MLG TrailingArm symétriques.
+    """
+
+    model_kind: str = "aircraft"
+    body: AircraftBodyInputs = field(default_factory=AircraftBodyInputs)
+    simulation: AircraftSimulationInputs = field(default_factory=AircraftSimulationInputs)
+    drop: AircraftDropConfig = field(default_factory=AircraftDropConfig)
+    layout: AircraftGearLayoutInputs = field(default_factory=AircraftGearLayoutInputs)
+    nlg: StraitStrutInputs = field(default_factory=default_strait_strut_inputs)
+    mlg: TrailingArmInputs = field(default_factory=default_trailing_arm_inputs)
+
+    def _compose_nlg_inputs(self) -> StraitStrutInputs:
+        """Projette les réglages globaux avion sur la config locale NLG."""
+        return replace(
+            self.nlg,
+            model_kind="strait_strut",
+            masse=self.body.masse,
+            vz=self.drop.vz,
+            vx=self.drop.vx,
+            lift=self.body.lift,
+            pitch=self.drop.pitch,
+            roll=0.0,
+            temps_simu=self.simulation.temps_simu,
+            it=self.simulation.it,
+            integrator=self.simulation.integrator,
+            damper_core_solver=self.simulation.damper_core_solver,
+            hydraulic_error_tol=self.simulation.hydraulic_error_tol,
+            hydraulic_max_iter=self.simulation.hydraulic_max_iter,
+            temperature=self.simulation.temperature,
+        )
+
+    def _compose_mlg_inputs(self) -> TrailingArmInputs:
+        """Projette les réglages globaux avion sur la config locale MLG."""
+        return replace(
+            self.mlg,
+            model_kind="trailing_arm",
+            masse=self.body.masse,
+            vz=self.drop.vz,
+            vx=self.drop.vx,
+            lift=self.body.lift,
+            pitch=self.drop.pitch,
+            roll=0.0,
+            temps_simu=self.simulation.temps_simu,
+            it=self.simulation.it,
+            integrator=self.simulation.integrator,
+            damper_core_solver=self.simulation.damper_core_solver,
+            hydraulic_error_tol=self.simulation.hydraulic_error_tol,
+            hydraulic_max_iter=self.simulation.hydraulic_max_iter,
+            temperature=self.simulation.temperature,
+        )
+
+    def validate(self, collector: ErrorCollector | None = None) -> ErrorCollector:
+        """Valide les entrées de simulation avion complet (lot 1)."""
+        c = collector or ErrorCollector()
+
+        def positive(value: float, field_name: str, label: str) -> None:
+            c.check(
+                not (value > 0),
+                code="VALEUR_NON_POSITIVE",
+                message=f"{label} doit être strictement positif (valeur reçue : {value}).",
+                field=field_name,
+                hint=f"Saisir une valeur > 0 pour {label}.",
+            )
+
+        positive(self.body.masse, "body.masse", "La masse avion")
+        positive(self.body.jyy, "body.jyy", "L'inertie avion en tangage")
+        positive(self.simulation.it, "simulation.it", "Le pas de temps")
+        positive(self.simulation.temps_simu, "simulation.temps_simu", "La durée de simulation")
+        positive(
+            self.simulation.hydraulic_error_tol,
+            "simulation.hydraulic_error_tol",
+            "La tolérance d'erreur hydraulique",
+        )
+        c.check(
+            self.drop.vz <= 0.0,
+            code="VZ_NON_POSITIVE",
+            message="La vitesse verticale de chute doit être positive.",
+            field="drop.vz",
+            hint="Saisir Vz > 0 (sens de chute).",
+        )
+        c.check(
+            not (0.0 <= self.body.lift <= 1.0),
+            code="LIFT_HORS_PLAGE",
+            message=(
+                f"Le coefficient de portance doit être compris entre 0 et 1 "
+                f"(reçu : {self.body.lift})."
+            ),
+            field="body.lift",
+            hint="Saisir un coefficient de portance entre 0 et 1.",
+        )
+        c.check(
+            self.simulation.integrator not in {"euler", "rk4"},
+            code="INTEGRATEUR_INVALIDE",
+            message=(
+                "L'intégrateur doit être 'euler' ou 'rk4' "
+                f"(reçu : {self.simulation.integrator})."
+            ),
+            field="simulation.integrator",
+            hint="Choisir 'euler' ou 'rk4'.",
+        )
+        c.check(
+            self.simulation.damper_core_solver not in {"auto_fast", "auto_precise"},
+            code="SOLVEUR_AMORTISSEUR_INVALIDE",
+            message=(
+                "Le solveur noyau amortisseur doit être 'auto_fast' ou "
+                f"'auto_precise' (reçu : {self.simulation.damper_core_solver})."
+            ),
+            field="simulation.damper_core_solver",
+            hint="Choisir 'auto_fast' ou 'auto_precise'.",
+        )
+        c.check(
+            int(self.simulation.hydraulic_max_iter) < 4,
+            code="HYDRAULIC_MAX_ITER_TROP_FAIBLE",
+            message=(
+                "Le nombre maximal d'itérations hydrauliques doit être supérieur "
+                f"ou égal à 4 (reçu : {self.simulation.hydraulic_max_iter})."
+            ),
+            field="simulation.hydraulic_max_iter",
+            hint="Saisir une valeur entière >= 4.",
+        )
+        c.check(
+            abs(self.layout.mlg_left_station.y - self.layout.mlg_right_station.y) <= 1.0e-9,
+            code="MLG_STATIONS_CONFONDUES",
+            message="Les stations MLG gauche et droite doivent être distinctes latéralement.",
+            field="layout.mlg_left_station",
+            hint="Vérifier les coordonnées Y des deux MLG.",
+        )
+
+        self._compose_nlg_inputs().validate(c)
+        self._compose_mlg_inputs().validate(c)
+        return c
+
+    def to_si(self) -> AircraftParamsSI:
+        """Convertit les entrées avion complet en SI pour le moteur global futur."""
+        import numpy as np
+
+        def pt(p: Point3) -> np.ndarray:
+            return np.array([p.x * U.MM_TO_M, p.y * U.MM_TO_M, p.z * U.MM_TO_M])
+
+        nlg_inputs = self._compose_nlg_inputs()
+        mlg_inputs = self._compose_mlg_inputs()
+
+        return AircraftParamsSI(
+            masse=self.body.masse,
+            jyy=self.body.jyy,
+            lift=self.body.lift,
+            cg=pt(self.body.cg),
+            temps_simu=self.simulation.temps_simu,
+            it=self.simulation.it,
+            integrator=self.simulation.integrator,
+            damper_core_solver=self.simulation.damper_core_solver,
+            hydraulic_error_tol=self.simulation.hydraulic_error_tol,
+            hydraulic_max_iter=int(self.simulation.hydraulic_max_iter),
+            temperature=self.simulation.temperature,
+            vz=self.drop.vz,
+            vx=self.drop.vx,
+            pitch=self.drop.pitch * U.DEG_TO_RAD,
+            pitch_rate=self.drop.pitch_rate_deg_s * U.DEG_TO_RAD,
+            nlg_station=pt(self.layout.nlg_station),
+            mlg_left_station=pt(self.layout.mlg_left_station),
+            mlg_right_station=pt(self.layout.mlg_right_station),
+            nlg_strut_pitch=self.nlg.strut_pitch * U.DEG_TO_RAD,
+            nlg_strut_roll=self.nlg.strut_roll * U.DEG_TO_RAD,
+            nlg_h_pivot_z=self.nlg.h_pivot_z * U.MM_TO_M,
+            nlg_h_guide_top_z=self.nlg.h_guide_top_z * U.MM_TO_M,
+            nlg_h_guide_bot_z=self.nlg.h_guide_bot_z * U.MM_TO_M,
+            nlg_bague_guide=self.nlg.bague_guide * U.MM_TO_M,
+            nlg_bague_piston=self.nlg.bague_piston * U.MM_TO_M,
+            nlg_seal_precomp_pa=self.nlg.seal_precomp_pa,
+            nlg=nlg_inputs.to_si(),
+            mlg=mlg_inputs.to_si(),
+        )
+
+
+def default_aircraft_inputs() -> AircraftInputs:
+    """Retourne les entrées par défaut du futur mode avion complet (V1)."""
+    return AircraftInputs()
+
+
 __all__ = [
     "Point3",
     "Rainure",
+    "AircraftBodyInputs",
+    "AircraftSimulationInputs",
+    "AircraftDropConfig",
+    "AircraftGearLayoutInputs",
+    "AircraftInputs",
+    "AircraftParamsSI",
     "TrailingArmInputs",
     "StraitStrutInputs",
     "TrailingArmParamsSI",
     "default_trailing_arm_inputs",
     "default_strait_strut_inputs",
+    "default_aircraft_inputs",
 ]

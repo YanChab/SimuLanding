@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from dropsim import default_trailing_arm_inputs, default_strait_strut_inputs, run_simulation
+from dropsim import (
+    default_aircraft_inputs,
+    default_strait_strut_inputs,
+    default_trailing_arm_inputs,
+    run_simulation,
+)
 from dropsim.storage import (
     DEFAULT_PROJECT,
     inputs_from_dict,
@@ -28,6 +33,13 @@ def test_strait_strut_inputs_roundtrip():
     assert getattr(restored, "model_kind", "") == "strait_strut"
 
 
+def test_aircraft_inputs_roundtrip():
+    inp = default_aircraft_inputs()
+    restored = inputs_from_dict(inputs_to_dict(inp))
+    assert restored == inp
+    assert getattr(restored, "model_kind", "") == "aircraft"
+
+
 def test_save_load_roundtrip(tmp_path):
     inp = default_trailing_arm_inputs()
     result = run_simulation(inp)
@@ -47,6 +59,26 @@ def test_save_load_roundtrip(tmp_path):
         result.df["Tyre.FTyre (N)"].to_numpy(),
     )
     assert loaded_res.summary_rows == result.summary_rows
+
+
+def test_aircraft_save_load_roundtrip(tmp_path):
+    inp = default_aircraft_inputs()
+    result = run_simulation(inp)
+
+    path = save_simulation(inp, result, name="Avion complet nominal", project="Programme AC", directory=tmp_path)
+    assert path.exists()
+
+    loaded_inp, loaded_res, meta = load_simulation(path)
+
+    assert loaded_inp == inp
+    assert meta["name"] == "Avion complet nominal"
+    assert meta["project"] == "Programme AC"
+    assert loaded_res.n_steps == result.n_steps
+    assert list(loaded_res.df.columns) == list(result.df.columns)
+    np.testing.assert_allclose(
+        loaded_res.df["Aircraft.Fz total (N)"].to_numpy(),
+        result.df["Aircraft.Fz total (N)"].to_numpy(),
+    )
 
 
 def test_list_saved(tmp_path):

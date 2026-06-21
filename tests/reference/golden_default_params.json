@@ -1,0 +1,44 @@
+{
+  "body": {
+    "masse": 2500.0,
+    "jyy": 60000.0,
+    "lift": 0.67,
+    "cg": {
+      "x": 5062.0,
+      "y": 0.0,
+      "z": 1807.0
+    }
+  },
+  "drop": {
+    "vz": 3.05,
+    "vx": 36.0,
+    "pitch": 1.0,
+    "pitch_rate_deg_s": 0.0
+  },
+  "layout": {
+    "nlg_station": {
+      "x": 2710.0,
+      "y": 0.0,
+      "z": 381.0
+    },
+    "mlg_left_station": {
+      "x": 5675.0,
+      "y": -1350.0,
+      "z": 292.0
+    },
+    "mlg_right_station": {
+      "x": 5675.0,
+      "y": 1350.0,
+      "z": 292.0
+    }
+  },
+  "simulation": {
+    "temps_simu": 0.5,
+    "it": 5e-05,
+    "integrator": "rk4",
+    "damper_core_solver": "auto_fast",
+    "hydraulic_error_tol": 1e-05,
+    "hydraulic_max_iter": 10000,
+    "temperature": 25.0
+  }
+}

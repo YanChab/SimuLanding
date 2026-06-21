@@ -23,7 +23,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from .inputs import TrailingArmInputs, StraitStrutInputs, Point3, Rainure
+from .inputs import (
+    AircraftBodyInputs,
+    AircraftDropConfig,
+    AircraftGearLayoutInputs,
+    AircraftInputs,
+    AircraftSimulationInputs,
+    Point3,
+    Rainure,
+    StraitStrutInputs,
+    TrailingArmInputs,
+)
 from .simulation import SimulationResult
 
 # Version du schéma de fichier (incrémentée si le format évolue de façon incompatible).
@@ -39,37 +49,67 @@ DEFAULT_PROJECT = "Général"
 # --------------------------------------------------------------------------- #
 #  Sérialisation des entrées
 # --------------------------------------------------------------------------- #
-def inputs_to_dict(inputs: TrailingArmInputs | StraitStrutInputs) -> dict:
+def inputs_to_dict(inputs: AircraftInputs | TrailingArmInputs | StraitStrutInputs) -> dict:
     """Convertit ``TrailingArmInputs`` en dictionnaire JSON-compatible."""
     return asdict(inputs)
 
 
-def inputs_from_dict(d: dict) -> TrailingArmInputs | StraitStrutInputs:
+def _coerce_trailing_like_inputs(data: dict, cls: type[TrailingArmInputs] | type[StraitStrutInputs]) -> dict:
+    out = dict(data)
+    if out.get("damper_core_solver") in {"legacy", "implicit_adaptive", "auto"}:
+        out["damper_core_solver"] = "auto_precise"
+    for key in ("B", "A", "C", "R", "S"):
+        if key in out and isinstance(out[key], dict):
+            out[key] = Point3(**out[key])
+    if "rainures" in out:
+        out["rainures"] = [
+            Rainure(**r) if isinstance(r, dict) else Rainure(*r)
+            for r in out["rainures"]
+        ]
+    if "tyre_curve" in out:
+        out["tyre_curve"] = [tuple(t) for t in out["tyre_curve"]]
+    if "mu_curve" in out:
+        out["mu_curve"] = [tuple(t) for t in out["mu_curve"]]
+    known = {f.name for f in fields(cls)}
+    return {k: v for k, v in out.items() if k in known}
+
+
+def inputs_from_dict(d: dict) -> AircraftInputs | TrailingArmInputs | StraitStrutInputs:
     """Reconstruit des entrées depuis un dictionnaire (robuste aux clés en trop)."""
     model_kind = d.get("model_kind", "trailing_arm")
+    if model_kind == "aircraft":
+        body = d.get("body", {})
+        simulation = d.get("simulation", {})
+        drop = d.get("drop", {})
+        layout = d.get("layout", {})
+        nlg = d.get("nlg", {})
+        mlg = d.get("mlg", {})
+
+        if "cg" in body and isinstance(body["cg"], dict):
+            body = dict(body)
+            body["cg"] = Point3(**body["cg"])
+        for key in ("nlg_station", "mlg_left_station", "mlg_right_station"):
+            if key in layout and isinstance(layout[key], dict):
+                layout = dict(layout)
+                layout[key] = Point3(**layout[key])
+
+        return AircraftInputs(
+            model_kind="aircraft",
+            body=AircraftBodyInputs(**{k: v for k, v in body.items() if k in {f.name for f in fields(AircraftBodyInputs)}}),
+            simulation=AircraftSimulationInputs(
+                **{k: v for k, v in simulation.items() if k in {f.name for f in fields(AircraftSimulationInputs)}}
+            ),
+            drop=AircraftDropConfig(**{k: v for k, v in drop.items() if k in {f.name for f in fields(AircraftDropConfig)}}),
+            layout=AircraftGearLayoutInputs(
+                **{k: v for k, v in layout.items() if k in {f.name for f in fields(AircraftGearLayoutInputs)}}
+            ),
+            nlg=StraitStrutInputs(**_coerce_trailing_like_inputs(nlg, StraitStrutInputs)),
+            mlg=TrailingArmInputs(**_coerce_trailing_like_inputs(mlg, TrailingArmInputs)),
+        )
+
     cls = StraitStrutInputs if model_kind == "strait_strut" else TrailingArmInputs
-    known = {f.name for f in fields(cls)}
-    data = {k: v for k, v in d.items() if k in known}
-
-    if data.get("damper_core_solver") in {"legacy", "implicit_adaptive", "auto"}:
-        data["damper_core_solver"] = "auto_precise"
-
-    for key in ("B", "A", "C", "R", "S"):
-        if key in data and isinstance(data[key], dict):
-            data[key] = Point3(**data[key])
-
-    if "rainures" in data:
-        data["rainures"] = [
-            Rainure(**r) if isinstance(r, dict) else Rainure(*r)
-            for r in data["rainures"]
-        ]
-    if "tyre_curve" in data:
-        data["tyre_curve"] = [tuple(t) for t in data["tyre_curve"]]
-    if "mu_curve" in data:
-        data["mu_curve"] = [tuple(t) for t in data["mu_curve"]]
-
-    resolved_kind = data.get("model_kind", model_kind)
-    if resolved_kind == "strait_strut":
+    data = _coerce_trailing_like_inputs(d, cls)
+    if cls is StraitStrutInputs:
         return StraitStrutInputs(**data)
     return TrailingArmInputs(**data)
 
@@ -119,7 +159,7 @@ def _project_dir(directory: Path | str, project: str | None) -> Path:
 
 
 def bundle(
-    inputs: TrailingArmInputs | StraitStrutInputs,
+    inputs: AircraftInputs | TrailingArmInputs | StraitStrutInputs,
     result: SimulationResult,
     *,
     name: str,
@@ -137,7 +177,7 @@ def bundle(
 
 
 def save_simulation(
-    inputs: TrailingArmInputs | StraitStrutInputs,
+    inputs: AircraftInputs | TrailingArmInputs | StraitStrutInputs,
     result: SimulationResult,
     *,
     name: str,
@@ -158,7 +198,7 @@ def save_simulation(
     return path
 
 
-def load_simulation(path: Path | str) -> tuple[TrailingArmInputs | StraitStrutInputs, SimulationResult, dict]:
+def load_simulation(path: Path | str) -> tuple[AircraftInputs | TrailingArmInputs | StraitStrutInputs, SimulationResult, dict]:
     """Recharge une simulation ; renvoie ``(inputs, result, meta)``.
 
     ``meta`` contient ``name`` et ``saved_at``. Lève ``ValueError`` si le schéma

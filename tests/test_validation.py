@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dropsim import default_trailing_arm_inputs, run_simulation
+from dropsim import default_aircraft_inputs, default_trailing_arm_inputs, run_simulation
 from dropsim.simulation import _negative_pressure_warnings
 
 REF_CSV = os.path.join(
@@ -90,3 +90,62 @@ def test_negative_pressure_warning_ignores_positive_series():
 
     warnings = _negative_pressure_warnings(full)
     assert warnings == []
+
+
+def test_aircraft_defaults_validate_and_convert_to_si():
+    inp = default_aircraft_inputs()
+
+    collector = inp.validate()
+    assert not collector.has_errors
+
+    params = inp.to_si()
+    assert params.masse == pytest.approx(inp.body.masse)
+    assert params.vz == pytest.approx(inp.drop.vz)
+    assert params.pitch == pytest.approx(inp.drop.pitch * np.pi / 180.0)
+    assert params.nlg.integrator == inp.simulation.integrator
+    assert params.mlg.integrator == inp.simulation.integrator
+    assert params.nlg.temps_simu == pytest.approx(inp.simulation.temps_simu)
+    assert params.mlg.it == pytest.approx(inp.simulation.it)
+
+
+def test_aircraft_validation_rejects_invalid_global_fields():
+    inp = default_aircraft_inputs()
+    inp.body.masse = -1.0
+    inp.simulation.integrator = "bogus"
+    inp.layout.mlg_right_station.y = inp.layout.mlg_left_station.y
+
+    collector = inp.validate()
+    assert collector.has_errors
+    fields = {err.field for err in collector.errors}
+    assert "body.masse" in fields
+    assert "simulation.integrator" in fields
+    assert "layout.mlg_left_station" in fields
+
+
+def test_aircraft_to_si_propagates_global_settings_to_nested_gears():
+    inp = default_aircraft_inputs()
+    inp.simulation.integrator = "euler"
+    inp.simulation.temperature = -15.0
+    inp.drop.pitch = 3.0
+    inp.drop.vx = 52.0
+
+    params = inp.to_si()
+    assert params.nlg.integrator == "euler"
+    assert params.mlg.integrator == "euler"
+    assert params.nlg.vx == pytest.approx(52.0)
+    assert params.mlg.vx == pytest.approx(52.0)
+    assert params.pitch == pytest.approx(np.deg2rad(3.0))
+
+
+def test_aircraft_simulation_smoke_runs_with_expected_outputs():
+    inp = default_aircraft_inputs()
+    result = run_simulation(inp)
+
+    assert result.n_steps > 0
+    assert not result.df.empty
+    assert "Aircraft.CG.z (m)" in result.df.columns
+    assert "Aircraft.Fz total (N)" in result.df.columns
+    assert "NLG.d (m)" in result.df.columns
+    assert "NLG.Pg (bar)" in result.df.columns
+    assert "MLG left.Ftot (N)" in result.df.columns
+    assert "MLG right.Pd (bar)" in result.df.columns

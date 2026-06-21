@@ -1105,6 +1105,230 @@ maximal au poids statique ; le **facteur de charge** y ajoute la portance.
 
 ---
 
+## 15. Mode avion complet (2 DDL)
+
+Le mode avion complet implémenté dans `dropsim/engine_aircraft.py` couple un
+fuselage rigide à trois trains :
+
+- 1 train avant NLG de type StraitStrut ;
+- 2 trains principaux MLG de type TrailingArm, paramétrés identiques et
+  symétrisés en $Y$.
+
+La dynamique globale comporte 2 degrés de liberté :
+
+- translation verticale du centre de gravité ;
+- rotation en tangage autour de l'axe $Y$ au centre de gravité.
+
+### 15.1 Hypothèses de modélisation
+
+- Le sol global est plan, horizontal et fixé à $z=0$.
+- La portance est constante pendant la simulation via un coefficient $L$.
+- Le couplage se fait au même pas de temps global $\Delta t$ pour avion + NLG +
+  MLG gauche + MLG droite.
+- Les noyaux locaux StraitStrut et TrailingArm sont réutilisés sans
+  simplification de leurs lois internes (gaz, hydraulique, pneu, friction,
+  butées).
+
+### 15.2 Variables d'état globales et paramètres
+
+- $z_{cg}$, $\dot z_{cg}$, $\ddot z_{cg}$ : déplacement, vitesse, accélération
+  verticale du centre de gravité.
+- $\theta$, $\dot\theta$, $\ddot\theta$ : tangage, vitesse angulaire,
+  accélération angulaire.
+- $m$ : masse avion.
+- $J_{yy}$ : inertie en tangage du fuselage.
+- $L$ : coefficient de portance constant.
+- $(x_{cg}, z_{cg,0})$ : position nominale du centre de gravité dans le repère
+  avion.
+
+### 15.3 Cinématique rigide des stations de train
+
+Pour une station train de coordonnées avion nominales $(x_s, z_s)$, la position
+sol instantanée utilisée par le moteur est :
+
+$$
+x_s^{sol}=x_{cg}+ (x_s-x_{cg})\cos\theta - (z_s-z_{cg,0})\sin\theta
+$$
+
+$$
+z_s^{sol}=z_{cg,0}+z_{cg} + (x_s-x_{cg})\sin\theta + (z_s-z_{cg,0})\cos\theta
+$$
+
+Les vitesses/accélérations verticales de support imposées aux noyaux locaux sont
+(linéarisation identique à l'implémentation) :
+
+$$
+v_{sup,i}=\dot z_{cg}-x_i\,\dot\theta
+$$
+
+$$
+a_{sup,i}=\ddot z_{cg}-x_i\,\ddot\theta
+$$
+
+où $x_i = x_{station,i}-x_{cg}$ (NLG, MLG gauche, MLG droite).
+
+### 15.4 Initialisation globale et condition de contact initial
+
+L'initialisation impose une condition géométrique simple : la roue la plus basse
+est tangente au sol au temps initial.
+
+Pour chaque train, on calcule la cote verticale roue-sol de référence, puis :
+
+$$
+z_{bottom}=\min\left(z_{R,NLG}-R_{0,NLG},\ z_{R,MLG,g}-R_{0,MLG},\ z_{R,MLG,d}-R_{0,MLG}\right)
+$$
+
+$$
+z_{cg}(t=0) = -z_{bottom}
+$$
+
+Les offsets rigides des points d'attache (B, C, Gt, Gb selon le train) sont
+mesurés au repos, convertis en repère corps, puis reconvertis à chaque pas pour
+garantir la cohérence géométrique dans l'export animation.
+
+### 15.5 Équations globales du fuselage (PFD 2 DDL)
+
+Les efforts injectés dans le PFD avion sont les efforts transmis par les
+liaisons de train :
+
+- NLG : effort en B ;
+- MLG gauche : efforts en B et C ;
+- MLG droite : efforts en B et C.
+
+Somme verticale :
+
+$$
+F_{z,total}=F_{z,NLG}+F_{z,MLG,g}+F_{z,MLG,d}
+$$
+
+Équation de translation verticale :
+
+$$
+m\,\ddot z_{cg}=F_{z,total}-m\,g\,(1-L)
+$$
+
+Moment de tangage total autour du centre de gravité, avec pour chaque point de
+liaison $P_i=(x_i,z_i)$ et effort $\vec F_i=(F_{x,i},F_{z,i})$ :
+
+$$
+M_{pitch}=\sum_i\left((x_i-x_{cg})F_{z,i}-(z_i-z_{cg})F_{x,i}\right)
+$$
+
+Équation de rotation :
+
+$$
+J_{yy}\,\ddot\theta=M_{pitch}
+$$
+
+Intégration temporelle (fonction commune `_integrate_const_acc`) :
+
+$$
+\dot z_{cg}^{k+1}, z_{cg}^{k+1} = \mathcal{I}(\dot z_{cg}^{k}, z_{cg}^{k}, \ddot z_{cg}^{k}, \Delta t)
+$$
+
+$$
+\dot\theta^{k+1}, \theta^{k+1} = \mathcal{I}(\dot\theta^{k}, \theta^{k}, \ddot\theta^{k}, \Delta t)
+$$
+
+où $\mathcal{I}$ est Euler ou RK4 selon le paramètre `integrator`.
+
+### 15.6 Couplage local NLG (StraitStrut)
+
+La jambe NLG est résolue dans son repère local avec rotation sol-jambe :
+
+$$
+R_{sol\to lg}=R_{sol\to lg}(\alpha_p,\alpha_r), \qquad
+\alpha_p = \alpha_{strut,pitch} - \theta
+$$
+
+La déflexion pneu NLG est calculée en repère monde uniquement :
+
+$$
+z_{R,NLG}^{world}=z_{B,NLG}^{world} + (\overrightarrow{BR}_{sol})_z
+$$
+
+$$
+\delta_{NLG}=R_{0,NLG}-(z_{R,NLG}^{world}-z_{sol}), \qquad
+\delta_{NLG}=\max(0,\delta_{NLG})
+$$
+
+L'effort total jambe NLG suit la même forme que le modèle NLG isolé :
+
+$$
+F_{tot,NLG}=S_cP_c-S_dP_d+S_{bh}P_g+F_{fric,joint}+F_{fric,bagues}+F_{but\acute ee}
+$$
+
+Forçage de contact vers le PFD avion :
+
+- si $F_{tyre,NLG}>0$, l'effort transmis en B est injecté ;
+- sinon, l'effort injecté est nul pour éviter d'exciter l'avion avec une
+  précharge interne hors contact sol.
+
+### 15.7 Couplage local MLG gauche et droite (TrailingArm)
+
+Chaque MLG est résolu via `_trailing_arm_local_step` avec cinématique support
+imposée :
+
+$$
+\Delta z_{sup} = z_{sup}^{k} - z_{sup,local}^{k}
+$$
+
+et forçages $v_{sup}$, $a_{sup}$ issus de la cinématique fuselage.
+
+Le modèle MLG droit est obtenu par symétrie géométrique en $Y$ des paramètres
+du MLG gauche.
+
+Les efforts transmis au fuselage sont les efforts de liaison en B et C renvoyés
+par le noyau local :
+
+$$
+\vec F_{MLG} = \vec F_B + \vec F_C
+$$
+
+avec export complet des composantes et moments de torseur.
+
+### 15.8 Schéma algorithmique d'un pas avion complet
+
+1. Calcul des stations de train depuis $(z_{cg},\theta)$.
+2. Calcul des cinématiques support $(z_{sup},v_{sup},a_{sup})$ pour NLG et MLG.
+3. Résolution locale NLG (gaz/hydraulique/pneu/frictions).
+4. Résolution locale MLG gauche puis MLG droite.
+5. Assemblage des efforts et moments globaux.
+6. Calcul de $(\ddot z_{cg},\ddot\theta)$ puis intégration en temps.
+7. Enregistrement des sorties physiques et géométriques.
+
+### 15.9 Sorties scientifiques du mode avion complet
+
+Le moteur exporte :
+
+- états globaux avion ($z_{cg}$, $\dot z_{cg}$, $\ddot z_{cg}$,
+  $\theta$, $\dot\theta$, $\ddot\theta$) ;
+- contributions d'efforts verticaux par train et moment de tangage total ;
+- pour NLG et chaque MLG : course, vitesse, efforts, pressions,
+  déflexion pneu, glissement, torseurs, diagnostics hydrauliques ;
+- géométrie des points caractéristiques pour animation et vérifications
+  cinématiques.
+
+### 15.10 Gouvernance de référence (golden)
+
+Deux artefacts avion coexistent et doivent rester séparés :
+
+- `tests/reference/golden_aircraft_summary.json` : baseline de non-régression
+  utilisée par `tests/test_aircraft_regression.py`.
+- `tests/reference/golden_summary_aircraft.json` : artefact de référence projet
+  orienté résumé, non consommé par le test de régression avion.
+
+Régénération officielle du golden de test avion :
+
+```
+/Users/neoyan/SimuLanding/.venv/bin/python scripts/regen_golden_aircraft_test.py
+```
+
+Cette séparation évite les faux échecs de non-régression causés par
+l'écrasement d'un format par l'autre.
+
+---
+
 *Document généré pour le projet SimuLanding — modèle `dropsim`. Les équations
 ci-dessus correspondent une à une aux implémentations des modules `engine.py`,
 `gas.py`, `hydraulic.py`, `metering.py`, `tyre.py`, `geometry.py` et

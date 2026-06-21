@@ -122,6 +122,216 @@ OUTPUT_COLUMNS_SS: dict[str, str] = {
 }
 
 
+@dataclass
+class StraitStrutLocalState:
+    """État local réutilisable du train StraitStrut sur un pas global."""
+
+    ptR_lg: np.ndarray
+    ptGt_lg: np.ndarray
+    ptGb_lg: np.ndarray
+    ptB_lg: np.ndarray
+    z_ms: float
+    vz_ms: float
+    z_mns_lg: float
+    vz_mns_lg: float
+    d: float
+    v_damper: float
+    delta_pc: float
+    delta_pd: float
+    pg_prev: float
+    ftot: float
+    tyre_omega: float
+    tyre_vx: float
+    tyre_depx: float
+    tyre_defl_val: float
+
+
+def _init_strait_strut_local_state(
+    p: TrailingArmParamsSI,
+    gas: GasSpring,
+    R_sol_to_lg: np.ndarray,
+    R_lg_to_sol: np.ndarray,
+    *,
+    h_pivot_z_m: float,
+    h_guide_top_z_m: float,
+    h_guide_bot_z_m: float,
+) -> StraitStrutLocalState:
+    """Construit l'état local initial réutilisable du modèle StraitStrut."""
+    unload_r = p.unload_radius
+    ptR_lg = np.array([0.0, 0.0, unload_r])
+    ptGt_lg = np.array([0.0, 0.0, unload_r + h_guide_top_z_m])
+    ptGb_lg = np.array([0.0, 0.0, unload_r + h_guide_bot_z_m])
+    ptB_lg = np.array([0.0, 0.0, unload_r + h_pivot_z_m])
+
+    k_endstop = 1.0e8
+    pg_init = gas.pressure(0.0, p.Pinitbp)
+    d0 = -pg_init * p.St / k_endstop
+    ptB_lg[2] -= d0
+    ptGb_lg[2] -= d0
+
+    ptR_sol = R_lg_to_sol @ ptR_lg
+    vz_ms = -p.vz
+    v_ms_sol = np.array([0.0, 0.0, vz_ms])
+    v_ms_lg = R_sol_to_lg @ v_ms_sol
+    vz_mns_lg = float(v_ms_lg[2])
+    tyre_defl_val = max(0.0, unload_r - float(ptR_sol[2]))
+
+    return StraitStrutLocalState(
+        ptR_lg=ptR_lg,
+        ptGt_lg=ptGt_lg,
+        ptGb_lg=ptGb_lg,
+        ptB_lg=ptB_lg,
+        z_ms=0.0,
+        vz_ms=vz_ms,
+        z_mns_lg=0.0,
+        vz_mns_lg=vz_mns_lg,
+        d=float(d0),
+        v_damper=0.0,
+        delta_pc=0.0,
+        delta_pd=0.0,
+        pg_prev=pg_init,
+        ftot=p.St * pg_init + _endstop(float(d0), p.course, smooth_len=p.endstop_smooth),
+        tyre_omega=0.0,
+        tyre_vx=0.0,
+        tyre_depx=0.0,
+        tyre_defl_val=tyre_defl_val,
+    )
+
+
+def _strait_strut_resolve_damper_step(
+    p: TrailingArmParamsSI,
+    gas: GasSpring,
+    tab_pos: np.ndarray,
+    tab_sec: np.ndarray,
+    state: StraitStrutLocalState,
+) -> dict[str, float]:
+    """Résout le noyau gaz/hydraulique local à partir de l'état courant."""
+    solver_mode = _select_damper_core_solver(
+        p,
+        state.d,
+        state.v_damper,
+        state.pg_prev,
+        state.ftot,
+    )
+    non_implicit_dt_scale = (
+        1.10
+        if p.damper_core_solver == "auto_fast" and solver_mode != "implicit_adaptive"
+        else 1.0
+    )
+    if solver_mode == "implicit_adaptive":
+        min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 128.0
+        return damper_force_step_implicit_adaptive(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            state.d,
+            state.v_damper,
+            state.d,
+            state.v_damper,
+            state.delta_pc,
+            state.delta_pd,
+            state.pg_prev,
+            min_h=min_h,
+            auto_fast_mode=(p.damper_core_solver == "auto_fast"),
+            implicit_dt_scale=2.0 if p.damper_core_solver == "auto_fast" else 1.0,
+        )
+    return damper_force_step(
+        p,
+        gas,
+        tab_pos,
+        tab_sec,
+        state.d,
+        state.v_damper,
+        state.delta_pc,
+        state.delta_pd,
+        state.pg_prev,
+        dt=p.it * non_implicit_dt_scale,
+    )
+
+
+def _strait_strut_advance_local_state(
+    p: TrailingArmParamsSI,
+    state: StraitStrutLocalState,
+    R_sol_to_lg: np.ndarray,
+    R_lg_to_sol: np.ndarray,
+    *,
+    support_acc_ms_z: float,
+    ftot: float,
+    tyre_ftyre_i: float,
+    dt: float,
+    method: str,
+) -> StraitStrutLocalState:
+    """Avance l'état local StraitStrut d'un pas sous cinématique support imposée."""
+    poids_ms = p.masse * G * (1.0 - p.lift)
+    mns = p.unsprung_mass
+    poids_mns_lg_z = mns * G
+
+    z_ms, vz_ms = _integrate_const_acc(state.z_ms, state.vz_ms, support_acc_ms_z, dt, method)
+    v_ms_sol_vec = np.array([0.0, 0.0, vz_ms])
+    v_ms_lg_vec = R_sol_to_lg @ v_ms_sol_vec
+    vz_ms_lg = float(v_ms_lg_vec[2])
+
+    acc_mns_lg_z = (-ftot + tyre_ftyre_i - poids_mns_lg_z) / mns
+    z_mns_lg, vz_mns_lg = _integrate_const_acc(
+        state.z_mns_lg,
+        state.vz_mns_lg,
+        acc_mns_lg_z,
+        dt,
+        method,
+    )
+
+    ptR_lg = state.ptR_lg.copy()
+    ptR_lg[2] += vz_mns_lg * dt
+    ptB_lg = state.ptB_lg.copy()
+    ptB_lg[2] += vz_ms_lg * dt
+    ptGb_lg = state.ptGb_lg.copy()
+    ptGb_lg[2] += vz_ms_lg * dt
+    ptGt_lg = state.ptGt_lg.copy()
+    ptGt_lg[2] += vz_ms_lg * dt
+
+    ptR_sol = R_lg_to_sol @ ptR_lg
+    tyre_defl_val = max(0.0, p.unload_radius - float(ptR_sol[2]))
+
+    v_damper = -(vz_ms_lg - vz_mns_lg)
+    d = state.d + v_damper * dt
+
+    r_eff_val = r_eff(p.unload_radius, state.tyre_defl_val)
+    slip = 0.0
+    if abs(p.vx) > 1.0e-9:
+        slip = (p.vx - state.tyre_omega * r_eff_val) / abs(p.vx)
+    mu_val = mu(slip, p.mu_x, p.mu_y)
+    fspin = mu_val * tyre_ftyre_i * math.copysign(1.0, slip) if tyre_ftyre_i > 0 else 0.0
+    tyre_alpha_i = (fspin * r_eff_val) / p.wheel_inertia if tyre_ftyre_i > 0 else 0.0
+    fx_spring_wheel = -p.kx * state.tyre_depx - p.cx * state.tyre_vx
+    acc_tyre_x = (fx_spring_wheel + fspin) / p.wheelmass
+
+    tyre_omega = state.tyre_omega + tyre_alpha_i * dt
+    tyre_vx = state.tyre_vx + acc_tyre_x * dt
+    tyre_depx = state.tyre_depx + state.tyre_vx * dt
+
+    return StraitStrutLocalState(
+        ptR_lg=ptR_lg,
+        ptGt_lg=ptGt_lg,
+        ptGb_lg=ptGb_lg,
+        ptB_lg=ptB_lg,
+        z_ms=z_ms,
+        vz_ms=vz_ms,
+        z_mns_lg=z_mns_lg,
+        vz_mns_lg=vz_mns_lg,
+        d=d,
+        v_damper=v_damper,
+        delta_pc=state.delta_pc,
+        delta_pd=state.delta_pd,
+        pg_prev=state.pg_prev,
+        ftot=ftot,
+        tyre_omega=tyre_omega,
+        tyre_vx=tyre_vx,
+        tyre_depx=tyre_depx,
+        tyre_defl_val=tyre_defl_val,
+    )
+
+
 # --------------------------------------------------------------------------- #
 #  Transformation de repère sol ↔ jambe (reproduction exacte du VBA cRot)
 # --------------------------------------------------------------------------- #
@@ -255,32 +465,15 @@ def run_strait_strut(
     R_sol_to_lg = _rot_sol_to_lg(alfap, alfar)
     R_lg_to_sol = R_lg_to_sol_mat = R_sol_to_lg.T
 
-    # --- Géométrie initiale jambe (repère jambe) --------------------------- #
-    # Positions des points dans le repère jambe
-    # Z = hauteur au-dessus de l'origine repère jambe (sol = 0 au contact pneu)
-    unload_r = p.unload_radius  # rayon libre (m)
-    # Position initiale du centre de roue dans le repère jambe (Rlg):
-    ptR_lg = np.array([0.0, 0.0, unload_r])  # roue sur sol, Z = rayon libre
-    # Points géométriques de guidage (positions au-dessus du centre de roue initial)
-    ptGt_lg = np.array([0.0, 0.0, unload_r + h_guide_top_z_m])
-    ptGb_lg = np.array([0.0, 0.0, unload_r + h_guide_bot_z_m])
-    ptB_lg = np.array([0.0, 0.0, unload_r + h_pivot_z_m])
-    ptS_sol = np.zeros(3)  # sol : origine (repère sol)
-
-    # --- Stabilisation statique initial ------------------------------------ #
-    # Trouver d0 tel que Ftot ≈ 0 (équilibre initial sans vitesse).
-    # Ftot(v=0, d<0) = Sc*Pg - Sd*Pg + Sbh*Pg + d * k_endstop = Pg*St + d*k_endstop
-    # → d0 = -Pg_init * St / k_endstop
-    k_endstop = 1.0e8  # N/m (identique à `_endstop`)
-    pg_init = gas.pressure(0.0, p.Pinitbp)
-    d0 = -pg_init * p.St / k_endstop  # négatif (légère extension)
-    # Ajuster les positions initiales des points (équivalent VBA stabilisation)
-    ptB_lg[2] -= d0
-    ptGb_lg[2] -= d0
-
-    # Convertir les points initiaux en repère sol
-    ptR_sol = R_lg_to_sol @ ptR_lg
-    ptS_sol = np.zeros(3)
+    state = _init_strait_strut_local_state(
+        p,
+        gas,
+        R_sol_to_lg,
+        R_lg_to_sol,
+        h_pivot_z_m=h_pivot_z_m,
+        h_guide_top_z_m=h_guide_top_z_m,
+        h_guide_bot_z_m=h_guide_bot_z_m,
+    )
 
     # --- État initial ------------------------------------------------------ #
     dt = p.it
@@ -288,43 +481,24 @@ def run_strait_strut(
     method = p.integrator
 
     # Masse suspendue Ms (repère sol)
-    vz_ms = -p.vz             # vitesse verticale initiale (chute = négative)
-    z_ms = 0.0                # déplacement vertical (m)
     poids_ms = p.masse * G * (1.0 - p.lift)  # N (poids effectif sol)
 
-    # Masse non suspendue Mns (repère jambe)
-    # Vitesse initiale Mns = même vitesse que Ms dans le repère jambe
-    v_ms_sol = np.array([0.0, 0.0, vz_ms])
-    v_ms_lg = R_sol_to_lg @ v_ms_sol
-    vz_mns_lg = float(v_ms_lg[2])
-    z_mns_lg = 0.0
     mns = p.unsprung_mass           # masse non suspendue totale (kg)
     poids_mns_lg_z = mns * G       # N (poids Mns dans repère jambe, projeté)
 
-    # Amortisseur
-    d = float(d0)
-    v_damper = 0.0
-    delta_pc = 0.0
-    delta_pd = 0.0
-    pg_prev = pg_init
-    ftot = p.St * pg_prev + _endstop(d, p.course, smooth_len=p.endstop_smooth)
-
-    # Pneu
-    tyre_omega = 0.0
-    tyre_vx = 0.0
-    tyre_depx = 0.0
-    tyre_defl_val = unload_r - (float(ptR_sol[2]) - float(ptS_sol[2]))
-    tyre_defl_val = max(0.0, tyre_defl_val)
+    # Pneu / sol
+    unload_r = p.unload_radius
+    ptS_sol = np.zeros(3)
 
     # Effort amortisseur initial (TB_sl)
     tb_lg_z = 0.0  # effort jambe dans le repère jambe (Z), init 0
     tb_sol = R_lg_to_sol @ np.array([0.0, 0.0, tb_lg_z])
 
     # Énergies cumulées
-    e_kin_prev = 0.5 * p.masse * vz_ms ** 2
-    e_kin_mns_prev = 0.5 * mns * vz_mns_lg ** 2
-    e_kin_spin_prev = 0.5 * p.wheel_inertia * tyre_omega ** 2
-    e_kin_horiz_prev = 0.5 * p.wheelmass * tyre_vx ** 2
+    e_kin_prev = 0.5 * p.masse * state.vz_ms ** 2
+    e_kin_mns_prev = 0.5 * mns * state.vz_mns_lg ** 2
+    e_kin_spin_prev = 0.5 * p.wheel_inertia * state.tyre_omega ** 2
+    e_kin_horiz_prev = 0.5 * p.wheelmass * state.tyre_vx ** 2
     e_gas_acc = 0.0
     e_tyre_acc = 0.0
     e_spring_x_acc = 0.0
@@ -346,62 +520,26 @@ def run_strait_strut(
         t = i * dt
 
         # --- Enregistrement de l'état au pas i ----------------------------- #
-        solver_mode = _select_damper_core_solver(p, d, v_damper, pg_prev, ftot)
-        non_implicit_dt_scale = (
-            1.10
-            if p.damper_core_solver == "auto_fast" and solver_mode != "implicit_adaptive"
-            else 1.0
-        )
-        if solver_mode == "implicit_adaptive":
-            min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 128.0
-            damp_step = damper_force_step_implicit_adaptive(
-                p,
-                gas,
-                tab_pos,
-                tab_sec,
-                d,
-                v_damper,
-                d,
-                v_damper,
-                delta_pc,
-                delta_pd,
-                pg_prev,
-                min_h=min_h,
-                auto_fast_mode=(p.damper_core_solver == "auto_fast"),
-                implicit_dt_scale=2.0 if p.damper_core_solver == "auto_fast" else 1.0,
-            )
-        else:
-            damp_step = damper_force_step(
-                p,
-                gas,
-                tab_pos,
-                tab_sec,
-                d,
-                v_damper,
-                delta_pc,
-                delta_pd,
-                pg_prev,
-                dt=p.it * non_implicit_dt_scale,
-            )
+        damp_step = _strait_strut_resolve_damper_step(p, gas, tab_pos, tab_sec, state)
         pg = damp_step["pg"]
         pc = damp_step["pc"]
         pd = damp_step["pd"]
-        delta_pc = damp_step["delta_pc"]
-        delta_pd = damp_step["delta_pd"]
-        pg_prev = pg
+        state.delta_pc = damp_step["delta_pc"]
+        state.delta_pd = damp_step["delta_pd"]
+        state.pg_prev = pg
 
         fgas = damp_step["fgas"]
-        ffrijoi = _ffrijoi_nlg(v_damper, pd, p, seal_precomp_pa)
-        fendstop = _endstop(d, p.course, smooth_len=p.endstop_smooth)
+        ffrijoi = _ffrijoi_nlg(state.v_damper, pd, p, seal_precomp_pa)
+        fendstop = _endstop(state.d, p.course, smooth_len=p.endstop_smooth)
 
         # Effort pneu vertical
-        tyre_ftyre_i = max(0.0, f_tyre(tyre_defl_val, tyre_defl_tbl, tyre_load_tbl))
+        tyre_ftyre_i = max(0.0, f_tyre(state.tyre_defl_val, tyre_defl_tbl, tyre_load_tbl))
         # Force ressort/amortisseur horizontal APPLIQUEE A LA ROUE (repère sol).
         # La convention interne historique du moteur utilise ce signe pour les
         # projections repère sol ↔ repère jambe. En revanche, les sorties
         # utilisateur ``tr_x`` / ``reaction_h`` suivent la convention Excel et
         # TrailingArm : réaction transmise à la structure, donc signe opposé.
-        fx_spring_wheel = -p.kx * tyre_depx - p.cx * tyre_vx
+        fx_spring_wheel = -p.kx * state.tyre_depx - p.cx * state.tyre_vx
         tr_x = -fx_spring_wheel
         # Torseur utilisé par la dynamique interne (convention historique).
         tr_sol = np.array([fx_spring_wheel, 0.0, tyre_ftyre_i])
@@ -411,18 +549,19 @@ def run_strait_strut(
         xr = abs(tr_lg_x)  # effort latéral résultant sur la roue dans le repère jambe
 
         # Réactions aux bagues de guidage (équilibre statique du bras de guidage)
-        z_r_lg = float(ptR_lg[2])
-        z_gt_lg = float(ptGt_lg[2])
-        z_gb_lg = float(ptGb_lg[2])
+        z_r_lg = float(state.ptR_lg[2])
+        z_gt_lg = float(state.ptGt_lg[2])
+        z_gb_lg = float(state.ptGb_lg[2])
         if abs(z_gb_lg - z_gt_lg) > 1.0e-9:
             xgb = -(z_r_lg - z_gt_lg) * xr / (z_gb_lg - z_gt_lg)
         else:
             xgb = 0.0
         xgt = -xgb - xr
 
-        ffribag = _ffribag_nlg(v_damper, xgt, xgb, p.Dt, bague_guide_m, bague_piston_m)
+        ffribag = _ffribag_nlg(state.v_damper, xgt, xgb, p.Dt, bague_guide_m, bague_piston_m)
 
         ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + ffribag + fendstop
+        state.ftot = ftot
         fhyd = damp_step["fhyd"]
 
         # Effort de jambe en repère sol (pour la dynamique Ms)
@@ -430,10 +569,10 @@ def run_strait_strut(
         tb_sol_cur = R_lg_to_sol @ tb_lg
 
         # Pneu : slip, mu, spin-up, spring-back
-        r_eff_val = r_eff(p.unload_radius, tyre_defl_val)
+        r_eff_val = r_eff(p.unload_radius, state.tyre_defl_val)
         slip = 0.0
         if abs(p.vx) > 1.0e-9:
-            slip = (p.vx - tyre_omega * r_eff_val) / abs(p.vx)
+            slip = (p.vx - state.tyre_omega * r_eff_val) / abs(p.vx)
         mu_val = mu(slip, mu_x, mu_y)
         fspin = mu_val * tyre_ftyre_i * math.copysign(1.0, slip) if tyre_ftyre_i > 0 else 0.0
         tyre_alpha_i = (fspin * r_eff_val) / p.wheel_inertia if tyre_ftyre_i > 0 else 0.0
@@ -446,40 +585,40 @@ def run_strait_strut(
         tb_res_z = float(tb_sol_cur[2])
         tb_norm = math.sqrt(tb_res_x**2 + tb_res_y**2 + tb_res_z**2)
         # Moment en B = (ptR_sol - ptB_sol) × TR_sol (moment de la réaction sol)
-        ptB_sol = R_lg_to_sol @ ptB_lg
-        ptR_sol_cur = R_lg_to_sol @ ptR_lg
+        ptB_sol = R_lg_to_sol @ state.ptB_lg
+        ptR_sol_cur = R_lg_to_sol @ state.ptR_lg
         r_b = ptR_sol_cur - ptB_sol
         mom_B = np.cross(r_b, tr_sol)
 
         # Bilan énergétique (simplifié — diagnostic)
-        e_kin_new = 0.5 * p.masse * vz_ms ** 2
-        e_kin_mns_new = 0.5 * mns * vz_mns_lg ** 2
-        e_kin_spin_new = 0.5 * p.wheel_inertia * tyre_omega ** 2
-        e_kin_horiz_new = 0.5 * p.wheelmass * tyre_vx ** 2
-        e_gas_acc += fgas * v_damper * dt
-        e_tyre_acc += tyre_ftyre_i * max(0.0, vz_mns_lg) * dt
-        e_spring_x_acc = 0.5 * p.kx * tyre_depx ** 2
-        e_hyd_acc += abs(fhyd * v_damper * dt)
-        e_fric_acc += abs(ffrijoi * v_damper * dt)
-        e_fribag_acc += abs(ffribag * v_damper * dt)
-        e_damp_x_acc += p.cx * tyre_vx ** 2 * dt
+        e_kin_new = 0.5 * p.masse * state.vz_ms ** 2
+        e_kin_mns_new = 0.5 * mns * state.vz_mns_lg ** 2
+        e_kin_spin_new = 0.5 * p.wheel_inertia * state.tyre_omega ** 2
+        e_kin_horiz_new = 0.5 * p.wheelmass * state.tyre_vx ** 2
+        e_gas_acc += fgas * state.v_damper * dt
+        e_tyre_acc += tyre_ftyre_i * max(0.0, state.vz_mns_lg) * dt
+        e_spring_x_acc = 0.5 * p.kx * state.tyre_depx ** 2
+        e_hyd_acc += abs(fhyd * state.v_damper * dt)
+        e_fric_acc += abs(ffrijoi * state.v_damper * dt)
+        e_fribag_acc += abs(ffribag * state.v_damper * dt)
+        e_damp_x_acc += p.cx * state.tyre_vx ** 2 * dt
         e_slip_acc += abs(fspin * p.vx * dt) if abs(p.vx) > 1.0e-9 else 0.0
-        e_endstop_acc += abs(fendstop * v_damper * dt)
+        e_endstop_acc += abs(fendstop * state.v_damper * dt)
         e_input_total = (e_kin_new + e_kin_mns_new + e_kin_spin_new + e_kin_horiz_new
                          + e_gas_acc + e_tyre_acc + e_hyd_acc + e_fric_acc
                          + e_fribag_acc + e_damp_x_acc + e_slip_acc + e_endstop_acc)
-        e_residual = e_input_0 + p.masse * G * abs(z_ms) + mns * G * abs(z_mns_lg) - e_input_total
+        e_residual = e_input_0 + p.masse * G * abs(state.z_ms) + mns * G * abs(state.z_mns_lg) - e_input_total
 
         # Enregistrement
         out["temps"][i] = t
         out["accms"][i] = float(tb_sol_cur[2] - poids_ms) / p.masse
-        out["vitms"][i] = vz_ms
-        out["depms"][i] = z_ms
+        out["vitms"][i] = state.vz_ms
+        out["depms"][i] = state.z_ms
         out["accmns"][i] = (-ftot + tyre_ftyre_i - poids_mns_lg_z) / mns
-        out["vitmns"][i] = vz_mns_lg
-        out["depmns"][i] = z_mns_lg
-        out["trailing_arm_v"][i] = v_damper
-        out["trailing_arm_d"][i] = max(0.0, d)
+        out["vitmns"][i] = state.vz_mns_lg
+        out["depmns"][i] = state.z_mns_lg
+        out["trailing_arm_v"][i] = state.v_damper
+        out["trailing_arm_d"][i] = max(0.0, state.d)
         out["trailing_arm_ftot"][i] = ftot
         out["trailing_arm_fhyd"][i] = fhyd
         out["trailing_arm_ffrijoi"][i] = ffrijoi
@@ -488,8 +627,8 @@ def run_strait_strut(
         out["pg"][i] = pg / 1.0e5          # Pa → bar
         out["pc"][i] = pc / 1.0e5
         out["pd"][i] = pd / 1.0e5
-        out["delta_pc"][i] = delta_pc / 1.0e5
-        out["delta_pd"][i] = delta_pd / 1.0e5
+        out["delta_pc"][i] = state.delta_pc / 1.0e5
+        out["delta_pd"][i] = state.delta_pd / 1.0e5
         out["secbh"][i] = damp_step["sec"] * 1.0e6  # m² → mm²
         out["hyd_conv_err"][i] = damp_step["hyd_conv_err"]
         out["hyd_conv_iter"][i] = damp_step["hyd_conv_iter"]
@@ -498,10 +637,10 @@ def run_strait_strut(
         out["hyd_qc_leak"][i] = damp_step["qc_leak"]
         out["hyd_leak_ratio"][i] = damp_step["leak_ratio"]
         out["hyd_re_leak"][i] = damp_step["re_leak"]
-        out["tyre_defl"][i] = tyre_defl_val
+        out["tyre_defl"][i] = state.tyre_defl_val
         out["tyre_ftyre"][i] = tyre_ftyre_i
         out["tyre_alpha"][i] = tyre_alpha_i
-        out["tyre_omega"][i] = tyre_omega
+        out["tyre_omega"][i] = state.tyre_omega
         out["tyre_mu"][i] = mu_val
         out["tyre_slip"][i] = slip
         out["tr_x"][i] = tr_x
@@ -543,41 +682,16 @@ def run_strait_strut(
         # --- Intégration du pas i→i+1 ------------------------------------- #
         # 1. Dynamique masse suspendue Ms (repère sol)
         acc_ms_z = (float(tb_sol_cur[2]) - poids_ms) / p.masse
-        z_ms, vz_ms = _integrate_const_acc(z_ms, vz_ms, acc_ms_z, dt, method)
-
-        # 2. Convertir VitMs sol → repère jambe
-        v_ms_sol_vec = np.array([0.0, 0.0, vz_ms])
-        v_ms_lg_vec = R_sol_to_lg @ v_ms_sol_vec
-        vz_ms_lg = float(v_ms_lg_vec[2])
-
-        # 3. Dynamique masse non suspendue Mns (repère jambe)
-        acc_mns_lg_z = (-ftot + tyre_ftyre_i - poids_mns_lg_z) / mns
-        z_mns_lg, vz_mns_lg = _integrate_const_acc(z_mns_lg, vz_mns_lg, acc_mns_lg_z, dt, method)
-
-        # 4. Mise à jour position roue dans le repère jambe
-        ptR_lg = ptR_lg.copy()
-        ptR_lg[2] += vz_mns_lg * dt
-        ptB_lg = ptB_lg.copy()
-        ptB_lg[2] += vz_ms_lg * dt
-        ptGb_lg = ptGb_lg.copy()
-        ptGb_lg[2] += vz_ms_lg * dt
-        ptGt_lg = ptGt_lg.copy()
-        ptGt_lg[2] += vz_ms_lg * dt
-
-        # 5. Position roue en repère sol → déflexion pneu
-        ptR_sol = R_lg_to_sol @ ptR_lg
-        tyre_defl_val = max(0.0, unload_r - (float(ptR_sol[2]) - float(ptS_sol[2])))
-
-        # 6. Vitesse amortisseur = -(vMs_lg_Z - vMns_lg_Z)
-        v_damper = -(vz_ms_lg - vz_mns_lg)
-        d += v_damper * dt
-
-        # 7. Spin-up / spring-back pneu
-        tyre_omega_new = tyre_omega + tyre_alpha_i * dt
-        tyre_vx_new = tyre_vx + acc_tyre_x * dt
-        tyre_depx_new = tyre_depx + tyre_vx * dt
-        tyre_omega = tyre_omega_new
-        tyre_vx = tyre_vx_new
-        tyre_depx = tyre_depx_new
+        state = _strait_strut_advance_local_state(
+            p,
+            state,
+            R_sol_to_lg,
+            R_lg_to_sol,
+            support_acc_ms_z=acc_ms_z,
+            ftot=ftot,
+            tyre_ftyre_i=tyre_ftyre_i,
+            dt=dt,
+            method=method,
+        )
 
     return EngineOutput(data=out, n_steps=n_steps)

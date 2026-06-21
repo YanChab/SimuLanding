@@ -117,6 +117,259 @@ class EngineOutput:
     geometry: dict[str, np.ndarray] = field(default_factory=dict)
 
 
+@dataclass
+class TrailingArmLocalState:
+    """État local réutilisable du train TrailingArm sur un pas global."""
+
+    A: np.ndarray
+    B: np.ndarray
+    C: np.ndarray
+    R: np.ndarray
+    S: np.ndarray
+    accms: float
+    vitms: float
+    depms: float
+    ta_x: float
+    ta_y: float
+    ta_z: float
+    tb_x: float
+    tb_y: float
+    tb_z: float
+    tr_x: float
+    tr_y: float
+    tr_z: float
+    al_y: float
+    om_y: float
+    omega: float
+    alpha: float
+    vitx: float
+    depx: float
+    defl: float
+    delta_pc: float
+    delta_pd: float
+    qc_total: float
+    qc_bh: float
+    qc_leak: float
+    leak_ratio: float
+    re_leak: float
+    hyd_conv_err: float
+    hyd_conv_iter: float
+    pg_prev: float
+    ftot: float
+    v_prev: float
+    entraxe: float
+    th_ay: float
+    th_ry: float
+    d: float
+    v: float
+    sec: float = 0.0
+
+
+def _trailing_arm_local_step(
+    p: TrailingArmParamsSI,
+    gas: GasSpring,
+    tab_pos: np.ndarray,
+    tab_sec: np.ndarray,
+    tyre_defl: np.ndarray,
+    tyre_load: np.ndarray,
+    mu_x: np.ndarray,
+    mu_y: np.ndarray,
+    state: TrailingArmLocalState,
+    *,
+    support_dz: float,
+    support_vitms: float,
+    support_accms: float,
+    entraxe_init: float,
+    lg_ab: float,
+    lg_rb: float,
+    dy_ca: float,
+    fast_time_scale: float,
+    integrator_mode: str,
+    It: float,
+) -> dict[str, float]:
+    """Avance le noyau local TrailingArm sous cinématique support imposée."""
+    state.accms = support_accms
+    state.depms += support_dz
+    state.vitms = support_vitms
+    state.B[2] += support_dz
+    state.C[2] += support_dz
+
+    state.al_y = (1.0 / p.jyy) * (
+        (state.A[2] - state.B[2]) * state.ta_x
+        - (state.A[0] - state.B[0]) * state.ta_z
+        + (state.R[2] - state.B[2]) * state.tr_x
+        - (state.R[0] - state.B[0]) * state.tr_z
+    )
+    om_prev = state.om_y
+    if integrator_mode == "rk4":
+        state.om_y = om_prev + state.al_y * It
+        dtheta = om_prev * It + 0.5 * state.al_y * It * It
+        state.th_ay += dtheta
+        state.th_ry += dtheta
+    else:
+        state.om_y = om_prev + state.al_y * It
+        state.th_ay += state.om_y * It
+        state.th_ry += state.om_y * It
+
+    state.R[0] = -lg_rb * math.sin(state.th_ry) + state.B[0]
+    state.R[2] = -lg_rb * math.cos(state.th_ry) + state.B[2]
+    state.defl = p.unload_radius - (state.R[2] - state.S[2])
+    ftyre = f_tyre(state.defl, tyre_defl, tyre_load)
+    state.tr_z = ftyre
+
+    if p.vx != 0.0:
+        slip = (p.vx - state.omega * r_eff(p.unload_radius, state.defl)) / abs(p.vx)
+    else:
+        slip = 0.0
+    mu_val = mu(slip, mu_x, mu_y)
+    fspin = mu_val * state.tr_z * _sign(slip)
+    fx_old = p.kx * state.depx + p.cx * state.vitx
+    accx = (-fx_old + fspin) / p.wheelmass
+    state.depx, state.vitx = _integrate_const_acc(state.depx, state.vitx, accx, It, integrator_mode)
+    state.tr_x = p.kx * state.depx + p.cx * state.vitx
+    state.alpha = (fspin * (p.unload_radius - state.defl)) / p.wheel_inertia
+    state.omega = state.omega + state.alpha * It
+
+    state.A[0] = -lg_ab * math.sin(state.th_ay) + state.B[0]
+    state.A[2] = -lg_ab * math.cos(state.th_ay) + state.B[2]
+    dist_ca = math.sqrt(
+        (state.C[0] - state.A[0]) ** 2 + (state.C[1] - state.A[1]) ** 2 + (state.C[2] - state.A[2]) ** 2
+    )
+    state.v = -(dist_ca - state.entraxe) / It
+    state.entraxe = dist_ca
+    state.d = entraxe_init - state.entraxe
+
+    solver_mode = _select_damper_core_solver(p, state.d, state.v, state.pg_prev, state.ftot)
+    non_implicit_dt_scale = (
+        fast_time_scale * 1.10
+        if p.damper_core_solver == "auto_fast" and solver_mode != "implicit_adaptive"
+        else 1.0
+    )
+    if solver_mode == "implicit_adaptive":
+        min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 128.0
+        damp = damper_force_step_implicit_adaptive(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            max(0.0, state.d - state.v * It),
+            state.v_prev,
+            state.d,
+            state.v,
+            state.delta_pc,
+            state.delta_pd,
+            state.pg_prev,
+            min_h=min_h,
+            auto_fast_mode=(p.damper_core_solver == "auto_fast"),
+            implicit_dt_scale=(2.0 * fast_time_scale) if p.damper_core_solver == "auto_fast" else 1.0,
+        )
+    elif p.damper_core_solver == "auto_fast":
+        damp = damper_force_step(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            state.d,
+            state.v,
+            state.delta_pc,
+            state.delta_pd,
+            state.pg_prev,
+            dt=p.it * non_implicit_dt_scale,
+        )
+    elif p.integrator == "rk4":
+        damp = damper_force_step_rk4_coupled(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            max(0.0, state.d - state.v * It),
+            state.v_prev,
+            state.d,
+            state.v,
+            state.delta_pc,
+            state.delta_pd,
+            state.pg_prev,
+            dt_scale=non_implicit_dt_scale,
+        )
+    else:
+        damp = damper_force_step(
+            p,
+            gas,
+            tab_pos,
+            tab_sec,
+            state.d,
+            state.v,
+            state.delta_pc,
+            state.delta_pd,
+            state.pg_prev,
+            dt=p.it * non_implicit_dt_scale,
+        )
+
+    pg = damp["pg"]
+    pc = damp["pc"]
+    pd = damp["pd"]
+    state.delta_pc = damp["delta_pc"]
+    state.delta_pd = damp["delta_pd"]
+    state.qc_total = damp["qc_total"]
+    state.qc_bh = damp["qc_bh"]
+    state.qc_leak = damp["qc_leak"]
+    state.re_leak = damp["re_leak"]
+    state.leak_ratio = damp["leak_ratio"]
+    state.hyd_conv_err = damp.get("hyd_conv_err", 0.0)
+    state.hyd_conv_iter = damp.get("hyd_conv_iter", 0.0)
+    state.sec = damp["sec"]
+    fgas = damp["fgas"]
+    ffrijoi = damp["ffrijoi"]
+    fhyd = damp["fhyd"]
+    state.ftot = damp["ftot"]
+    state.pg_prev = pg
+
+    state.ta_z = -state.ftot * ((state.C[2] - state.A[2]) / state.entraxe)
+    state.ta_y = -state.ftot * ((state.C[1] - state.A[1]) / state.entraxe)
+    state.ta_x = -state.ftot * ((state.C[0] - state.A[0]) / state.entraxe)
+    state.tb_x = -state.ta_x - state.tr_x
+    state.tb_y = -state.ta_y - state.tr_y
+    state.tb_z = -state.ta_z - state.tr_z
+
+    fc_x, fc_y, fc_z = -state.ta_x, -state.ta_y, -state.ta_z
+    fb_x, fb_y, fb_z = -state.tb_x, -state.tb_y, -state.tb_z
+    res_x = fb_x + fc_x
+    res_y = fb_y + fc_y
+    res_z = fb_z + fc_z
+    res_norm = math.sqrt(res_x * res_x + res_y * res_y + res_z * res_z)
+    bax, bay, baz = state.A[0] - state.B[0], state.A[1] - state.B[1], state.A[2] - state.B[2]
+    brx, bry, brz = state.R[0] - state.B[0], state.R[1] - state.B[1], state.R[2] - state.B[2]
+    mb_x = (bay * state.ta_z - baz * state.ta_y) + (bry * state.tr_z - brz * state.tr_y)
+    mb_z = (bax * state.ta_y - bay * state.ta_x) + (brx * state.tr_y - bry * state.tr_x)
+
+    state.v_prev = state.v
+
+    return {
+        "pg": pg,
+        "pc": pc,
+        "pd": pd,
+        "fgas": fgas,
+        "ffrijoi": ffrijoi,
+        "fhyd": fhyd,
+        "ftyre": ftyre,
+        "slip": slip,
+        "mu_val": mu_val,
+        "fspin": fspin,
+        "fc_x": fc_x,
+        "fc_y": fc_y,
+        "fc_z": fc_z,
+        "fb_x": fb_x,
+        "fb_y": fb_y,
+        "fb_z": fb_z,
+        "res_x": res_x,
+        "res_y": res_y,
+        "res_z": res_z,
+        "res_norm": res_norm,
+        "mb_x": mb_x,
+        "mb_z": mb_z,
+    }
+
+
 # Positions géométriques enregistrées pour l'animation (repère train, en mm).
 GEOMETRY_KEYS: tuple[str, ...] = (
     "ax", "az", "bx", "bz", "cx", "cz", "rx", "rz", "ground_z", "wheel_radius",
@@ -710,29 +963,55 @@ def run_trailing_arm(
     geom = {k: np.zeros(n_out) for k in GEOMETRY_KEYS}
     ground_z = float(S[2])  # niveau du sol (fixe dans le repère train)
 
-    accms = 0.0
-    vitms = -Vitesse
-    depms = 0.0
-    ta_x = ta_y = ta_z = 0.0
-    tb_x = tb_y = tb_z = 0.0
-    tr_x = tr_y = tr_z = 0.0
-    al_y = om_y = 0.0
-    omega = alpha = 0.0
-    vitx = depx = 0.0
-    defl = 0.0
-    delta_pc = delta_pd = 0.0
-    qc_total = qc_bh = qc_leak = leak_ratio = re_leak = 0.0
-    hyd_conv_err = 0.0
-    hyd_conv_iter = 0.0
-    pg_prev = pg
-    ftot = p.St * pg
-    v_prev = 0.0
+    state = TrailingArmLocalState(
+        A=A,
+        B=B,
+        C=C,
+        R=R,
+        S=S,
+        accms=0.0,
+        vitms=-Vitesse,
+        depms=0.0,
+        ta_x=0.0,
+        ta_y=0.0,
+        ta_z=0.0,
+        tb_x=0.0,
+        tb_y=0.0,
+        tb_z=0.0,
+        tr_x=0.0,
+        tr_y=0.0,
+        tr_z=0.0,
+        al_y=0.0,
+        om_y=0.0,
+        omega=0.0,
+        alpha=0.0,
+        vitx=0.0,
+        depx=0.0,
+        defl=0.0,
+        delta_pc=0.0,
+        delta_pd=0.0,
+        qc_total=0.0,
+        qc_bh=0.0,
+        qc_leak=0.0,
+        leak_ratio=0.0,
+        re_leak=0.0,
+        hyd_conv_err=0.0,
+        hyd_conv_iter=0.0,
+        pg_prev=pg,
+        ftot=p.St * pg,
+        v_prev=0.0,
+        entraxe=entraxe,
+        th_ay=th_ay,
+        th_ry=th_ry,
+        d=0.0,
+        v=0.0,
+    )
 
     # --- Accumulateurs du bilan énergétique (diagnostic) ------------------ #
     # Énergie cinétique initiale d'impact de la masse suspendue ; sert de
     # référence pour le résidu. La gravité et le spin-up ajoutent un travail au
     # fil du temps.
-    e_kin_init = 0.5 * Ms * vitms * vitms
+    e_kin_init = 0.5 * Ms * state.vitms * state.vitms
     e_gas_acc = 0.0       # travail réversible du gaz (∑ Fgas·dd)
     e_tyre_acc = 0.0      # énergie élastique stockée dans le pneu (∑ Ftyre·d(defl))
     e_hyd_acc = 0.0       # dissipation hydraulique (∑ |Fhyd·v|·dt)
@@ -744,9 +1023,9 @@ def run_trailing_arm(
     e_slip_acc = 0.0      # chaleur dissipée par glissement au contact pneu/sol
     d_prev = 0.0          # course de l'amortisseur au pas précédent
     defl_prev = 0.0       # déflexion du pneu au pas précédent
-    depms_prev = depms    # déplacement masse suspendue au pas précédent
+    depms_prev = state.depms    # déplacement masse suspendue au pas précédent
     omega_prev = 0.0      # vitesse de rotation roue au pas précédent
-    rx_prev = float(R[0])  # position horizontale du moyeu R au pas précédent
+    rx_prev = float(state.R[0])  # position horizontale du moyeu R au pas précédent
     fgas_prev = p.St * pg
     fhyd_prev = 0.0
     ffrijoi_prev = 0.0
@@ -754,7 +1033,7 @@ def run_trailing_arm(
     endstop_prev = _endstop(d_prev, p.course, smooth_len=p.endstop_smooth)
     tr_x_prev = 0.0
     fspin_prev = 0.0
-    vitx_prev = vitx
+    vitx_prev = state.vitx
 
     n_steps = n_it
     for i in range(n_out):
@@ -764,182 +1043,101 @@ def run_trailing_arm(
         
         try:
             # Dynamique de la masse suspendue (TA/TB du pas précédent)
-            accms = (1.0 / Ms) * (-ta_z - tb_z - pms_rlg_z)
-            depms, vitms = _integrate_const_acc(depms, vitms, accms, It, integrator_mode)
-            dz = depms - depms_prev
-            B[2] += dz
-            C[2] += dz
-
-            # Rotation du balancier
-            al_y = (1.0 / Jyy) * (
-                (A[2] - B[2]) * ta_x
-                - (A[0] - B[0]) * ta_z
-                + (R[2] - B[2]) * tr_x
-                - (R[0] - B[0]) * tr_z
+            support_accms = (1.0 / Ms) * (-state.ta_z - state.tb_z - pms_rlg_z)
+            support_depms, support_vitms = _integrate_const_acc(
+                state.depms,
+                state.vitms,
+                support_accms,
+                It,
+                integrator_mode,
             )
-            om_prev = om_y
-            if integrator_mode == "rk4":
-                om_y = om_prev + al_y * It
-                dtheta = om_prev * It + 0.5 * al_y * It * It
-                th_ay += dtheta
-                th_ry += dtheta
-            else:
-                om_y = om_prev + al_y * It
-                th_ay += om_y * It
-                th_ry += om_y * It
-
-            # Position de R et écrasement du pneu
-            R[0] = -lg_rb * math.sin(th_ry) + B[0]
-            R[2] = -lg_rb * math.cos(th_ry) + B[2]
-            defl = p.unload_radius - (R[2] - S[2])
-            ftyre = f_tyre(defl, tyre_defl, tyre_load)
-            tr_z = ftyre
-
-            # Adhérence / spin-up / spring-back
-            if Vx != 0.0:
-                slip = (Vx - omega * r_eff(p.unload_radius, defl)) / abs(Vx)
-            else:
-                slip = 0.0
-            mu_val = mu(slip, mu_x, mu_y)
-            fspin = mu_val * tr_z * _sign(slip)
-            fx_old = p.kx * depx + p.cx * vitx
-            accx = (-fx_old + fspin) / p.wheelmass
-            depx, vitx = _integrate_const_acc(depx, vitx, accx, It, integrator_mode)
-            tr_x = p.kx * depx + p.cx * vitx
-            alpha = (fspin * (p.unload_radius - defl)) / p.wheel_inertia
-            omega = omega + alpha * It
-
-            # Position de A et cinématique de l'amortisseur
-            A[0] = -lg_ab * math.sin(th_ay) + B[0]
-            A[2] = -lg_ab * math.cos(th_ay) + B[2]
-            dist_ca = math.sqrt(
-                (C[0] - A[0]) ** 2 + (C[1] - A[1]) ** 2 + (C[2] - A[2]) ** 2
+            dz = support_depms - state.depms
+            step = _trailing_arm_local_step(
+                p,
+                gas,
+                tab_pos,
+                tab_sec,
+                tyre_defl,
+                tyre_load,
+                mu_x,
+                mu_y,
+                state,
+                support_dz=dz,
+                support_vitms=support_vitms,
+                support_accms=support_accms,
+                entraxe_init=entraxe_init,
+                lg_ab=lg_ab,
+                lg_rb=lg_rb,
+                dy_ca=dy_ca,
+                fast_time_scale=fast_time_scale,
+                integrator_mode=integrator_mode,
+                It=It,
             )
-            v = -(dist_ca - entraxe) / It
-            entraxe = dist_ca
-            d = entraxe_init - entraxe
+            pg = step["pg"]
+            pc = step["pc"]
+            pd = step["pd"]
+            fgas = step["fgas"]
+            ffrijoi = step["ffrijoi"]
+            fhyd = step["fhyd"]
+            ftyre = step["ftyre"]
+            slip = step["slip"]
+            mu_val = step["mu_val"]
+            fspin = step["fspin"]
+            fc_x = step["fc_x"]
+            fc_y = step["fc_y"]
+            fc_z = step["fc_z"]
+            fb_x = step["fb_x"]
+            fb_y = step["fb_y"]
+            fb_z = step["fb_z"]
+            res_x = step["res_x"]
+            res_y = step["res_y"]
+            res_z = step["res_z"]
+            res_norm = step["res_norm"]
+            mb_x = step["mb_x"]
+            mb_z = step["mb_z"]
 
-            # Ressort gazeux + hydraulique (meme loi que l'export "Loi hydraulique").
-            solver_mode = _select_damper_core_solver(p, d, v, pg_prev, ftot)
-            non_implicit_dt_scale = (
-                fast_time_scale * 1.10
-                if p.damper_core_solver == "auto_fast" and solver_mode != "implicit_adaptive"
-                else 1.0
-            )
-            if solver_mode == "implicit_adaptive":
-                min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 128.0
-                damp = damper_force_step_implicit_adaptive(
-                    p,
-                    gas,
-                    tab_pos,
-                    tab_sec,
-                    d_prev,
-                    v_prev,
-                    d,
-                    v,
-                    delta_pc,
-                    delta_pd,
-                    pg_prev,
-                    min_h=min_h,
-                    auto_fast_mode=(p.damper_core_solver == "auto_fast"),
-                    implicit_dt_scale=(2.0 * fast_time_scale) if p.damper_core_solver == "auto_fast" else 1.0,
-                )
-            elif p.damper_core_solver == "auto_fast":
-                damp = damper_force_step(
-                    p,
-                    gas,
-                    tab_pos,
-                    tab_sec,
-                    d,
-                    v,
-                    delta_pc,
-                    delta_pd,
-                    pg_prev,
-                    dt=p.it * non_implicit_dt_scale,
-                )
-            elif p.integrator == "rk4":
-                damp = damper_force_step_rk4_coupled(
-                    p,
-                    gas,
-                    tab_pos,
-                    tab_sec,
-                    d_prev,
-                    v_prev,
-                    d,
-                    v,
-                    delta_pc,
-                    delta_pd,
-                    pg_prev,
-                    dt_scale=non_implicit_dt_scale,
-                )
-            else:
-                damp = damper_force_step(
-                    p,
-                    gas,
-                    tab_pos,
-                    tab_sec,
-                    d,
-                    v,
-                    delta_pc,
-                    delta_pd,
-                    pg_prev,
-                    dt=p.it * non_implicit_dt_scale,
-                )
-            pg = damp["pg"]
-            pc = damp["pc"]
-            pd = damp["pd"]
-            delta_pc = damp["delta_pc"]
-            delta_pd = damp["delta_pd"]
-            qc_total = damp["qc_total"]
-            qc_bh = damp["qc_bh"]
-            qc_leak = damp["qc_leak"]
-            re_leak = damp["re_leak"]
-            leak_ratio = damp["leak_ratio"]
-            hyd_conv_err = damp.get("hyd_conv_err", 0.0)
-            hyd_conv_iter = damp.get("hyd_conv_iter", 0.0)
-            sec = damp["sec"]
-            fgas = damp["fgas"]
-            ffrijoi = damp["ffrijoi"]
-            fhyd = damp["fhyd"]
-            ftot = damp["ftot"]
-            pg_prev = pg
-
-            # Efforts dans l'amortisseur et le balancier (pour le pas suivant).
-            # La projection 3D (division par l'entraxe réel) réduit naturellement
-            # les composantes X-Z lorsque l'amortisseur est oblique en Y.
-            ta_z = -ftot * ((C[2] - A[2]) / entraxe)
-            ta_y = -ftot * ((C[1] - A[1]) / entraxe)
-            ta_x = -ftot * ((C[0] - A[0]) / entraxe)
-            tb_x = -ta_x - tr_x
-            tb_y = -ta_y - tr_y
-            tb_z = -ta_z - tr_z
-
-            # --- Torseur d'effort transmis à la masse suspendue --------------
-            # Efforts de liaison appliqués PAR le train SUR la masse suspendue
-            # (réactions, 3ᵉ loi de Newton) :
-            #   - en C (tête d'amortisseur, ROTULE) : FC = -TA, effort pur sans
-            #     moment (une rotule ne transmet aucun couple) ;
-            #   - en B (pivot du balancier, PIVOT)  : FB = -TB, effort + moment.
-            fc_x, fc_y, fc_z = -ta_x, -ta_y, -ta_z
-            fb_x, fb_y, fb_z = -tb_x, -tb_y, -tb_z
-            # Résultante du torseur (somme des deux efforts) ; vaut la réaction
-            # sol TR.
-            res_x = fb_x + fc_x
-            res_y = fb_y + fc_y
-            res_z = fb_z + fc_z
-            res_norm = math.sqrt(res_x * res_x + res_y * res_y + res_z * res_z)
-            # Moment réacté par le pivot B. B est un PIVOT d'axe Y : il ne peut
-            # transmettre AUCUN moment autour de Y (axe de rotation libre — ce
-            # moment alimente la dynamique de rotation du balancier, cf. al_y /
-            # Jyy) ; il ne réagit que les moments autour de X et de Z.
-            # Le moment se calcule à partir des efforts qui agissent RÉELLEMENT
-            # sur le balancier — l'effort amortisseur TA appliqué en A et la
-            # réaction sol TR appliquée en R — réduits au pivot B (bras BA, BR),
-            # et NON à partir de l'effort en C (qui s'applique sur la cellule).
-            bax, bay, baz = A[0] - B[0], A[1] - B[1], A[2] - B[2]
-            brx, bry, brz = R[0] - B[0], R[1] - B[1], R[2] - B[2]
-            mb_x = (bay * ta_z - baz * ta_y) + (bry * tr_z - brz * tr_y)
-            mb_z = (bax * ta_y - bay * ta_x) + (brx * tr_y - bry * tr_x)
+            accms = state.accms
+            vitms = state.vitms
+            depms = state.depms
+            ta_x = state.ta_x
+            ta_y = state.ta_y
+            ta_z = state.ta_z
+            tb_x = state.tb_x
+            tb_y = state.tb_y
+            tb_z = state.tb_z
+            tr_x = state.tr_x
+            tr_y = state.tr_y
+            tr_z = state.tr_z
+            al_y = state.al_y
+            om_y = state.om_y
+            omega = state.omega
+            alpha = state.alpha
+            vitx = state.vitx
+            depx = state.depx
+            defl = state.defl
+            delta_pc = state.delta_pc
+            delta_pd = state.delta_pd
+            qc_total = state.qc_total
+            qc_bh = state.qc_bh
+            qc_leak = state.qc_leak
+            leak_ratio = state.leak_ratio
+            re_leak = state.re_leak
+            hyd_conv_err = state.hyd_conv_err
+            hyd_conv_iter = state.hyd_conv_iter
+            pg_prev = state.pg_prev
+            ftot = state.ftot
+            v_prev = state.v_prev
+            entraxe = state.entraxe
+            th_ay = state.th_ay
+            th_ry = state.th_ry
+            d = state.d
+            v = state.v
+            sec = state.sec
+            A = state.A
+            B = state.B
+            C = state.C
+            R = state.R
+            S = state.S
 
         except SimError as err:
             err.context.setdefault("iteration", i)

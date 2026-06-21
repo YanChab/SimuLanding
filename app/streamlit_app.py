@@ -148,6 +148,8 @@ cinématique de jambe).
 pages = [
     st.Page(accueil, title="Accueil", icon="🏠", default=True),
     st.Page("pages/1_Saisie.py", title="Saisie", icon="📝"),
+    st.Page("pages/5_Avion_complet.py", title="Avion complet", icon="🛫"),
+    st.Page("pages/6_Resultats_avion_complet.py", title="Resultats avion", icon="📊"),
     st.Page("pages/2_Resultats.py", title="Résultats", icon="📈"),
     st.Page("pages/3_Comparaison.py", title="Comparaison", icon="⚖️"),
     st.Page("pages/4_Loi_hydraulique.py", title="Loi hydraulique", icon="🧮"),

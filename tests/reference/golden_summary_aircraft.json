@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "Course max NLG (mm)": 129.58285605572587,
+    "Course max MLG gauche (mm)": 175.73176568395803,
+    "Course max MLG droite (mm)": 175.73176568395803,
+    "Effort vertical total max Fz (N)": 105323.79534104883,
+    "Moment de tangage max (N.m)": 58152.12107076093,
+    "Acc\u00e9l\u00e9ration CG max (g)": 3.964548230012184,
+    "Nombre de pas": 10000
+  },
+  "summary_rows": []
+}
