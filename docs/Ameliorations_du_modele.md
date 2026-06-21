@@ -8,6 +8,18 @@
 
 ## 1. État actuel observé
 
+### 1.1 Mise à jour récente StraitStrut (NLG)
+
+Depuis la dernière itération, la non-régression dédiée StraitStrut a été
+renforcée avec une comparaison directe aux courbes Excel `Results_NLG.csv`
+(`Tyre.FTyre`, `NLG.d`, `NLG.Pg`, `NLG.Pc`, `NLG.Pd`).
+
+Point important de robustesse : la RMS est désormais évaluée sur la phase
+physiquement la plus pertinente (compression principale), avec une fenêtre
+temporelle bornée, plutôt que sur toute la queue tardive du signal Excel.
+Cette approche évite des faux négatifs liés à la longueur variable du CSV
+exporté, tout en conservant des seuils stricts sur la dynamique d'impact.
+
 Le projet dispose déjà de points solides :
 
 - moteur physique structuré par sous-domaines (`gas.py`, `hydraulic.py`,
