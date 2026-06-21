@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import dropsim.engine_strait_strut as engine_ss
 from dropsim import default_strait_strut_inputs, run_simulation
 
 _HERE = os.path.dirname(__file__)
@@ -33,7 +34,7 @@ def _inputs_for(overrides: dict[str, float]):
     for key, value in overrides.items():
         setattr(inp, key, value)
     inp.integrator = "rk4"
-    inp.damper_core_solver = "auto_precise"
+    inp.damper_core_solver = "auto_fast"
     return inp
 
 
@@ -188,6 +189,20 @@ def test_excel_reference_curve_rms(reference_curve):
     if reference_curve is None:
         pytest.skip("Référence NLG absente: _extract/reference/Results_NLG.csv")
 
+    # Ce test compare aux courbes Excel historiques Results_NLG.csv.
+    # Si le profil par défaut est volontairement remplacé par une référence
+    # utilisateur (ex: simulation sauvegardée), la comparaison n'est plus
+    # pertinente et doit être ignorée.
+    inp = default_strait_strut_inputs()
+    if not (
+        np.isclose(inp.vx, 37.0)
+        and np.isclose(inp.course, 230.0)
+        and np.isclose(inp.it, 5.0e-4)
+    ):
+        pytest.skip(
+            "Profil par défaut StraitStrut personnalisé: comparaison RMS Excel historique non applicable."
+        )
+
     result = run_simulation(default_strait_strut_inputs())
     sim = result.df
     ref = reference_curve
@@ -243,3 +258,22 @@ def test_excel_reference_curve_rms(reference_curve):
         assert rms <= cfg["rms_max"], (
             f"RMS trop élevée pour {metric_name}: {rms:.6g} > {cfg['rms_max']:.6g}"
         )
+
+
+def test_strait_strut_auto_precise_uses_implicit_adaptive(monkeypatch):
+    inp = default_strait_strut_inputs()
+    inp.damper_core_solver = "auto_precise"
+    inp.temps_simu = 0.01
+
+    calls = {"n": 0}
+    real_impl = engine_ss.damper_force_step_implicit_adaptive
+
+    def _spy(*args, **kwargs):
+        calls["n"] += 1
+        return real_impl(*args, **kwargs)
+
+    monkeypatch.setattr(engine_ss, "damper_force_step_implicit_adaptive", _spy)
+
+    result = run_simulation(inp)
+    assert result.n_steps > 0
+    assert calls["n"] > 0

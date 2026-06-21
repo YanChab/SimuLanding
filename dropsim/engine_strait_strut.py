@@ -26,7 +26,9 @@ from .engine import (
     EngineOutput,
     _endstop,
     _integrate_const_acc,
+    _select_damper_core_solver,
     damper_force_step,
+    damper_force_step_implicit_adaptive,
 )
 from .errors import ErrorCollector, SimError
 from .gas import GasSpring
@@ -305,6 +307,7 @@ def run_strait_strut(
     delta_pc = 0.0
     delta_pd = 0.0
     pg_prev = pg_init
+    ftot = p.St * pg_prev + _endstop(d, p.course, smooth_len=p.endstop_smooth)
 
     # Pneu
     tyre_omega = 0.0
@@ -343,10 +346,43 @@ def run_strait_strut(
         t = i * dt
 
         # --- Enregistrement de l'état au pas i ----------------------------- #
-        damp_step = damper_force_step(
-            p, gas, tab_pos, tab_sec,
-            d, v_damper, delta_pc, delta_pd, pg_prev, dt=dt,
+        solver_mode = _select_damper_core_solver(p, d, v_damper, pg_prev, ftot)
+        non_implicit_dt_scale = (
+            1.10
+            if p.damper_core_solver == "auto_fast" and solver_mode != "implicit_adaptive"
+            else 1.0
         )
+        if solver_mode == "implicit_adaptive":
+            min_h = 1.0 / 32.0 if p.damper_core_solver == "auto_fast" else 1.0 / 128.0
+            damp_step = damper_force_step_implicit_adaptive(
+                p,
+                gas,
+                tab_pos,
+                tab_sec,
+                d,
+                v_damper,
+                d,
+                v_damper,
+                delta_pc,
+                delta_pd,
+                pg_prev,
+                min_h=min_h,
+                auto_fast_mode=(p.damper_core_solver == "auto_fast"),
+                implicit_dt_scale=2.0 if p.damper_core_solver == "auto_fast" else 1.0,
+            )
+        else:
+            damp_step = damper_force_step(
+                p,
+                gas,
+                tab_pos,
+                tab_sec,
+                d,
+                v_damper,
+                delta_pc,
+                delta_pd,
+                pg_prev,
+                dt=p.it * non_implicit_dt_scale,
+            )
         pg = damp_step["pg"]
         pc = damp_step["pc"]
         pd = damp_step["pd"]

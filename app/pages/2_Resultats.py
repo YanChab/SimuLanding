@@ -20,7 +20,7 @@ _APP = Path(__file__).resolve().parent.parent
 if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
-from dropsim.engine import OUTPUT_COLUMNS  # noqa: E402
+from dropsim.engine import OUTPUT_COLUMNS, _select_damper_core_solver  # noqa: E402
 from dropsim.engine_strait_strut import OUTPUT_COLUMNS_SS  # noqa: E402
 from dropsim.geometry import deter_pos_bal_a, deter_pos_bal_r, rotate_about  # noqa: E402
 from dropsim import (  # noqa: E402
@@ -150,6 +150,52 @@ COL = OUTPUT_COLUMNS_SS if _model_kind == "strait_strut" else OUTPUT_COLUMNS
 
 # Colonne « course » exprimée en mm pour l'affichage.
 course_mm = df[COL["trailing_arm_d"]] * 1000.0
+
+
+def _compute_implicit_usage_curve(
+    data,
+    inputs,
+    model_kind: str,
+    col_map: dict[str, str],
+) -> np.ndarray | None:
+    """Reconstruit l'usage implicite du noyau amortisseur (0 explicite, 1 implicite).
+
+    Le moteur n'exporte pas explicitement le mode du solveur à chaque pas. On
+    rejoue donc la même heuristique que dans `engine.py` sur les séries de
+    sortie pour visualiser quand le chemin implicite est sélectionné.
+    """
+    if inputs is None:
+        return None
+
+    try:
+        p = inputs.to_si()
+        d_arr = data[col_map["trailing_arm_d"]].to_numpy(dtype=float)
+        v_arr = data[col_map["trailing_arm_v"]].to_numpy(dtype=float)
+        pg_bar_arr = data[col_map["pg"]].to_numpy(dtype=float)
+        ftot_arr = data[col_map["trailing_arm_ftot"]].to_numpy(dtype=float)
+    except (KeyError, AttributeError, TypeError, ValueError):
+        return None
+
+    if d_arr.size == 0:
+        return None
+
+    pg_prev = float(getattr(p, "Pinitbp", pg_bar_arr[0] * 1.0e5))
+    ftot_prev = float(ftot_arr[0])
+
+    implicit_flag = np.zeros_like(d_arr, dtype=float)
+    for i in range(d_arr.size):
+        solver_mode = _select_damper_core_solver(
+            p,
+            float(d_arr[i]),
+            float(v_arr[i]),
+            pg_prev,
+            ftot_prev,
+        )
+        implicit_flag[i] = 1.0 if solver_mode == "implicit_adaptive" else 0.0
+        pg_prev = float(pg_bar_arr[i]) * 1.0e5
+        ftot_prev = float(ftot_arr[i])
+
+    return implicit_flag
 
 
 def _compute_kinematic_curve(inputs, n_pts: int = 401) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
@@ -425,12 +471,22 @@ with tab_conv:
     else:
         conv_err = df[COL["hyd_conv_err"]]
         conv_iter = df[COL["hyd_conv_iter"]]
+        implicit_curve = _compute_implicit_usage_curve(
+            data=df,
+            inputs=st.session_state.get("inputs"),
+            model_kind=_model_kind,
+            col_map=COL,
+        )
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Erreur moyenne", f"{float(np.mean(conv_err)):.3e}")
         c2.metric("Erreur max", f"{float(np.max(conv_err)):.3e}")
         c3.metric("Itérations moyennes", f"{float(np.mean(conv_iter)):.2f}")
         c4.metric("Itérations max", f"{float(np.max(conv_iter)):.0f}")
+        if implicit_curve is None:
+            c5.metric("Mode implicite", "N/A")
+        else:
+            c5.metric("Pas implicites", f"{100.0 * float(np.mean(implicit_curve)):.1f} %")
 
         fig_conv = go.Figure()
         fig_conv.add_trace(
@@ -475,6 +531,45 @@ with tab_conv:
             width="stretch",
             config={"responsive": True},
         )
+
+        if implicit_curve is None:
+            st.info(
+                "Impossible de reconstruire le mode implicite/explicite pour ce résultat "
+                "(entrées manquantes ou colonnes incomplètes)."
+            )
+        else:
+            fig_imp = go.Figure()
+            fig_imp.add_trace(
+                go.Scatter(
+                    x=t,
+                    y=implicit_curve,
+                    mode="lines",
+                    line_shape="hv",
+                    fill="tozeroy",
+                    name="Mode implicite",
+                )
+            )
+            fig_imp.update_layout(
+                title=dict(text="Activation du noyau implicite", y=0.98, yanchor="top"),
+                margin=dict(l=10, r=10, t=80, b=55),
+                legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
+                height=420,
+                plot_bgcolor=GRAPH_PAPER_BG,
+                paper_bgcolor="white",
+                xaxis=_grid_axis("Temps (s)"),
+                yaxis={
+                    **_grid_axis("Mode de calcul"),
+                    "range": [-0.05, 1.05],
+                    "tickmode": "array",
+                    "tickvals": [0, 1],
+                    "ticktext": ["Explicite", "Implicite"],
+                },
+            )
+            st.plotly_chart(
+                fig_imp,
+                width="stretch",
+                config={"responsive": True},
+            )
 
 with tab_cine:
     st.plotly_chart(
