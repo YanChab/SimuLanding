@@ -1,3 +1,15 @@
+# Spécification historique du classeur Excel
+
+Ce document décrit le classeur Excel source utilisé historiquement pour les
+simulations de drop test.
+
+Statut actuel du projet Python:
+- le modèle StraitStrut utilise comme profil par défaut la référence projet
+    "Strait Strut Reference";
+- la non-régression StraitStrut est basée sur le golden projet;
+- les références Excel restent des sources d'architecture et de compréhension,
+    pas la baseline de test active pour StraitStrut.
+
 Dans le dossier SimuLanding il y a un fichier excel. L'objectif de ce fichier excel est de pouvoir faire la simulation d'atterrissage d'un avion complet pour dimension les loi hydraulique et ressort gaz des trains d'atterrissage. 
 Je vais  décrire les contenu de chaque onglet et l'objectif.
 Description des onglets:

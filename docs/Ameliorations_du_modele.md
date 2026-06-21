@@ -21,15 +21,13 @@ Depuis la dernière mise à jour, les points suivants sont actés dans le dépô
 
 ### 1.1 Mise à jour récente StraitStrut (NLG)
 
-Depuis la dernière itération, la non-régression dédiée StraitStrut a été
-renforcée avec une comparaison directe aux courbes Excel `Results_NLG.csv`
-(`Tyre.FTyre`, `NLG.d`, `NLG.Pg`, `NLG.Pc`, `NLG.Pd`).
+Depuis la dernière itération, la non-régression dédiée StraitStrut est alignée
+sur la référence projet **Strait Strut Reference** via le golden
+`tests/reference/golden_strait_strut_summary.json`.
 
-Point important de robustesse : la RMS est désormais évaluée sur la phase
-physiquement la plus pertinente (compression principale), avec une fenêtre
-temporelle bornée, plutôt que sur toute la queue tardive du signal Excel.
-Cette approche évite des faux négatifs liés à la longueur variable du CSV
-exporté, tout en conservant des seuils stricts sur la dynamique d'impact.
+Les comparaisons directes au CSV Excel `Results_NLG.csv` restent possibles pour
+l'analyse historique ponctuelle, mais ne sont plus la baseline active du profil
+par défaut StraitStrut.
 
 Le projet dispose déjà de points solides :
 

@@ -8,6 +8,10 @@
 > Mise à jour 2026-06-21 : pour le modèle StraitStrut (NLG), le profil par
 > défaut est aligné sur la référence projet **Strait Strut Reference** et la
 > non-régression associée repose sur le golden projet.
+>
+> Les courbes Excel historiques (`Results_NLG.csv`) restent utilisées comme
+> support d'analyse scientifique, mais ne constituent plus la baseline de test
+> par défaut pour StraitStrut.
 
 ---
 

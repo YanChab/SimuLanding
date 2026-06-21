@@ -5,6 +5,17 @@
 >
 > Le code VBA a été extrait du binaire `xl/vbaProject.bin` (20 modules, ~6000 lignes) et analysé module par module. Les copies lisibles se trouvent dans `_extract/vba_clean/`.
 
+## Addendum projet Python (état courant)
+
+Ce document reste centré sur l'analyse du classeur VBA historique.
+
+Dans l'application Python SimuLanding:
+- le profil par défaut StraitStrut est aligné sur la référence projet
+    "Strait Strut Reference";
+- la non-régression StraitStrut est pilotée par le golden projet;
+- les exports Excel (`Results_NLG`, `Results_MLG`) sont conservés comme
+    références historiques d'analyse et de comparaison ponctuelle.
+
 ---
 
 ## 1. Objectif et périmètre

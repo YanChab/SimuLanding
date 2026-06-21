@@ -17,3 +17,4 @@
 -> Rajouter un avertissement lorqu'il y a des pression négatives
 -> page paramètre du modèle pour pouvoir le configurer.
 -> Rajouter une courbe du ratio cinématique -> ok
+-> aligner les défauts StraitStrut sur une référence projet + golden dédié -> OK
