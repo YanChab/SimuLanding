@@ -108,7 +108,7 @@ def _build_tolerance_cases(p_nominal):
         min_value=0.0,
         value=0.0,
         step=0.01,
-        format="%.3f",
+        format="%.12g",
         key="hydrau_tol_dinsidepalier_mm",
     )
     tol_dbh_mm = c2.number_input(
@@ -116,7 +116,7 @@ def _build_tolerance_cases(p_nominal):
         min_value=0.0,
         value=0.0,
         step=0.01,
-        format="%.3f",
+        format="%.12g",
         key="hydrau_tol_dbh_mm",
     )
     tol_rainure_mm = c3.number_input(
@@ -124,7 +124,7 @@ def _build_tolerance_cases(p_nominal):
         min_value=0.0,
         value=0.0,
         step=0.01,
-        format="%.3f",
+        format="%.12g",
         key="hydrau_tol_rainure_mm",
     )
 
@@ -256,8 +256,8 @@ try:
                 width="stretch",
                 height=700,
                 column_config={
-                    "Course (mm)": st.column_config.NumberColumn("Course (mm)", format="%d"),
-                    **{c: st.column_config.NumberColumn(c, format="%.0f") for c in col_labels},
+                    "Course (mm)": st.column_config.NumberColumn("Course (mm)", format="%.12g"),
+                    **{c: st.column_config.NumberColumn(c, format="%.12g") for c in col_labels},
                 },
             )
 

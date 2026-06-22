@@ -286,7 +286,7 @@ with col_summary:
             summary_df,
             column_config={
                 "Paramètre": st.column_config.TextColumn("Paramètre"),
-                "Valeur": st.column_config.NumberColumn("Valeur", format="%.4g", alignment="right"),
+                "Valeur": st.column_config.NumberColumn("Valeur", format="%.12g", alignment="right"),
             },
             hide_index=True,
             width="stretch",

@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
@@ -31,6 +32,13 @@ from dropsim import errors as ds_errors  # noqa: E402
 from dropsim import inputs as ds_inputs  # noqa: E402
 from dropsim import storage as ds_storage  # noqa: E402
 from dropsim.engine_aircraft import OUTPUT_COLUMNS_AC, run_aircraft  # noqa: E402
+from dropsim.inputs import (  # noqa: E402
+    TEMP_REF_C,
+    compute_bulk_modulus_at_temperature,
+    compute_bulk_modulus_from_aeration,
+    compute_gas_oil_at_temperature,
+)
+from dropsim.metering import build_section_table  # noqa: E402
 from theme import apply_theme  # noqa: E402
 
 apply_theme()
@@ -305,7 +313,7 @@ inp: Any = st.session_state.aircraft_inputs
 def _num(label: str, key: str, value: float, *, step: float = 1.0, min_value=None) -> float:
     if key not in st.session_state:
         st.session_state[key] = float(value)
-    return float(st.number_input(label, key=key, step=step, min_value=min_value))
+    return float(st.number_input(label, key=key, step=step, min_value=min_value, format="%.12g"))
 
 
 def _decimal_places(*values: float) -> int:
@@ -327,9 +335,409 @@ def _num_precise(label: str, key: str, value: float, *, step: float, min_value=N
             key=key,
             step=step,
             min_value=min_value,
-            format=f"%.{decimals}f",
+            format=f"%.{max(decimals, 12)}g",
         )
     )
+
+
+_PAPER_BG = "#fbfbf2"
+_GRID_MAJOR = "#e08e7b"
+_GRID_MINOR = "#f3c9bf"
+
+
+def _mini_axis(title: str) -> dict:
+    return dict(
+        title=title,
+        showgrid=True,
+        gridcolor=_GRID_MAJOR,
+        gridwidth=1,
+        zeroline=True,
+        zerolinecolor=_GRID_MAJOR,
+        showline=True,
+        linecolor=_GRID_MAJOR,
+        mirror=True,
+        ticks="outside",
+        minor=dict(showgrid=True, gridcolor=_GRID_MINOR, gridwidth=0.5),
+    )
+
+
+def _safe_xy(df_table: pd.DataFrame):
+    d = df_table.dropna()
+    if d.empty:
+        return [], []
+    return d.iloc[:, 0].to_numpy(), d.iloc[:, 1].to_numpy()
+
+
+def _mini_chart(x, y, xlab: str, ylab: str, *, color: str) -> go.Figure:
+    fig = go.Figure(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="lines+markers",
+            line=dict(color=color, width=2),
+            marker=dict(size=5, color=color),
+        )
+    )
+    fig.update_layout(
+        height=210,
+        margin=dict(l=8, r=8, t=8, b=8),
+        plot_bgcolor=_PAPER_BG,
+        paper_bgcolor="white",
+        xaxis=_mini_axis(xlab),
+        yaxis=_mini_axis(ylab),
+        showlegend=False,
+    )
+    return fig
+
+
+def _curve_to_editor_df(curve, col_a: str, col_b: str) -> pd.DataFrame:
+    table = pd.DataFrame(curve, columns=[col_a, col_b]).T
+    table.columns = [f"P{i + 1}" for i in range(table.shape[1])]
+    return table
+
+
+def _rainures_to_editor_df(rainures) -> pd.DataFrame:
+    table = pd.DataFrame(
+        [(r.debut, r.fin, r.profondeur) for r in rainures],
+        columns=["Début (mm)", "Fin (mm)", "Profondeur (mm)"],
+    ).T
+    table.columns = [f"R{i + 1}" for i in range(table.shape[1])]
+    return table
+
+
+def _read_curve_editor(key: str, fallback, col_a: str, col_b: str):
+    edited = st.session_state.get(key)
+    if edited is None:
+        return [(float(x), float(y)) for x, y in fallback]
+    try:
+        df = pd.DataFrame(edited).T.reset_index(drop=True)
+        if df.shape[1] < 2:
+            return [(float(x), float(y)) for x, y in fallback]
+        df = df.iloc[:, :2]
+        df.columns = [col_a, col_b]
+        df = df.apply(pd.to_numeric, errors="coerce").dropna()
+        if len(df) < 2:
+            return [(float(x), float(y)) for x, y in fallback]
+        return [(float(r[0]), float(r[1])) for r in df.itertuples(index=False)]
+    except Exception:
+        return [(float(x), float(y)) for x, y in fallback]
+
+
+def _read_rainures_editor(key: str, fallback):
+    edited = st.session_state.get(key)
+    if edited is None:
+        return [ds_inputs.Rainure(float(r.debut), float(r.fin), float(r.profondeur)) for r in fallback]
+    try:
+        df = pd.DataFrame(edited).T.reset_index(drop=True)
+        if df.shape[1] < 3:
+            return [ds_inputs.Rainure(float(r.debut), float(r.fin), float(r.profondeur)) for r in fallback]
+        df = df.iloc[:, :3]
+        df.columns = ["Début (mm)", "Fin (mm)", "Profondeur (mm)"]
+        df = df.apply(pd.to_numeric, errors="coerce").dropna()
+        if df.empty:
+            return [ds_inputs.Rainure(float(r.debut), float(r.fin), float(r.profondeur)) for r in fallback]
+        return [
+            ds_inputs.Rainure(float(a), float(b), float(c))
+            for a, b, c in df.itertuples(index=False)
+        ]
+    except Exception:
+        return [ds_inputs.Rainure(float(r.debut), float(r.fin), float(r.profondeur)) for r in fallback]
+
+
+def _sync_gear_widgets(prefix: str, gear: Any, *, include_strut: bool) -> None:
+    p = f"ac_{prefix}_"
+    if include_strut:
+        st.session_state[f"{p}strut_pitch"] = float(gear.strut_pitch)
+        st.session_state[f"{p}strut_roll"] = float(gear.strut_roll)
+        st.session_state[f"{p}h_pivot"] = float(gear.h_pivot_z)
+        st.session_state[f"{p}h_gt"] = float(gear.h_guide_top_z)
+        st.session_state[f"{p}h_gb"] = float(gear.h_guide_bot_z)
+        st.session_state[f"{p}bg"] = float(gear.bague_guide)
+        st.session_state[f"{p}bp"] = float(gear.bague_piston)
+        st.session_state[f"{p}seal"] = float(gear.seal_precomp_pa)
+
+    st.session_state[f"{p}unsprung_mass"] = float(gear.unsprung_mass)
+    st.session_state[f"{p}wheel_inertia"] = float(gear.wheel_inertia)
+    st.session_state[f"{p}unload_radius"] = float(gear.unload_radius)
+    st.session_state[f"{p}kx"] = float(gear.kx)
+    st.session_state[f"{p}cx"] = float(gear.cx)
+    st.session_state[f"{p}wheelmass"] = float(gear.wheelmass)
+
+    st.session_state[f"{p}Dpis"] = float(gear.Dpis)
+    st.session_state[f"{p}Dbh"] = float(gear.Dbh)
+    st.session_state[f"{p}Dt"] = float(gear.Dt)
+    st.session_state[f"{p}Dp"] = float(gear.Dp)
+    st.session_state[f"{p}DInsideBh"] = float(gear.DInsideBh)
+    st.session_state[f"{p}DInsidePalierBh"] = float(gear.DInsidePalierBh)
+    st.session_state[f"{p}Lbh"] = float(gear.Lbh)
+    st.session_state[f"{p}LPalierBh"] = float(gear.LPalierBh)
+    st.session_state[f"{p}excentricite_palier_bh"] = float(gear.excentricite_palier_bh)
+    st.session_state[f"{p}course"] = float(gear.course)
+    st.session_state[f"{p}DTrouPis"] = float(gear.DTrouPis)
+    st.session_state[f"{p}NbTrouPis"] = float(gear.NbTrouPis)
+    st.session_state[f"{p}HauteurPisBh"] = float(gear.HauteurPisBh)
+    st.session_state[f"{p}DTrouDiap"] = float(gear.DTrouDiap)
+    st.session_state[f"{p}NbTrouDiap"] = float(gear.NbTrouDiap)
+    st.session_state[f"{p}tore"] = float(gear.tore)
+    st.session_state[f"{p}fc"] = float(gear.fc)
+    st.session_state[f"{p}fh"] = float(gear.fh)
+    st.session_state[f"{p}endstop_smooth_mm"] = float(gear.endstop_smooth_mm)
+
+    st.session_state[f"{p}Pinitbp"] = float(gear.Pinitbp)
+    st.session_state[f"{p}Vgbp"] = float(gear.Vgbp)
+    st.session_state[f"{p}Vh"] = float(gear.Vh)
+    st.session_state[f"{p}Pinithp"] = float(gear.Pinithp)
+    st.session_state[f"{p}Vghp"] = float(gear.Vghp)
+    st.session_state[f"{p}gamma"] = float(gear.gamma)
+
+    st.session_state[f"{p}visc"] = float(gear.visc)
+    st.session_state[f"{p}rho"] = float(gear.rho)
+    st.session_state[f"{p}aeration_pct"] = float(gear.aeration_pct)
+    st.session_state[f"{p}k_air"] = float(gear.k_air)
+    st.session_state[f"{p}k_huile"] = float(gear.k_huile)
+    st.session_state[f"{p}k_huile_temp_coeff"] = float(gear.k_huile_temp_coeff)
+    st.session_state[f"{p}bulk"] = float(gear.bulk)
+
+    st.session_state[f"{p}diametre_rainure"] = float(gear.diametre_rainure)
+    st.session_state[f"{p}tyre_curve_editor"] = _curve_to_editor_df(
+        gear.tyre_curve,
+        "Déflexion (mm)",
+        "Charge (kN)",
+    )
+    st.session_state[f"{p}mu_curve_editor"] = _curve_to_editor_df(
+        gear.mu_curve,
+        "Slip",
+        "μ",
+    )
+    st.session_state[f"{p}rainures_editor"] = _rainures_to_editor_df(gear.rainures)
+
+
+def _render_gear_full_sections(prefix: str, gear: Any, *, include_strut: bool, title: str) -> None:
+    p = f"ac_{prefix}_"
+    st.subheader(title)
+
+    if include_strut:
+        st.markdown("**Géométrie jambe NLG (StraitStrut)**")
+        a, b = st.columns(2)
+        with a:
+            _num("Strut pitch (deg)", f"{p}strut_pitch", gear.strut_pitch, step=0.1)
+            _num("Strut roll (deg)", f"{p}strut_roll", gear.strut_roll, step=0.1)
+            _num("h pivot Z (mm)", f"{p}h_pivot", gear.h_pivot_z, step=1.0)
+            _num("h guide top (mm)", f"{p}h_gt", gear.h_guide_top_z, step=1.0)
+        with b:
+            _num("h guide bot (mm)", f"{p}h_gb", gear.h_guide_bot_z, step=1.0)
+            _num("Bague guide (mm)", f"{p}bg", gear.bague_guide, step=1.0)
+            _num("Bague piston (mm)", f"{p}bp", gear.bague_piston, step=1.0)
+            _num("Précharge joint (Pa)", f"{p}seal", gear.seal_precomp_pa, step=100.0)
+
+    st.markdown("### Pneu et spring-back")
+    pneu_param_col, tyre_chart_col = st.columns([2, 5])
+    with pneu_param_col:
+        _num("Masse non suspendue (kg)", f"{p}unsprung_mass", gear.unsprung_mass, step=0.5, min_value=0.0)
+        _num("Inertie polaire roue (kg.m²)", f"{p}wheel_inertia", gear.wheel_inertia, step=0.01, min_value=0.0)
+        _num("Rayon libre (mm)", f"{p}unload_radius", gear.unload_radius, step=1.0)
+        _num("Raideur spring-back Kx (N/m)", f"{p}kx", gear.kx, step=1000.0, min_value=0.0)
+        _num("Amortissement spring-back Cx (N.s/m)", f"{p}cx", gear.cx, step=10.0, min_value=0.0)
+        _num("Masse roue spring-back (kg)", f"{p}wheelmass", gear.wheelmass, step=0.5, min_value=0.0)
+
+    with tyre_chart_col:
+        st.markdown("**Courbe pneu** - déflexion (mm) -> charge (kN)")
+        tyre_t_edit = st.data_editor(
+            _curve_to_editor_df(gear.tyre_curve, "Déflexion (mm)", "Charge (kN)"),
+            column_config={
+                "Déflexion (mm)": st.column_config.NumberColumn("Déflexion (mm)", alignment="center", format="%.12g"),
+                "Charge (kN)": st.column_config.NumberColumn("Charge (kN)", alignment="center", format="%.12g"),
+            },
+            width="stretch",
+            key=f"{p}tyre_curve_editor",
+        )
+        tyre_df = tyre_t_edit.T.reset_index(drop=True)
+        tyre_df.columns = ["Déflexion (mm)", "Charge (kN)"]
+        tx, ty = _safe_xy(tyre_df)
+        st.plotly_chart(
+            _mini_chart(tx, ty, "Déflexion (mm)", "Charge (kN)", color="#1f77b4"),
+            width="stretch",
+            key=f"ac_{prefix}_tyre_chart",
+        )
+
+    st.markdown("**Courbe d'adhérence** - taux de glissement -> μ")
+    mu_t_edit = st.data_editor(
+        _curve_to_editor_df(gear.mu_curve, "Slip", "μ"),
+        column_config={
+            "Slip": st.column_config.NumberColumn("Slip", alignment="center", format="%.12g"),
+            "μ": st.column_config.NumberColumn("μ", alignment="center", format="%.12g"),
+        },
+        width="stretch",
+        key=f"{p}mu_curve_editor",
+    )
+    mu_df = mu_t_edit.T.reset_index(drop=True)
+    mu_df.columns = ["Slip", "μ"]
+    mx, my = _safe_xy(mu_df)
+    st.plotly_chart(
+        _mini_chart(mx, my, "Slip", "μ", color="#2ca02c"),
+        width="stretch",
+        key=f"ac_{prefix}_mu_chart",
+    )
+
+    st.markdown("### Amortisseur, ressort gazeux, huile et rainures de la butée hydraulique")
+    col_amort, col_gaz, col_huile = st.columns([1, 1, 1])
+    with col_amort:
+        st.markdown("**Amortisseur (géométrie)**")
+        _num("Ø piston Dpis (mm)", f"{p}Dpis", gear.Dpis, step=0.5)
+        _num("Ø ext. butée hydraulique Dbh (mm)", f"{p}Dbh", gear.Dbh, step=0.5)
+        _num("Ø tige Dt (mm)", f"{p}Dt", gear.Dt, step=0.5)
+        _num("Ø intérieur tige Dp (mm)", f"{p}Dp", gear.Dp, step=0.5)
+        _num("Ø intérieur butée DInsideBh (mm)", f"{p}DInsideBh", gear.DInsideBh, step=0.5)
+        _num("Ø intérieur palier DInsidePalierBh (mm)", f"{p}DInsidePalierBh", gear.DInsidePalierBh, step=0.5)
+        _num("Longueur trou BH (mm)", f"{p}Lbh", gear.Lbh, step=0.5)
+        _num("Longueur palier BH (mm)", f"{p}LPalierBh", gear.LPalierBh, step=0.5)
+        _num("Excentricité BH/palier (mm)", f"{p}excentricite_palier_bh", gear.excentricite_palier_bh, step=0.05)
+        _num("Course totale SAT (mm)", f"{p}course", gear.course, step=1.0)
+        _num("Ø trou piston détente (mm)", f"{p}DTrouPis", gear.DTrouPis, step=0.1)
+        _num("Nb trous piston", f"{p}NbTrouPis", gear.NbTrouPis, step=1.0, min_value=0.0)
+        _num("Hauteur piston BH (mm)", f"{p}HauteurPisBh", gear.HauteurPisBh, step=0.5)
+        _num("Ø trou clapet (mm)", f"{p}DTrouDiap", gear.DTrouDiap, step=0.1)
+        _num("Nb trous clapet", f"{p}NbTrouDiap", gear.NbTrouDiap, step=1.0, min_value=0.0)
+        _num("Section tore joint (mm)", f"{p}tore", gear.tore, step=0.1)
+        _num("Friction sèche joint fc (N/mm)", f"{p}fc", gear.fc, step=1.0)
+        _num("Coeff. friction pression fh", f"{p}fh", gear.fh, step=0.01)
+        _num("Longueur lissage butée (mm)", f"{p}endstop_smooth_mm", gear.endstop_smooth_mm, step=0.1, min_value=1.0e-6)
+
+    with col_gaz:
+        st.markdown("**Ressort gazeux**")
+        _num("Pression init. BP (bar)", f"{p}Pinitbp", gear.Pinitbp, step=0.1)
+        _num("Volume gaz init. BP (cc)", f"{p}Vgbp", gear.Vgbp, step=1.0)
+        _num("Volume d'huile (cc)", f"{p}Vh", gear.Vh, step=1.0)
+        _num("Pression init. HP (bar)", f"{p}Pinithp", gear.Pinithp, step=0.1)
+        _num("Volume gaz init. HP (cc)", f"{p}Vghp", gear.Vghp, step=1.0)
+        _num("Coefficient polytropique γ", f"{p}gamma", gear.gamma, step=0.01)
+        temp = float(st.session_state.get("ac_sim_temp", gear.temperature))
+        adj = compute_gas_oil_at_temperature(
+            Pinitbp=float(st.session_state[f"{p}Pinitbp"]),
+            Vgbp=float(st.session_state[f"{p}Vgbp"]),
+            Vh=float(st.session_state[f"{p}Vh"]),
+            Pinithp=float(st.session_state[f"{p}Pinithp"]),
+            Vghp=float(st.session_state[f"{p}Vghp"]),
+            visc=float(st.session_state.get(f"{p}visc", gear.visc)),
+            temperature=temp,
+        )
+        st.caption(f"Calculé à {temp:g} °C (référence {TEMP_REF_C:g} °C)")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Paramètre": "Pression init. BP (bar)", "Valeur": adj["Pinitbp"]},
+                    {"Paramètre": "Volume gaz init. BP (cc)", "Valeur": adj["Vgbp"]},
+                    {"Paramètre": "Volume d'huile (cc)", "Valeur": adj["Vh"]},
+                    {"Paramètre": "Pression init. HP (bar)", "Valeur": adj["Pinithp"]},
+                    {"Paramètre": "Volume gaz init. HP (cc)", "Valeur": adj["Vghp"]},
+                ]
+            ),
+            column_config={
+                "Paramètre": st.column_config.TextColumn("Paramètre", alignment="right"),
+                "Valeur": st.column_config.NumberColumn("Valeur", alignment="center", format="%.12g"),
+            },
+            hide_index=True,
+            width="stretch",
+        )
+
+    with col_huile:
+        st.markdown("**Huile**")
+        _num("Viscosité cinématique (cSt)", f"{p}visc", gear.visc, step=1.0)
+        _num("Masse volumique ρ (kg/m³)", f"{p}rho", gear.rho, step=1.0)
+        _num("Aération volumique à 25°C (%)", f"{p}aeration_pct", gear.aeration_pct, step=0.1, min_value=0.0)
+        _num("Kair à 25°C (MPa)", f"{p}k_air", gear.k_air, step=0.1)
+        _num("Khuile à 25°C (MPa)", f"{p}k_huile", gear.k_huile, step=1.0)
+        _num("Sensibilité thermique Khuile (1/°C)", f"{p}k_huile_temp_coeff", gear.k_huile_temp_coeff, step=0.001)
+        try:
+            bulk_25 = compute_bulk_modulus_from_aeration(
+                aeration_pct=float(st.session_state[f"{p}aeration_pct"]),
+                k_air=float(st.session_state[f"{p}k_air"]),
+                k_huile=float(st.session_state[f"{p}k_huile"]),
+            )
+            bulk_adj = compute_bulk_modulus_at_temperature(
+                aeration_pct=float(st.session_state[f"{p}aeration_pct"]),
+                k_air_ref=float(st.session_state[f"{p}k_air"]),
+                k_huile_ref=float(st.session_state[f"{p}k_huile"]),
+                temperature=float(st.session_state.get("ac_sim_temp", gear.temperature)),
+                k_huile_temp_coeff=float(st.session_state[f"{p}k_huile_temp_coeff"]),
+            )
+            bulk_mpa = float(bulk_adj["bulk"])
+        except (TypeError, ValueError):
+            bulk_25 = float(gear.bulk)
+            bulk_adj = {"k_air": float(gear.k_air), "k_huile": float(gear.k_huile)}
+            bulk_mpa = float(gear.bulk)
+        st.session_state[f"{p}bulk"] = float(bulk_mpa)
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Paramètre": "Bulk effectif à 25°C (MPa)", "Valeur": bulk_25},
+                    {"Paramètre": "Kair corrigé en T (MPa)", "Valeur": float(bulk_adj["k_air"])},
+                    {"Paramètre": "Khuile corrigé en T (MPa)", "Valeur": float(bulk_adj["k_huile"])},
+                    {"Paramètre": "Bulk effectif courant (MPa)", "Valeur": bulk_mpa},
+                ]
+            ),
+            column_config={
+                "Paramètre": st.column_config.TextColumn("Paramètre", alignment="right"),
+                "Valeur": st.column_config.NumberColumn("Valeur", alignment="center", format="%.12g"),
+            },
+            hide_index=True,
+            width="stretch",
+        )
+
+    st.markdown("**Rainures de la butée hydraulique**")
+    _num("Ø rainure (mm)", f"{p}diametre_rainure", gear.diametre_rainure, step=0.1, min_value=0.0)
+    re_col, rs_col = st.columns([1, 1])
+    with re_col:
+        rain_t_edit = st.data_editor(
+            _rainures_to_editor_df(gear.rainures),
+            column_config={
+                "Début (mm)": st.column_config.NumberColumn("Début (mm)", alignment="center", format="%.12g"),
+                "Fin (mm)": st.column_config.NumberColumn("Fin (mm)", alignment="center", format="%.12g"),
+                "Profondeur (mm)": st.column_config.NumberColumn("Profondeur (mm)", alignment="center", format="%.12g"),
+            },
+            width="stretch",
+            height=150,
+            key=f"{p}rainures_editor",
+        )
+        rainures_df = rain_t_edit.T.reset_index(drop=True)
+        rainures_df.columns = ["Début (mm)", "Fin (mm)", "Profondeur (mm)"]
+    with rs_col:
+        try:
+            rd = rainures_df.apply(pd.to_numeric, errors="coerce").dropna()
+            shim = SimpleNamespace(
+                Dbh=float(st.session_state[f"{p}Dbh"]) / 1000.0,
+                diametre_rainure=float(st.session_state[f"{p}diametre_rainure"]),
+                course=float(st.session_state[f"{p}course"]) / 1000.0,
+                rainures_debut=np.array([float(r[0]) for r in rd.itertuples(index=False)]),
+                rainures_fin=np.array([float(r[1]) for r in rd.itertuples(index=False)]),
+                rainures_profondeur=np.array([float(r[2]) for r in rd.itertuples(index=False)]),
+            )
+            _, tab_sec = build_section_table(shim)
+            course_mm = np.arange(len(tab_sec), dtype=float)
+            sec_mm2 = tab_sec * 1.0e6
+            sfig = go.Figure()
+            sfig.add_trace(
+                go.Scatter(
+                    x=course_mm,
+                    y=sec_mm2,
+                    mode="lines",
+                    line=dict(width=2.5, color="#9467bd"),
+                    name="Section cumulée",
+                )
+            )
+            sfig.update_layout(
+                title=dict(text="Section cumulée butée hydraulique", x=0.5, font=dict(size=12)),
+                height=210,
+                margin=dict(l=8, r=8, t=26, b=8),
+                plot_bgcolor=_PAPER_BG,
+                paper_bgcolor="white",
+                showlegend=False,
+                xaxis=_mini_axis("Course (mm)"),
+                yaxis=_mini_axis("Section (mm²)"),
+            )
+            st.plotly_chart(sfig, width="stretch", key=f"ac_{prefix}_rainure_chart")
+        except (ValueError, TypeError, KeyError, ZeroDivisionError):
+            st.caption("Section cumulée indisponible — vérifier les cotes et Dbh.")
 
 
 def _sync_widgets_from_inputs(inp: Any) -> None:
@@ -363,27 +771,8 @@ def _sync_widgets_from_inputs(inp: Any) -> None:
     st.session_state.ac_mlg_r_y = float(inp.layout.mlg_right_station.y)
     st.session_state.ac_mlg_r_z = float(inp.layout.mlg_right_station.z)
 
-    st.session_state.ac_nlg_strut_pitch = float(inp.nlg.strut_pitch)
-    st.session_state.ac_nlg_strut_roll = float(inp.nlg.strut_roll)
-    st.session_state.ac_nlg_h_pivot = float(inp.nlg.h_pivot_z)
-    st.session_state.ac_nlg_h_gt = float(inp.nlg.h_guide_top_z)
-    st.session_state.ac_nlg_h_gb = float(inp.nlg.h_guide_bot_z)
-    st.session_state.ac_nlg_bg = float(inp.nlg.bague_guide)
-    st.session_state.ac_nlg_bp = float(inp.nlg.bague_piston)
-    st.session_state.ac_nlg_seal = float(inp.nlg.seal_precomp_pa)
-
-    st.session_state.ac_mlg_dpis = float(inp.mlg.Dpis)
-    st.session_state.ac_mlg_dbh = float(inp.mlg.Dbh)
-    st.session_state.ac_mlg_dt = float(inp.mlg.Dt)
-    st.session_state.ac_mlg_course = float(inp.mlg.course)
-    st.session_state.ac_mlg_pinitbp = float(inp.mlg.Pinitbp)
-    st.session_state.ac_mlg_vgbp = float(inp.mlg.Vgbp)
-    st.session_state.ac_mlg_pinithp = float(inp.mlg.Pinithp)
-    st.session_state.ac_mlg_vghp = float(inp.mlg.Vghp)
-    st.session_state.ac_mlg_unsprung = float(inp.mlg.unsprung_mass)
-    st.session_state.ac_mlg_unload = float(inp.mlg.unload_radius)
-    st.session_state.ac_mlg_kx = float(inp.mlg.kx)
-    st.session_state.ac_mlg_cx = float(inp.mlg.cx)
+    _sync_gear_widgets("nlg", inp.nlg, include_strut=True)
+    _sync_gear_widgets("mlg", inp.mlg, include_strut=False)
 
 
 def _set_loaded_aircraft_state(inputs: Any, result, *, name: str, project: str) -> None:
@@ -565,37 +954,20 @@ if st.session_state.ac_show_layout:
         mlg_r_z = _num("MLGd Z", "ac_mlg_r_z", inp.layout.mlg_right_station.z, step=10.0)
 
 if st.session_state.ac_show_nlg:
-    st.subheader("Parametres NLG (specifiques StraitStrut)")
-    a, b = st.columns(2)
-    with a:
-        nlg_strut_pitch = _num("NLG strut pitch (deg)", "ac_nlg_strut_pitch", inp.nlg.strut_pitch, step=0.1)
-        nlg_strut_roll = _num("NLG strut roll (deg)", "ac_nlg_strut_roll", inp.nlg.strut_roll, step=0.1)
-        nlg_h_pivot = _num("NLG h pivot Z (mm)", "ac_nlg_h_pivot", inp.nlg.h_pivot_z, step=1.0)
-        nlg_h_gt = _num("NLG h guide top (mm)", "ac_nlg_h_gt", inp.nlg.h_guide_top_z, step=1.0)
-    with b:
-        nlg_h_gb = _num("NLG h guide bot (mm)", "ac_nlg_h_gb", inp.nlg.h_guide_bot_z, step=1.0)
-        nlg_bg = _num("NLG bague guide (mm)", "ac_nlg_bg", inp.nlg.bague_guide, step=1.0)
-        nlg_bp = _num("NLG bague piston (mm)", "ac_nlg_bp", inp.nlg.bague_piston, step=1.0)
-        nlg_seal = _num("NLG seal precomp (Pa)", "ac_nlg_seal", inp.nlg.seal_precomp_pa, step=100.0)
+    _render_gear_full_sections(
+        "nlg",
+        inp.nlg,
+        include_strut=True,
+        title="Paramètres NLG",
+    )
 
 if st.session_state.ac_show_mlg:
-    st.subheader("Parametres MLG (principaux)")
-    a, b, c = st.columns(3)
-    with a:
-        mlg_dpis = _num("MLG Dpis (mm)", "ac_mlg_dpis", inp.mlg.Dpis, step=0.5)
-        mlg_dbh = _num("MLG Dbh (mm)", "ac_mlg_dbh", inp.mlg.Dbh, step=0.5)
-        mlg_dt = _num("MLG Dt (mm)", "ac_mlg_dt", inp.mlg.Dt, step=0.5)
-        mlg_course = _num("MLG course (mm)", "ac_mlg_course", inp.mlg.course, step=1.0)
-    with b:
-        mlg_pinitbp = _num("MLG Pinit BP (bar)", "ac_mlg_pinitbp", inp.mlg.Pinitbp, step=0.1)
-        mlg_vgbp = _num("MLG Vg BP (cc)", "ac_mlg_vgbp", inp.mlg.Vgbp, step=1.0)
-        mlg_pinithp = _num("MLG Pinit HP (bar)", "ac_mlg_pinithp", inp.mlg.Pinithp, step=0.5)
-        mlg_vghp = _num("MLG Vg HP (cc)", "ac_mlg_vghp", inp.mlg.Vghp, step=1.0)
-    with c:
-        mlg_unsprung = _num("MLG unsprung mass (kg)", "ac_mlg_unsprung", inp.mlg.unsprung_mass, step=0.5)
-        mlg_unload = _num("MLG rayon libre (mm)", "ac_mlg_unload", inp.mlg.unload_radius, step=1.0)
-        mlg_kx = _num("MLG Kx (N/m)", "ac_mlg_kx", inp.mlg.kx, step=1000.0)
-        mlg_cx = _num("MLG Cx (N.s/m)", "ac_mlg_cx", inp.mlg.cx, step=10.0)
+    _render_gear_full_sections(
+        "mlg",
+        inp.mlg,
+        include_strut=False,
+        title="Paramètres MLG",
+    )
 
 
 def _build_aircraft_inputs():
@@ -634,27 +1006,78 @@ def _build_aircraft_inputs():
     out.layout.mlg_left_station = _INPUTS.Point3(float(st.session_state.ac_mlg_l_x), float(st.session_state.ac_mlg_l_y), float(st.session_state.ac_mlg_l_z))
     out.layout.mlg_right_station = _INPUTS.Point3(float(st.session_state.ac_mlg_r_x), float(st.session_state.ac_mlg_r_y), float(st.session_state.ac_mlg_r_z))
 
-    out.nlg.strut_pitch = float(st.session_state.ac_nlg_strut_pitch)
-    out.nlg.strut_roll = float(st.session_state.ac_nlg_strut_roll)
-    out.nlg.h_pivot_z = float(st.session_state.ac_nlg_h_pivot)
-    out.nlg.h_guide_top_z = float(st.session_state.ac_nlg_h_gt)
-    out.nlg.h_guide_bot_z = float(st.session_state.ac_nlg_h_gb)
-    out.nlg.bague_guide = float(st.session_state.ac_nlg_bg)
-    out.nlg.bague_piston = float(st.session_state.ac_nlg_bp)
-    out.nlg.seal_precomp_pa = float(st.session_state.ac_nlg_seal)
+    def _apply_gear(prefix: str, gear_out: Any, gear_in: Any, *, include_strut: bool) -> None:
+        p = f"ac_{prefix}_"
+        if include_strut:
+            gear_out.strut_pitch = float(st.session_state[f"{p}strut_pitch"])
+            gear_out.strut_roll = float(st.session_state[f"{p}strut_roll"])
+            gear_out.h_pivot_z = float(st.session_state[f"{p}h_pivot"])
+            gear_out.h_guide_top_z = float(st.session_state[f"{p}h_gt"])
+            gear_out.h_guide_bot_z = float(st.session_state[f"{p}h_gb"])
+            gear_out.bague_guide = float(st.session_state[f"{p}bg"])
+            gear_out.bague_piston = float(st.session_state[f"{p}bp"])
+            gear_out.seal_precomp_pa = float(st.session_state[f"{p}seal"])
 
-    out.mlg.Dpis = float(st.session_state.ac_mlg_dpis)
-    out.mlg.Dbh = float(st.session_state.ac_mlg_dbh)
-    out.mlg.Dt = float(st.session_state.ac_mlg_dt)
-    out.mlg.course = float(st.session_state.ac_mlg_course)
-    out.mlg.Pinitbp = float(st.session_state.ac_mlg_pinitbp)
-    out.mlg.Vgbp = float(st.session_state.ac_mlg_vgbp)
-    out.mlg.Pinithp = float(st.session_state.ac_mlg_pinithp)
-    out.mlg.Vghp = float(st.session_state.ac_mlg_vghp)
-    out.mlg.unsprung_mass = float(st.session_state.ac_mlg_unsprung)
-    out.mlg.unload_radius = float(st.session_state.ac_mlg_unload)
-    out.mlg.kx = float(st.session_state.ac_mlg_kx)
-    out.mlg.cx = float(st.session_state.ac_mlg_cx)
+        gear_out.unsprung_mass = float(st.session_state[f"{p}unsprung_mass"])
+        gear_out.wheel_inertia = float(st.session_state[f"{p}wheel_inertia"])
+        gear_out.unload_radius = float(st.session_state[f"{p}unload_radius"])
+        gear_out.kx = float(st.session_state[f"{p}kx"])
+        gear_out.cx = float(st.session_state[f"{p}cx"])
+        gear_out.wheelmass = float(st.session_state[f"{p}wheelmass"])
+
+        gear_out.tyre_curve = _read_curve_editor(
+            f"{p}tyre_curve_editor",
+            gear_in.tyre_curve,
+            "Déflexion (mm)",
+            "Charge (kN)",
+        )
+        gear_out.mu_curve = _read_curve_editor(
+            f"{p}mu_curve_editor",
+            gear_in.mu_curve,
+            "Slip",
+            "μ",
+        )
+
+        gear_out.Dpis = float(st.session_state[f"{p}Dpis"])
+        gear_out.Dbh = float(st.session_state[f"{p}Dbh"])
+        gear_out.Dt = float(st.session_state[f"{p}Dt"])
+        gear_out.Dp = float(st.session_state[f"{p}Dp"])
+        gear_out.DInsideBh = float(st.session_state[f"{p}DInsideBh"])
+        gear_out.DInsidePalierBh = float(st.session_state[f"{p}DInsidePalierBh"])
+        gear_out.Lbh = float(st.session_state[f"{p}Lbh"])
+        gear_out.LPalierBh = float(st.session_state[f"{p}LPalierBh"])
+        gear_out.excentricite_palier_bh = float(st.session_state[f"{p}excentricite_palier_bh"])
+        gear_out.course = float(st.session_state[f"{p}course"])
+        gear_out.DTrouPis = float(st.session_state[f"{p}DTrouPis"])
+        gear_out.NbTrouPis = int(round(float(st.session_state[f"{p}NbTrouPis"])))
+        gear_out.HauteurPisBh = float(st.session_state[f"{p}HauteurPisBh"])
+        gear_out.DTrouDiap = float(st.session_state[f"{p}DTrouDiap"])
+        gear_out.NbTrouDiap = int(round(float(st.session_state[f"{p}NbTrouDiap"])))
+        gear_out.tore = float(st.session_state[f"{p}tore"])
+        gear_out.fc = float(st.session_state[f"{p}fc"])
+        gear_out.fh = float(st.session_state[f"{p}fh"])
+        gear_out.endstop_smooth_mm = float(st.session_state[f"{p}endstop_smooth_mm"])
+
+        gear_out.Pinitbp = float(st.session_state[f"{p}Pinitbp"])
+        gear_out.Vgbp = float(st.session_state[f"{p}Vgbp"])
+        gear_out.Vh = float(st.session_state[f"{p}Vh"])
+        gear_out.Pinithp = float(st.session_state[f"{p}Pinithp"])
+        gear_out.Vghp = float(st.session_state[f"{p}Vghp"])
+        gear_out.gamma = float(st.session_state[f"{p}gamma"])
+
+        gear_out.visc = float(st.session_state[f"{p}visc"])
+        gear_out.rho = float(st.session_state[f"{p}rho"])
+        gear_out.aeration_pct = float(st.session_state[f"{p}aeration_pct"])
+        gear_out.k_air = float(st.session_state[f"{p}k_air"])
+        gear_out.k_huile = float(st.session_state[f"{p}k_huile"])
+        gear_out.k_huile_temp_coeff = float(st.session_state[f"{p}k_huile_temp_coeff"])
+        gear_out.bulk = float(st.session_state.get(f"{p}bulk", gear_in.bulk))
+
+        gear_out.diametre_rainure = float(st.session_state[f"{p}diametre_rainure"])
+        gear_out.rainures = _read_rainures_editor(f"{p}rainures_editor", gear_in.rainures)
+
+    _apply_gear("nlg", out.nlg, base.nlg, include_strut=True)
+    _apply_gear("mlg", out.mlg, base.mlg, include_strut=False)
 
     return out
 

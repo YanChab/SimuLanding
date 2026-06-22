@@ -168,7 +168,7 @@ def num(label: str, field: str, default: float, *, step: float = 1.0,
     st.number_input(
         shown,
         step=step,
-        format=fmt,
+        format=fmt or "%.12g",
         help=help,
         min_value=min_value,
         key=skey,
@@ -218,7 +218,7 @@ def num_table(specs: list[tuple], key: str, *, height: int | None = None,
         df,
         column_config={
             "Paramètre": st.column_config.TextColumn("Paramètre", alignment="right"),
-            "Valeur": st.column_config.NumberColumn("Valeur", width="small", alignment="center"),
+            "Valeur": st.column_config.NumberColumn("Valeur", width="small", alignment="center", format="%.12g"),
         },
         disabled=["Paramètre"],
         hide_index=True,
@@ -244,9 +244,7 @@ def value_table(rows: list[tuple[str, float]], *, height: int | None = None) -> 
         df,
         column_config={
             "Paramètre": st.column_config.TextColumn("Paramètre", alignment="right"),
-            "Valeur": st.column_config.NumberColumn(
-                "Valeur", width="small", alignment="center", format="%.4g"
-            ),
+            "Valeur": st.column_config.NumberColumn("Valeur", width="small", alignment="center", format="%.12g"),
         },
         hide_index=True,
         width="content",
@@ -385,9 +383,9 @@ with col_balancier:
                 }
             ),
             column_config={
-                "X": st.column_config.NumberColumn("X", alignment="center"),
-                "Y": st.column_config.NumberColumn("Y", alignment="center"),
-                "Z": st.column_config.NumberColumn("Z", alignment="center"),
+                "X": st.column_config.NumberColumn("X", alignment="center", format="%.12g"),
+                "Y": st.column_config.NumberColumn("Y", alignment="center", format="%.12g"),
+                "Z": st.column_config.NumberColumn("Z", alignment="center", format="%.12g"),
             },
             width="stretch",
             hide_index=True,
@@ -651,7 +649,7 @@ with re_col:
     ).T
     _rain_t.columns = [f"R{i + 1}" for i in range(_rain_t.shape[1])]
     _rain_cfg = {
-        c: st.column_config.NumberColumn(c, alignment="center")
+        c: st.column_config.NumberColumn(c, alignment="center", format="%.12g")
         for c in _rain_t.columns
     }
     rain_t_edit = st.data_editor(
