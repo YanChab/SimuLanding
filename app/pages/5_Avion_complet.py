@@ -243,13 +243,16 @@ inp: Any = st.session_state.aircraft_inputs
 st.markdown(
     """
     <style>
+    /* Barre de lancement collée SOUS l'en-tête de navigation Streamlit
+       (header [data-testid="stHeader"] : ~3.75rem de haut, z-index très élevé). */
     div[data-testid="stVerticalBlock"] > div:has(div.ac-launch-anchor) {
         position: sticky;
-        top: 0;
-        z-index: 100;
+        top: 3.75rem;
+        z-index: 99;
         background-color: var(--background-color, #ffffff);
-        padding: 0.4rem 0 0.6rem 0;
+        padding: 0.5rem 0;
         border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+        box-shadow: 0 4px 8px -6px rgba(0, 0, 0, 0.35);
     }
     </style>
     """,
