@@ -587,7 +587,10 @@ def run_strait_strut(
         acc_tyre_x = (fx_spring_wheel + fspin) / p.wheelmass
 
         # Torseur à l'attache fuselage B
-        tb_res_x = float(tb_sol_cur[0])
+        # Signe horizontal corrigé : l'effort transmis à la cellule suit la même
+        # convention que ``reaction_h`` et que le TrailingArm (MLG), cf. PFD
+        # (docs/PFD_trains.md §5.3). Le code historique reportait +tb_sol_cur[0].
+        tb_res_x = -float(tb_sol_cur[0])
         tb_res_y = float(tb_sol_cur[1])
         tb_res_z = float(tb_sol_cur[2])
         tb_norm = math.sqrt(tb_res_x**2 + tb_res_y**2 + tb_res_z**2)

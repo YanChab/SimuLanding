@@ -542,11 +542,16 @@ class StraitStrutSlot:
         adv = self.state
 
         fz_slot = float(tb_sol[2])
+        # Signe horizontal corrigé : effort transmis à la cellule dans la même
+        # convention que ``reaction_h`` et que le TrailingArm (MLG), cf. PFD
+        # (docs/PFD_trains.md §5.3, §7.5). Sert au report ET à l'injection dans le
+        # moment de tangage (le code historique injectait +tb_sol[0]).
+        fx_cell = -float(tb_sol[0])
         contributions = [
             InterfaceContribution(
                 px=bx_step,
                 pz=bz_step,
-                fx=float(tb_sol[0]),
+                fx=fx_cell,
                 fz=float(tb_sol[2]),
                 mx=float(mom_B[0]),
                 my=float(mom_B[1]),
@@ -590,10 +595,10 @@ class StraitStrutSlot:
             "accmns": (-ftot + tyre_ftyre - p.unsprung_mass * G) / p.unsprung_mass,
             "vitmns": adv.vz_mns_lg,
             "depmns": adv.z_mns_lg,
-            "tors_res_x": float(tb_sol[0]),
+            "tors_res_x": fx_cell,
             "tors_res_z": float(tb_sol[2]),
             "tors_res_norm": math.hypot(float(tb_sol[0]), float(tb_sol[2])),
-            "torsb_fx": float(tb_sol[0]),
+            "torsb_fx": fx_cell,
             "torsb_fz": float(tb_sol[2]),
             "torsb_mx": float(mom_B[0]),
             "torsb_my": float(mom_B[1]),
