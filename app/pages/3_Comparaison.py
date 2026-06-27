@@ -158,8 +158,8 @@ fig.add_trace(go.Scatter(x=res_a.df[x_col], y=res_a.df[y_col], mode="lines", nam
 fig.add_trace(go.Scatter(x=res_b.df[x_col], y=res_b.df[y_col], mode="lines", name=name_b))
 fig.update_layout(
     title=dict(text=f"{y_col} en fonction de {x_col}", y=0.98, yanchor="top"),
-    margin=dict(l=10, r=10, t=80, b=55),
-    legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
+    margin=dict(l=10, r=10, t=56, b=90),
+    legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="left", x=0),
     height=GRAPH_HEIGHT,
     xaxis_title=x_col,
     yaxis_title=y_col,

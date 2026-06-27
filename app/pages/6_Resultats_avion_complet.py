@@ -109,12 +109,12 @@ def _line(x, ys: list[tuple[str, object]], title: str, xlab: str, ylab: str) -> 
     for name, y in ys:
         fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name))
     fig.update_layout(
-        title=title,
+        title=dict(text=title, y=0.98, yanchor="top"),
         xaxis_title=xlab,
         yaxis_title=ylab,
         height=560,
-        margin=dict(l=8, r=8, t=60, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(l=8, r=8, t=56, b=110),
+        legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0),
     )
     return fig
 
@@ -136,13 +136,13 @@ def _line_dual(
     for name, y in right:
         fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name, yaxis="y2", line=dict(dash="dot")))
     fig.update_layout(
-        title=title,
+        title=dict(text=title, y=0.98, yanchor="top"),
         xaxis_title=xlab,
         yaxis=dict(title=left_lab),
         yaxis2=dict(title=right_lab, overlaying="y", side="right", showgrid=False),
         height=560,
-        margin=dict(l=8, r=8, t=60, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(l=8, r=8, t=56, b=110),
+        legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0),
     )
     return fig
 
