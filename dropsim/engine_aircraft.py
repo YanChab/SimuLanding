@@ -437,6 +437,11 @@ class StraitStrutSlot:
         rz0 = station_z0 + float(r_sol_0[2] - self.r0_sol[2])
         return rz0 - self.unload_radius
 
+    def apply_ground_gap(self, gap: float) -> None:
+        """No-op : la déflexion pneu du StraitStrut est calculée en repère sol
+        (monde), donc déjà correcte quand la roue est en l'air (déflexion < 0)."""
+        return None
+
     def finalize_reference(self, z_cg: float, pitch_init: float) -> None:
         _, self.station_z_ref = _rigid_station(self.cg, z_cg, pitch_init, self.station)
         b_sol_ref = self.R_lg_to_sol_init @ self.state.ptB_lg
@@ -627,6 +632,18 @@ class TrailingArmSlot:
         rz0 = station_z0 + float(self.rt.state.R[2] - self.rt.r0[2])
         return rz0 - self.unload_radius
 
+    def apply_ground_gap(self, gap: float) -> None:
+        """Décale le sol local de la jambe vers le bas de ``gap`` (hauteur de la
+        roue au-dessus du sol réel à l'équilibre initial, due à l'assiette).
+
+        Le noyau TrailingArm calcule la déflexion pneu contre un sol local fixé
+        à l'initialisation (déflexion nulle au départ). Dans l'assemblage avion,
+        un train soulevé par l'assiette doit rester en l'air tant que sa roue
+        n'a pas descendu de ``gap`` ; on abaisse donc ``S`` d'autant.
+        """
+        if gap:
+            self.rt.state.S[2] -= float(gap)
+
     def finalize_reference(self, z_cg: float, pitch_init: float) -> None:
         _, self.station_z_ref = _rigid_station(self.cg, z_cg, pitch_init, self.station)
         b_off = self.rt.state.B - self.rt.r0
@@ -795,10 +812,14 @@ def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None)
 
     # Position initiale avion imposée : roue la plus basse tangente au sol,
     # après équilibrage local de chaque train.
-    z_bottom_ref = min(slot.reference_bottom_z(p.pitch) for slot in slots)
+    bottoms = [slot.reference_bottom_z(p.pitch) for slot in slots]
+    z_bottom_ref = min(bottoms)
     z_cg = -z_bottom_ref
-    for slot in slots:
+    for slot, bottom in zip(slots, bottoms):
         slot.finalize_reference(z_cg, p.pitch)
+        # Hauteur de la roue au-dessus du sol à l'équilibre initial (>= 0) : le
+        # train le plus bas est tangent (gap 0), les autres sont en l'air.
+        slot.apply_ground_gap(bottom - z_bottom_ref)
 
     vz_cg = -p.vz
     az_cg = 0.0

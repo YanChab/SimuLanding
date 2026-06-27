@@ -101,6 +101,28 @@ def test_gear_inputs_for_uses_gear_own_mass_not_aircraft_total():
     assert nlg.masse != ac.body.masse
 
 
+def test_pitched_mlg_stays_airborne_no_phantom_compression():
+    """À forte assiette nez bas, le NLG touche en premier ; le MLG, soulevé loin
+    du sol, ne doit ni générer d'effort pneu ni se comprimer tant qu'il est en
+    l'air (régression : l'amortisseur MLG se comprimait à tort)."""
+    ac = default_aircraft_inputs()
+    ac.drop.pitch = 15.0  # nez bas marqué -> MLG très au-dessus du sol
+    ac.drop.vz = 1.0      # chute douce pour que le run aille au bout sans buter le NLG
+    ac.simulation.temps_simu = 0.2
+    out = run_aircraft(ac.to_si())
+    d = out.data
+
+    # MLG en l'air : aucune compression ni effort pneu, au départ et tout du long.
+    assert d["mlg_left_stroke"][0] < 1.0e-4
+    assert d["mlg_right_stroke"][0] < 1.0e-4
+    assert np.max(d["mlg_left_tyre_ftyre"]) <= 1.0e-6
+    assert np.max(d["mlg_right_tyre_ftyre"]) <= 1.0e-6
+    assert np.allclose(d["mlg_left_stroke"], 0.0, atol=1.0e-4)
+    # Le NLG, lui, encaisse bien la chute (effort pneu et course non nuls).
+    assert np.max(d["nlg_tyre_ftyre"]) > 0.0
+    assert np.max(d["nlg_stroke"]) > 0.0
+
+
 def test_gear_drop_override_layering():
     """Les surcharges train isolé prennent le pas, le reste hérite du train."""
     ac = default_aircraft_inputs()
