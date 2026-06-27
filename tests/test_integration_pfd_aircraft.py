@@ -21,3 +21,15 @@ def test_fuselage_pfd_matches_aircraft_dynamics():
     ]:
         sc = max(1.0, scale)
         assert np.max(np.abs(r[kp] - r[kh])) / sc < 1e-9, f"{kp} ne reproduit pas {kh}"
+
+
+def test_aircraft_arm_mass_coupling():
+    """Masse balancier MLG active dans la dynamique avion couplée (§6.7)."""
+    inp, _r, _m = ds.load_simulation(_REF)
+    base = run_aircraft_pfd(inp, m_arm=0.0)
+    heavy = run_aircraft_pfd(inp, m_arm=20.0)
+    # La fermeture PFD (9)-(10) reste exacte même avec masse active.
+    sc = max(1.0, float(np.max(np.abs(heavy["theta_ddot_hist"]))))
+    assert np.max(np.abs(heavy["theta_ddot"] - heavy["theta_ddot_hist"])) / sc < 1e-9
+    # La masse change bien la trajectoire avion.
+    assert np.max(np.abs(heavy["z_ddot"] - base["z_ddot"])) > 1e-2

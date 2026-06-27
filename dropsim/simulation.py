@@ -424,7 +424,7 @@ def run_pfd_simulation(
     )
 
     if is_aircraft:
-        return run_aircraft_pfd(inputs)
+        return run_aircraft_pfd(inputs, m_arm=m_arm)
     if model_kind == "strait_strut":
         ss = inputs  # type: ignore[assignment]
         alfap_rad = getattr(ss, "strut_pitch", 0.0) * math.pi / 180.0 + params.pitch

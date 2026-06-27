@@ -631,13 +631,14 @@ class StraitStrutSlot:
 class TrailingArmSlot:
     """Slot de train de type TrailingArm (interfaces = points B et C)."""
 
-    def __init__(self, *, prefix, params, station, cg, vx, pitch_init):
+    def __init__(self, *, prefix, params, station, cg, vx, pitch_init, arm_mass=0.0):
         self.prefix = prefix
         self.model_kind = "trailing_arm"
         self.cg = cg
         self.station = station
         self.unload_radius = float(params.unload_radius)
         self.x_offset = float(station[0] - cg[0])
+        self.arm_mass = float(arm_mass)   # masse balancier active (PFD §6.7) ; 0 = historique
         self.rt = _init_trailing_runtime(params)
         self.station_z_ref = 0.0
         self.b_body = (0.0, 0.0)
@@ -670,6 +671,26 @@ class TrailingArmSlot:
 
     def step(self, *, station_x, station_z, zsup, vsup, asup, theta, dt) -> SlotStepResult:
         rt = self.rt
+        st = rt.state
+
+        # --- Balancier corps rigide (PFD §6.7) : accélération angulaire (6b) -----
+        #     imposée au noyau via al_y_override (B décalé du support, comme
+        #     l'historique). arm_mass = 0 ⇒ override None ⇒ comportement inchangé.
+        al_y_override = None
+        if self.arm_mass > 0.0:
+            B_shift = st.B.copy()
+            B_shift[2] += zsup - st.depms
+            Gp = 0.5 * (B_shift + st.R)
+            I_G = rt.p.jyy - self.arm_mass * ((Gp[0] - B_shift[0]) ** 2 + (Gp[2] - B_shift[2]) ** 2)
+            TA = np.array([st.ta_x, st.ta_y, st.ta_z])
+            TR = np.array([st.tr_x, st.tr_y, st.tr_z])
+            TB = np.array([st.tb_x, st.tb_y, st.tb_z])
+            moment_y = 0.0
+            for P, T in ((st.A, TA), (st.R, TR), (B_shift, TB)):
+                r = P - Gp
+                moment_y += r[2] * T[0] - r[0] * T[2]
+            al_y_override = moment_y / I_G
+
         step = _trailing_arm_local_step(
             rt.p,
             rt.gas,
@@ -690,8 +711,23 @@ class TrailingArmSlot:
             fast_time_scale=rt.fast_time_scale,
             integrator_mode=rt.integrator_mode,
             It=dt * rt.fast_time_scale,
+            al_y_override=al_y_override,
         )
         state = rt.state
+
+        # --- Effort pivot rigide (6a) : T_B = m'·a_G' − T_A − T_R − P' ----------
+        if self.arm_mass > 0.0:
+            Gp = 0.5 * (state.B + state.R)
+            rBG = Gp - state.B
+            a_G = (np.array([0.0, 0.0, asup])
+                   + al_y_override * np.array([rBG[2], 0.0, -rBG[0]])
+                   - state.om_y ** 2 * rBG)
+            TA = np.array([state.ta_x, state.ta_y, state.ta_z])
+            TR = np.array([state.tr_x, state.tr_y, state.tr_z])
+            TB = self.arm_mass * a_G - TA - TR - np.array([0.0, 0.0, -self.arm_mass * G])
+            state.tb_x, state.tb_y, state.tb_z = float(TB[0]), float(TB[1]), float(TB[2])
+            step = dict(step)
+            step["fb_x"], step["fb_z"] = float(-TB[0]), float(-TB[2])
 
         b_off_x, b_off_z = _off_body_to_world(self.b_body[0], self.b_body[1], theta)
         c_off_x, c_off_z = _off_body_to_world(self.c_body[0], self.c_body[1], theta)
@@ -774,7 +810,7 @@ class TrailingArmSlot:
         return SlotStepResult(contributions=contributions, fz_slot=fz_slot, diag=diag, geom=geom)
 
 
-def _build_slot(prefix, model_kind, params, strut_geom, station, cg, vx, pitch_init):
+def _build_slot(prefix, model_kind, params, strut_geom, station, cg, vx, pitch_init, arm_mass=0.0):
     """Construit le slot adapté au type de train choisi pour la position."""
     if model_kind == "strait_strut":
         if strut_geom is None:
@@ -789,11 +825,17 @@ def _build_slot(prefix, model_kind, params, strut_geom, station, cg, vx, pitch_i
             pitch_init=pitch_init,
         )
     return TrailingArmSlot(
-        prefix=prefix, params=params, station=station, cg=cg, vx=vx, pitch_init=pitch_init
+        prefix=prefix, params=params, station=station, cg=cg, vx=vx,
+        pitch_init=pitch_init, arm_mass=arm_mass,
     )
 
 
-def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None) -> EngineOutput:
+def run_aircraft(
+    p: AircraftParamsSI,
+    progress_callback: callable | None = None,
+    *,
+    mlg_arm_mass: float = 0.0,
+) -> EngineOutput:
     dt = p.it
     n_steps = max(1, round(p.temps_simu / dt))
     n_out = n_steps + 1
@@ -817,10 +859,12 @@ def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None)
         "nlg", p.nlg_model_kind, p.nlg, p.nlg_strut, p.nlg_station, p.cg, p.vx, p.pitch
     )
     mlg_l_slot = _build_slot(
-        "mlg_left", p.mlg_model_kind, p.mlg, p.mlg_strut, p.mlg_left_station, p.cg, p.vx, p.pitch
+        "mlg_left", p.mlg_model_kind, p.mlg, p.mlg_strut, p.mlg_left_station, p.cg, p.vx, p.pitch,
+        arm_mass=mlg_arm_mass,
     )
     mlg_r_slot = _build_slot(
-        "mlg_right", p.mlg_model_kind, mlg_r_params, mlg_r_strut, p.mlg_right_station, p.cg, p.vx, p.pitch
+        "mlg_right", p.mlg_model_kind, mlg_r_params, mlg_r_strut, p.mlg_right_station, p.cg, p.vx, p.pitch,
+        arm_mass=mlg_arm_mass,
     )
     slots = [nlg_slot, mlg_l_slot, mlg_r_slot]
 

@@ -22,9 +22,13 @@ from .inputs import AircraftInputs
 from .integration_pfd import InterfaceLoad, fuselage_accelerations
 
 
-def run_aircraft_pfd(inp: AircraftInputs) -> dict[str, np.ndarray]:
-    """Reconstruit (z̈_cg, θ̈) du fuselage par le PFD (§7) et compare à l'historique."""
-    out = run_aircraft(inp.to_si())
+def run_aircraft_pfd(inp: AircraftInputs, *, m_arm: float = 0.0) -> dict[str, np.ndarray]:
+    """Reconstruit (z̈_cg, θ̈) du fuselage par le PFD (§7) et compare à l'historique.
+
+    ``m_arm`` : masse balancier MLG active dans la **dynamique avion couplée**
+    (PFD §6.7). 0 ⇒ identique au moteur historique ; > 0 ⇒ change la trajectoire.
+    """
+    out = run_aircraft(inp.to_si(), mlg_arm_mass=m_arm)
     d = out.data
     g = out.geometry or {}
 
