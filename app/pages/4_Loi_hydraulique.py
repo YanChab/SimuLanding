@@ -24,7 +24,7 @@ _APP = Path(__file__).resolve().parent.parent
 if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
-from dropsim import default_trailing_arm_inputs, default_strait_strut_inputs  # noqa: E402
+from dropsim import default_aircraft_inputs  # noqa: E402
 from dropsim.errors import SimError  # noqa: E402
 from dropsim.gas import GasSpring  # noqa: E402
 from dropsim.metering import build_section_table  # noqa: E402
@@ -39,17 +39,32 @@ apply_theme()
 
 st.title("🧮 Loi hydraulique")
 st.caption(
-    "Tableau de l'effort total amortisseur en fonction de la vitesse et de la course "
-    "(calcul base sur les parametres saisis)."
+    "Effort total amortisseur en fonction de la vitesse et de la course, pour le "
+    "train choisi (NLG ou MLG) de la configuration « Avion complet »."
 )
 
-if "inputs" not in st.session_state:
-    if st.session_state.get("model_kind", "trailing_arm") == "strait_strut":
-        st.session_state.inputs = default_strait_strut_inputs()
-    else:
-        st.session_state.inputs = default_trailing_arm_inputs()
 
-inputs = st.session_state.inputs
+def _aircraft_inputs():
+    ac = st.session_state.get("aircraft_inputs")
+    if ac is None or getattr(ac, "model_kind", "") != "aircraft":
+        ac = default_aircraft_inputs()
+    return ac
+
+
+_ac = _aircraft_inputs()
+_gear_label = st.selectbox(
+    "Train",
+    ["NLG (train avant)", "MLG (train principal)"],
+    key="hydrau_gear",
+    help="La loi est calculée à partir des paramètres de ce train dans la "
+    "dernière configuration lancée/chargée sur la page Avion complet.",
+)
+inputs = _ac.nlg if _gear_label.startswith("NLG") else _ac.mlg
+_GEAR_KIND_LABELS = {"strait_strut": "StraitStrut", "trailing_arm": "TrailingArm"}
+st.caption(
+    f"Train sélectionné : **{_gear_label}** — type "
+    f"**{_GEAR_KIND_LABELS.get(getattr(inputs, 'model_kind', ''), '?')}**."
+)
 
 
 def _compute_matrix_for_params(p_case, d_values: np.ndarray, v_values: np.ndarray) -> np.ndarray:
