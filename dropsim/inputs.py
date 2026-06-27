@@ -949,6 +949,26 @@ class AircraftDropConfig:
 
 
 @dataclass
+class AircraftGearDropOverride:
+    """Conditions de chute spécifiques à un train pour un run *isolé*.
+
+    Chaque champ ``None`` signifie « hériter de la configuration globale avion »
+    (masse/lift du corps, vitesses/assiette de la chute, durée/pas de simu).
+    Ces surcharges ne sont consommées que par les runs NLG-seul / MLG-seul
+    (``AircraftInputs.gear_inputs_for``), jamais par la simulation avion complet.
+    """
+
+    masse: float | None = None
+    vz: float | None = None
+    vx: float | None = None
+    lift: float | None = None
+    pitch: float | None = None
+    roll: float | None = None
+    temps_simu: float | None = None
+    it: float | None = None
+
+
+@dataclass
 class AircraftGearLayoutInputs:
     """Implantation simplifiée des trains dans le repère avion (mm)."""
 
@@ -1056,14 +1076,19 @@ class AircraftInputs:
     simulation: AircraftSimulationInputs = field(default_factory=AircraftSimulationInputs)
     drop: AircraftDropConfig = field(default_factory=AircraftDropConfig)
     layout: AircraftGearLayoutInputs = field(default_factory=AircraftGearLayoutInputs)
-    nlg: StraitStrutInputs = field(default_factory=default_strait_strut_inputs)
+    nlg: TrailingArmInputs = field(default_factory=default_strait_strut_inputs)
     mlg: TrailingArmInputs = field(default_factory=default_trailing_arm_inputs)
+    # Surcharges de conditions de chute par train, pour les runs isolés.
+    nlg_drop: AircraftGearDropOverride = field(default_factory=AircraftGearDropOverride)
+    mlg_drop: AircraftGearDropOverride = field(default_factory=AircraftGearDropOverride)
 
-    def _compose_nlg_inputs(self) -> StraitStrutInputs:
-        """Projette les réglages globaux avion sur la config locale NLG."""
+    def _compose_gear(self, base: "TrailingArmInputs") -> "TrailingArmInputs":
+        """Projette les conditions GLOBALES avion (masse/lift corps, chute) sur la
+        config locale d'un train, pour la simulation avion complet *couplée*. Le
+        ``model_kind`` du train est préservé (le type de la position n'est pas
+        écrasé)."""
         return replace(
-            self.nlg,
-            model_kind="strait_strut",
+            base,
             masse=self.body.masse,
             vz=self.drop.vz,
             vx=self.drop.vx,
@@ -1079,19 +1104,47 @@ class AircraftInputs:
             temperature=self.simulation.temperature,
         )
 
-    def _compose_mlg_inputs(self) -> TrailingArmInputs:
-        """Projette les réglages globaux avion sur la config locale MLG."""
+    def _compose_nlg_inputs(self) -> "TrailingArmInputs":
+        """Config NLG projetée avec les conditions globales (run avion complet)."""
+        return self._compose_gear(self.nlg)
+
+    def _compose_mlg_inputs(self) -> "TrailingArmInputs":
+        """Config MLG projetée avec les conditions globales (run avion complet)."""
+        return self._compose_gear(self.mlg)
+
+    def gear_inputs_for(self, position: str) -> "TrailingArmInputs":
+        """Retourne un jeu d'entrées train isolé complet pour une position.
+
+        Contrairement au run avion couplé, un run isolé utilise les conditions de
+        chute *propres au train* (masse supportée, Vz, assiette… stockées sur
+        l'objet du train et physiquement dimensionnées), avec d'éventuelles
+        surcharges ``nlg_drop`` / ``mlg_drop`` par-dessus. Seuls les réglages
+        numériques (intégrateur, solveur, tolérance, température) sont
+        synchronisés depuis la config de simulation avion, pour cohérence de la
+        page unique. Le résultat se passe directement à ``run_simulation``.
+        """
+        if position == "nlg":
+            base, override = self.nlg, self.nlg_drop
+        elif position == "mlg":
+            base, override = self.mlg, self.mlg_drop
+        else:
+            raise ValueError(f"Position de train inconnue : {position!r} (attendu 'nlg' ou 'mlg').")
+
+        o = override or AircraftGearDropOverride()
+
+        def pick(value, fallback):
+            return fallback if value is None else value
+
         return replace(
-            self.mlg,
-            model_kind="trailing_arm",
-            masse=self.body.masse,
-            vz=self.drop.vz,
-            vx=self.drop.vx,
-            lift=self.body.lift,
-            pitch=self.drop.pitch,
-            roll=0.0,
-            temps_simu=self.simulation.temps_simu,
-            it=self.simulation.it,
+            base,
+            masse=pick(o.masse, base.masse),
+            vz=pick(o.vz, base.vz),
+            vx=pick(o.vx, base.vx),
+            lift=pick(o.lift, base.lift),
+            pitch=pick(o.pitch, base.pitch),
+            roll=pick(o.roll, base.roll),
+            temps_simu=pick(o.temps_simu, base.temps_simu),
+            it=pick(o.it, base.it),
             integrator=self.simulation.integrator,
             damper_core_solver=self.simulation.damper_core_solver,
             hydraulic_error_tol=self.simulation.hydraulic_error_tol,
@@ -1209,14 +1262,16 @@ class AircraftInputs:
             nlg_station=pt(self.layout.nlg_station),
             mlg_left_station=pt(self.layout.mlg_left_station),
             mlg_right_station=pt(self.layout.mlg_right_station),
-            nlg_strut_pitch=self.nlg.strut_pitch * U.DEG_TO_RAD,
-            nlg_strut_roll=self.nlg.strut_roll * U.DEG_TO_RAD,
-            nlg_h_pivot_z=self.nlg.h_pivot_z * U.MM_TO_M,
-            nlg_h_guide_top_z=self.nlg.h_guide_top_z * U.MM_TO_M,
-            nlg_h_guide_bot_z=self.nlg.h_guide_bot_z * U.MM_TO_M,
-            nlg_bague_guide=self.nlg.bague_guide * U.MM_TO_M,
-            nlg_bague_piston=self.nlg.bague_piston * U.MM_TO_M,
-            nlg_seal_precomp_pa=self.nlg.seal_precomp_pa,
+            # Champs plats hérités (lecture seule, désormais inutilisés par le
+            # moteur qui lit le conteneur nlg_strut). Tolèrent un NLG non-strut.
+            nlg_strut_pitch=getattr(self.nlg, "strut_pitch", 0.0) * U.DEG_TO_RAD,
+            nlg_strut_roll=getattr(self.nlg, "strut_roll", 0.0) * U.DEG_TO_RAD,
+            nlg_h_pivot_z=getattr(self.nlg, "h_pivot_z", 0.0) * U.MM_TO_M,
+            nlg_h_guide_top_z=getattr(self.nlg, "h_guide_top_z", 0.0) * U.MM_TO_M,
+            nlg_h_guide_bot_z=getattr(self.nlg, "h_guide_bot_z", 0.0) * U.MM_TO_M,
+            nlg_bague_guide=getattr(self.nlg, "bague_guide", 0.0) * U.MM_TO_M,
+            nlg_bague_piston=getattr(self.nlg, "bague_piston", 0.0) * U.MM_TO_M,
+            nlg_seal_precomp_pa=getattr(self.nlg, "seal_precomp_pa", 0.0),
             nlg=nlg_inputs.to_si(),
             mlg=mlg_inputs.to_si(),
             nlg_model_kind=nlg_inputs.model_kind,
@@ -1245,6 +1300,7 @@ __all__ = [
     "AircraftBodyInputs",
     "AircraftSimulationInputs",
     "AircraftDropConfig",
+    "AircraftGearDropOverride",
     "AircraftGearLayoutInputs",
     "AircraftInputs",
     "AircraftParamsSI",

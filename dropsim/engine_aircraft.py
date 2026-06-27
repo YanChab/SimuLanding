@@ -768,9 +768,16 @@ def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None)
     # paramètres miroir en Y lorsqu'il s'agit d'un TrailingArm.
     if p.mlg_model_kind == "trailing_arm":
         mlg_r_params = _mirror_trailing_params_y(p.mlg)
+        mlg_r_strut = p.mlg_strut
     else:
+        # StraitStrut au MLG : la géométrie de jambe est portée par le conteneur
+        # strut ; on reflète le roll de jambe pour le train droit.
         mlg_r_params = p.mlg
-    mlg_r_strut = p.mlg_strut
+        mlg_r_strut = (
+            replace(p.mlg_strut, strut_roll=-p.mlg_strut.strut_roll)
+            if p.mlg_strut is not None
+            else None
+        )
 
     nlg_slot = _build_slot(
         "nlg", p.nlg_model_kind, p.nlg, p.nlg_strut, p.nlg_station, p.cg, p.vx, p.pitch
