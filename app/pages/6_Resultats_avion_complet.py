@@ -14,6 +14,7 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
+from dropsim import storage as ds_storage
 from dropsim.tyre import r_eff
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
@@ -29,13 +30,62 @@ apply_theme()
 
 st.title("Avion complet - Resultats")
 
+
+def _set_loaded_aircraft_state(inputs, result, *, name: str, project: str) -> None:
+    """Réinjecte une simulation avion complet chargée dans la session.
+
+    Mêmes clés que la page Avion complet, afin que la navigation entre les deux
+    pages reste cohérente. Les états de formulaire ``ac_*`` sont purgés pour que
+    la page de saisie se réamorce depuis les entrées chargées.
+    """
+    st.session_state.aircraft_inputs = inputs
+    st.session_state.aircraft_result = result
+    st.session_state.aircraft_result_name = name
+    st.session_state.aircraft_current_project = project
+    for k in list(st.session_state.keys()):
+        if k.startswith(("ac_nlg", "ac_mlg", "ac_body", "ac_sim", "ac_drop", "ac_cg", "ac_lay")):
+            del st.session_state[k]
+
+
+with st.expander("Charger une simulation avion complet sauvegardée", expanded=False):
+    projects = ds_storage.list_projects()
+    if not projects:
+        st.caption("Aucune sauvegarde disponible.")
+    else:
+        current_project = st.session_state.get("aircraft_current_project", ds_storage.DEFAULT_PROJECT)
+        load_index = projects.index(current_project) if current_project in projects else 0
+        project_name = st.selectbox("Projet", projects, index=load_index, key="ac_res_load_project")
+        entries = [e for e in ds_storage.list_saved(project=project_name) if e.get("project") == project_name]
+        if not entries:
+            st.caption("Aucune sauvegarde dans ce projet.")
+        else:
+            labels = {f"{e['name']} · {e['saved_at'][:16].replace('T', ' ')}": e["path"] for e in entries}
+            selected = st.selectbox("Sauvegardes disponibles", list(labels.keys()), key="ac_res_load_choice")
+            if st.button("Charger", key="ac_res_load_btn", use_container_width=True):
+                loaded_inputs, loaded_result, meta = ds_storage.load_simulation(labels[selected])
+                if getattr(loaded_inputs, "model_kind", "") != "aircraft":
+                    st.error("La sauvegarde sélectionnée n'est pas une simulation avion complet.", icon="🛑")
+                else:
+                    _set_loaded_aircraft_state(
+                        loaded_inputs, loaded_result,
+                        name=meta.get("name", "Simulation avion complet"),
+                        project=meta.get("project", ds_storage.DEFAULT_PROJECT),
+                    )
+                    st.rerun()
+
+
 result = st.session_state.get("aircraft_result")
 if result is None:
     st.info(
-        "Aucun resultat avion complet en session. Lancez une simulation depuis la page Avion complet.",
+        "Aucun resultat avion complet en session. Lancez une simulation depuis la page "
+        "Avion complet, ou chargez une simulation sauvegardée ci-dessus.",
         icon="ℹ️",
     )
     st.stop()
+
+loaded_name = st.session_state.get("aircraft_result_name")
+if loaded_name:
+    st.caption(f"Résultat affiché : **{loaded_name}**")
 
 df = result.df
 df_energy = result.full_df if getattr(result, "full_df", None) is not None else df
