@@ -69,6 +69,34 @@ def _line(x, ys: list[tuple[str, object]], title: str, xlab: str, ylab: str) -> 
     return fig
 
 
+def _line_dual(
+    x,
+    left: list[tuple[str, object]],
+    right: list[tuple[str, object]],
+    title: str,
+    xlab: str,
+    left_lab: str,
+    right_lab: str,
+) -> go.Figure:
+    """Courbes avec efforts sur l'axe gauche et moments sur l'axe vertical
+    secondaire (droite). Les moments sont tracés en pointillés."""
+    fig = go.Figure()
+    for name, y in left:
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name))
+    for name, y in right:
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name, yaxis="y2", line=dict(dash="dot")))
+    fig.update_layout(
+        title=title,
+        xaxis_title=xlab,
+        yaxis=dict(title=left_lab),
+        yaxis2=dict(title=right_lab, overlaying="y", side="right", showgrid=False),
+        height=560,
+        margin=dict(l=8, r=8, t=60, b=40),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    )
+    return fig
+
+
 def _cumtrapz(time_s: np.ndarray, signal: np.ndarray) -> np.ndarray:
     if len(time_s) == 0:
         return np.array([], dtype=float)
@@ -585,6 +613,42 @@ s5.metric(contact_label, contact_metric)
 t = df["Temps (s)"]
 
 
+def _liaison_charts(label: str, base: str, *, has_c: bool, b_kind: str) -> None:
+    """Trace, pour chaque liaison du train avec la structure, les efforts (axe
+    gauche) et les moments (axe vertical secondaire). ``base`` est le préfixe de
+    colonne ("NLG", "MLG left", "MLG right"). ``b_kind`` qualifie la liaison B
+    ("encastrement" pour un StraitStrut, "pivot" pour un TrailingArm)."""
+    fx, fz = f"{base}.Torseur@B.Fx (N)", f"{base}.Torseur@B.Fz (N)"
+    mx, mz = f"{base}.Torseur@B.Mx (N.m)", f"{base}.Torseur@B.Mz (N.m)"
+    my = f"{base}.Torseur@B.My tangage (N.m)"
+    if _require_columns([fx, fz, mx, mz], f"{label} - Liaison B"):
+        moments = [("Moment Mx", df[mx]), ("Moment Mz", df[mz])]
+        if my in df.columns:
+            moments.insert(1, ("Moment My (tangage)", df[my]))
+        st.plotly_chart(
+            _line_dual(
+                t,
+                [("Effort Fx", df[fx]), ("Effort Fz", df[fz])],
+                moments,
+                f"{label} — Liaison {b_kind} B : efforts (gauche) + moments (axe secondaire)",
+                "Temps (s)", "Effort (N)", "Moment (N.m)",
+            ),
+            use_container_width=True,
+        )
+    if has_c:
+        cfx, cfz = f"{base}.Torseur@C.Fx (N)", f"{base}.Torseur@C.Fz (N)"
+        if _require_columns([cfx, cfz], f"{label} - Liaison C"):
+            st.plotly_chart(
+                _line(
+                    t,
+                    [("Effort Fx", df[cfx]), ("Effort Fz", df[cfz])],
+                    f"{label} — Liaison rotule C : efforts (pas de moment transmis)",
+                    "Temps (s)", "Effort (N)",
+                ),
+                use_container_width=True,
+            )
+
+
 tab_aircraft, tab_mlg, tab_nlg = st.tabs(["Avion complet", "Section MLG", "Section NLG"])
 
 with tab_aircraft:
@@ -924,19 +988,7 @@ with tab_mlg:
             ], "MLG gauche - Accélération et vitesse", "Temps (s)", "g / m.s⁻¹"), use_container_width=True)
 
     with mlg_l_tabs[6]:
-        if _require_columns([
-            "MLG left.Torseur@C.Fx (N)", "MLG left.Torseur@C.Fz (N)", "MLG left.Torseur@B.Fx (N)", "MLG left.Torseur@B.Fz (N)", "MLG left.Torseur@B.Mx (N.m)", "MLG left.Torseur@B.Mz (N.m)"
-        ], "MLG gauche - Torseur"):
-            st.plotly_chart(_line(t, [
-                ("Effort rotule C - X", df["MLG left.Torseur@C.Fx (N)"]),
-                ("Effort rotule C - Z", df["MLG left.Torseur@C.Fz (N)"]),
-                ("Effort pivot B - X", df["MLG left.Torseur@B.Fx (N)"]),
-                ("Effort pivot B - Z", df["MLG left.Torseur@B.Fz (N)"]),
-            ], "MLG gauche - Efforts de liaison", "Temps (s)", "Effort (N)"), use_container_width=True)
-            st.plotly_chart(_line(t, [
-                ("Moment X au pivot B", df["MLG left.Torseur@B.Mx (N.m)"]),
-                ("Moment Z au pivot B", df["MLG left.Torseur@B.Mz (N.m)"]),
-            ], "MLG gauche - Moments de liaison", "Temps (s)", "Moment (N.m)"), use_container_width=True)
+        _liaison_charts("MLG gauche", "MLG left", has_c=True, b_kind="pivot")
 
     st.markdown("### MLG droite")
     if e_mlg_r is not None:
@@ -1012,19 +1064,7 @@ with tab_mlg:
             ], "MLG droite - Accélération et vitesse", "Temps (s)", "g / m.s⁻¹"), use_container_width=True)
 
     with mlg_r_tabs[6]:
-        if _require_columns([
-            "MLG right.Torseur@C.Fx (N)", "MLG right.Torseur@C.Fz (N)", "MLG right.Torseur@B.Fx (N)", "MLG right.Torseur@B.Fz (N)", "MLG right.Torseur@B.Mx (N.m)", "MLG right.Torseur@B.Mz (N.m)"
-        ], "MLG droite - Torseur"):
-            st.plotly_chart(_line(t, [
-                ("Effort rotule C - X", df["MLG right.Torseur@C.Fx (N)"]),
-                ("Effort rotule C - Z", df["MLG right.Torseur@C.Fz (N)"]),
-                ("Effort pivot B - X", df["MLG right.Torseur@B.Fx (N)"]),
-                ("Effort pivot B - Z", df["MLG right.Torseur@B.Fz (N)"]),
-            ], "MLG droite - Efforts de liaison", "Temps (s)", "Effort (N)"), use_container_width=True)
-            st.plotly_chart(_line(t, [
-                ("Moment X au pivot B", df["MLG right.Torseur@B.Mx (N.m)"]),
-                ("Moment Z au pivot B", df["MLG right.Torseur@B.Mz (N.m)"]),
-            ], "MLG droite - Moments de liaison", "Temps (s)", "Moment (N.m)"), use_container_width=True)
+        _liaison_charts("MLG droite", "MLG right", has_c=True, b_kind="pivot")
 
 with tab_nlg:
     e_nlg = None
@@ -1108,17 +1148,7 @@ with tab_nlg:
             ], "NLG - Accélération et vitesse", "Temps (s)", "g / m.s⁻¹"), use_container_width=True)
 
     with nlg_tabs[6]:
-        if _require_columns([
-            "NLG.Torseur@B.Fx (N)", "NLG.Torseur@B.Fz (N)", "NLG.Torseur@B.Mx (N.m)", "NLG.Torseur@B.Mz (N.m)"
-        ], "NLG - Torseur"):
-            st.plotly_chart(_line(t, [
-                ("Effort pivot B - X", df["NLG.Torseur@B.Fx (N)"]),
-                ("Effort pivot B - Z", df["NLG.Torseur@B.Fz (N)"]),
-            ], "NLG - Efforts de liaison au pivot B", "Temps (s)", "Effort (N)"), use_container_width=True)
-            st.plotly_chart(_line(t, [
-                ("Moment X au pivot B", df["NLG.Torseur@B.Mx (N.m)"]),
-                ("Moment Z au pivot B", df["NLG.Torseur@B.Mz (N.m)"]),
-            ], "NLG - Moments de liaison au pivot B", "Temps (s)", "Moment (N.m)"), use_container_width=True)
+        _liaison_charts("NLG", "NLG", has_c=False, b_kind="encastrement")
 
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button(
