@@ -28,8 +28,12 @@ dropsim/      Moteur de calcul Python pur (NumPy), indépendant de l'UI.
 
 app/          Interface Streamlit
   streamlit_app.py        Page d'accueil
-  pages/1_Saisie.py       Saisie des données du train
-  pages/2_Resultats.py    Courbes de résultats
+  theme.py                Thème et styles partagés de l'UI
+  components/gear_form.py Formulaire de saisie d'un train (composant réutilisable)
+  pages/3_Comparaison.py            Comparaison de trains
+  pages/4_Loi_hydraulique.py        Loi hydraulique (NLG/MLG)
+  pages/5_Avion_complet.py          Saisie de l'avion complet
+  pages/6_Resultats_avion_complet.py Résultats de l'avion complet
 
 tests/        Tests de non-régression (goldens projet)
 _extract/     Données extraites historiques (VBA et exports Excel)
