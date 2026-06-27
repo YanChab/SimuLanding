@@ -30,7 +30,7 @@ from .engine import (
     damper_force_step,
     damper_force_step_implicit_adaptive,
 )
-from .errors import ErrorCollector, SimError
+from .errors import ErrorCollector, OVERSTROKE_CODES, SimError, make_overstroke_warning
 from .gas import GasSpring
 from .hydraulic import _sign
 from .inputs import TrailingArmParamsSI
@@ -516,11 +516,18 @@ def run_strait_strut(
     out: dict[str, np.ndarray] = {k: np.zeros(n_out) for k in OUTPUT_COLUMNS_SS}
 
     # --- Boucle d'intégration --------------------------------------------- #
+    bottomed = None  # (i_fail, exc) si l'amortisseur atteint sa butée de compression
     for i in range(n_out):
         t = i * dt
 
         # --- Enregistrement de l'état au pas i ----------------------------- #
-        damp_step = _strait_strut_resolve_damper_step(p, gas, tab_pos, tab_sec, state)
+        try:
+            damp_step = _strait_strut_resolve_damper_step(p, gas, tab_pos, tab_sec, state)
+        except SimError as exc:
+            if exc.code in OVERSTROKE_CODES:
+                bottomed = (i, exc)
+                break
+            raise
         pg = damp_step["pg"]
         pc = damp_step["pc"]
         pd = damp_step["pd"]
@@ -694,4 +701,17 @@ def run_strait_strut(
             method=method,
         )
 
-    return EngineOutput(data=out, n_steps=n_steps)
+    warnings = list(c.warnings)
+    if bottomed is not None:
+        i_fail, exc = bottomed
+        course = float(p.course)
+        over = np.where(out["trailing_arm_d"][:i_fail] > course)[0]
+        valid = int(over[0]) if over.size else i_fail
+        if valid < 1:
+            raise exc
+        last_stroke = float(out["trailing_arm_d"][valid - 1])
+        out = {k: v[:valid] for k, v in out.items()}
+        n_steps = valid - 1
+        warnings.append(make_overstroke_warning("le train (StraitStrut)", valid * dt, last_stroke, course, exc))
+
+    return EngineOutput(data=out, n_steps=n_steps, warnings=warnings)

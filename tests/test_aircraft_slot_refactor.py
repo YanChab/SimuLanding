@@ -123,6 +123,39 @@ def test_pitched_mlg_stays_airborne_no_phantom_compression():
     assert np.max(d["nlg_stroke"]) > 0.0
 
 
+def test_aircraft_overstroke_stops_gracefully_with_warning():
+    """Un sur-enfoncement (amortisseur en butée) n'échoue plus : le run s'arrête
+    proprement, restitue des données physiques et signale la butée."""
+    ac = default_aircraft_inputs()
+    ac.drop.pitch = 15.0   # NLG seul porte l'avion -> sur-enfoncement
+    ac.drop.vz = 3.05
+    ac.simulation.temps_simu = 0.3
+    out = run_aircraft(ac.to_si())  # ne doit pas lever
+
+    codes = [w.code for w in out.warnings]
+    assert "SUR_ENFONCEMENT" in codes
+    # Données conservées et physiques (pas de divergence) : course <= course méca + marge.
+    course_mm = ac.nlg.course
+    assert out.n_steps > 0
+    assert np.max(out.data["nlg_stroke"]) * 1000.0 <= course_mm + 1.0
+    assert np.all(np.isfinite(out.data["aircraft_fz_total"]))
+
+
+def test_single_gear_overstroke_stops_gracefully():
+    """Idem pour un run train isolé (StraitStrut et TrailingArm)."""
+    from dataclasses import replace
+    from dropsim.simulation import run_simulation
+
+    for factory in (default_strait_strut_inputs, default_trailing_arm_inputs):
+        base = factory()
+        heavy = replace(base, masse=base.masse * 4.0, vz=4.0)  # provoque la butée
+        result = run_simulation(heavy)  # ne doit pas lever
+        assert any(w.code == "SUR_ENFONCEMENT" for w in result.warnings)
+        assert len(result.df) > 0
+        # Aucun sur-enfoncement pour un run nominal : pas d'avertissement parasite.
+        assert not any(w.code == "SUR_ENFONCEMENT" for w in run_simulation(base).warnings)
+
+
 def test_gear_drop_override_layering():
     """Les surcharges train isolé prennent le pas, le reste hérite du train."""
     ac = default_aircraft_inputs()

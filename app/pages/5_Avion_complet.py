@@ -506,6 +506,11 @@ if res is not None:
     m1.metric("Pas", f"{res.n_steps}")
     m2.metric("Fz total max", f"{res.summary.get('Effort vertical total max Fz (N)', 0.0):.0f} N")
     m3.metric("Acc CG max", f"{res.summary.get('Accélération CG max (g)', 0.0):.3f} g")
+    for w in getattr(res, "warnings", []) or []:
+        if getattr(w, "code", "") == "SUR_ENFONCEMENT":
+            st.warning(f"⚠️ {w.message}\n\n💡 {w.hint}")
+        else:
+            st.warning(str(w))
 
 nlg_res = st.session_state.aircraft_nlg_result
 if nlg_res is not None:

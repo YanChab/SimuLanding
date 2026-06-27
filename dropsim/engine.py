@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .errors import ErrorCollector, ErrorLevel, SimError
+from .errors import ErrorCollector, ErrorLevel, OVERSTROKE_CODES, SimError, make_overstroke_warning
 from .gas import GasSpring
 from .geometry import chgt_rep, deter_pos_bal_a, deter_pos_bal_r, rotate_about
 from .hydraulic import _sign, calcul_hydrau
@@ -1036,11 +1036,12 @@ def run_trailing_arm(
     vitx_prev = state.vitx
 
     n_steps = n_it
+    bottomed = None  # (i_fail, exc) si l'amortisseur atteint sa butée de compression
     for i in range(n_out):
         # Appel au callback de progression
         if progress_callback:
             progress_callback(i + 1, n_out)
-        
+
         try:
             # Dynamique de la masse suspendue (TA/TB du pas précédent)
             support_accms = (1.0 / Ms) * (-state.ta_z - state.tb_z - pms_rlg_z)
@@ -1142,6 +1143,9 @@ def run_trailing_arm(
         except SimError as err:
             err.context.setdefault("iteration", i)
             err.context.setdefault("temps_s", i * It)
+            if err.code in OVERSTROKE_CODES:
+                bottomed = (i, err)
+                break
             raise
 
         if not math.isfinite(ftot) or not math.isfinite(pg):
@@ -1343,6 +1347,20 @@ def run_trailing_arm(
                 geom[k] = geom[k][: i + 1]
             break
 
-    return EngineOutput(data=out, n_steps=n_steps, warnings=c.warnings, geometry=geom)
+    warnings = list(c.warnings)
+    if bottomed is not None:
+        i_fail, exc = bottomed
+        course = float(p.course)
+        over = np.where(out["trailing_arm_d"][:i_fail] > course)[0]
+        valid = int(over[0]) if over.size else i_fail
+        if valid < 1:
+            raise exc
+        last_stroke = float(out["trailing_arm_d"][valid - 1])
+        out = {k: v[:valid] for k, v in out.items()}
+        geom = {k: v[:valid] for k, v in geom.items()}
+        n_steps = valid - 1
+        warnings.append(make_overstroke_warning("le train (TrailingArm)", valid * It, last_stroke, course, exc))
+
+    return EngineOutput(data=out, n_steps=n_steps, warnings=warnings, geometry=geom)
 
 __all__ = ["run_trailing_arm", "EngineOutput", "OUTPUT_COLUMNS", "GEOMETRY_KEYS"]

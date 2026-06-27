@@ -124,4 +124,53 @@ class ErrorCollector:
         return [e.as_dict() for e in self.errors]
 
 
-__all__ = ["ErrorLevel", "SimError", "ErrorCollector"]
+# Codes d'erreur runtime traduisant un sur-enfoncement de l'amortisseur (chambre
+# de gaz totalement comprimée). On les intercepte pour arrêter proprement la
+# simulation au lieu de la faire échouer.
+OVERSTROKE_CODES = frozenset({"GAZ_VOLUME_NEGATIF", "GAZ_JACOBIEN_SINGULIER"})
+
+
+def make_overstroke_warning(
+    gear_label: str,
+    time_s: float,
+    stroke_m: float,
+    course_m: float,
+    cause: "SimError | None" = None,
+) -> "SimError":
+    """Construit un avertissement non bloquant de sur-enfoncement (butée atteinte).
+
+    Utilisé par les moteurs pour signaler qu'un amortisseur a atteint sa butée de
+    compression : la simulation s'arrête à cet instant et conserve les données
+    jusque-là.
+    """
+    stroke_txt = f"{stroke_m * 1000.0:.1f} mm" if stroke_m == stroke_m else "n/d"
+    return SimError(
+        code="SUR_ENFONCEMENT",
+        message=(
+            f"Sur-enfoncement {gear_label} à t = {time_s * 1000.0:.1f} ms "
+            f"(course ≈ {stroke_txt}, course mécanique {course_m * 1000.0:.1f} mm) : "
+            "l'amortisseur atteint sa butée de compression. La simulation s'arrête "
+            "à cet instant ; les données précédentes restent exploitables."
+        ),
+        level=ErrorLevel.RUNTIME,
+        field="course",
+        hint=(
+            "Revoir le dimensionnement (augmenter le volume/la pression de gaz ou "
+            "l'amortissement), ou réduire la sévérité de la chute (Vz, masse, assiette)."
+        ),
+        context={
+            "time_s": time_s,
+            "stroke_m": stroke_m,
+            "course_m": course_m,
+            "cause": getattr(cause, "code", None),
+        },
+    )
+
+
+__all__ = [
+    "ErrorLevel",
+    "SimError",
+    "ErrorCollector",
+    "OVERSTROKE_CODES",
+    "make_overstroke_warning",
+]

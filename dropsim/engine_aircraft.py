@@ -21,6 +21,7 @@ from .engine_strait_strut import (
     _ffribag_nlg,
     StraitStrutLocalState,
 )
+from .errors import OVERSTROKE_CODES, SimError, make_overstroke_warning
 from .gas import GasSpring
 from .inputs import AircraftParamsSI, TrailingArmParamsSI, _strut_geom_si
 from .metering import build_section_table
@@ -830,27 +831,36 @@ def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None)
     out = {k: np.zeros(n_out) for k in OUTPUT_COLUMNS_AC}
     geom = {k: np.zeros(n_out) for k in GEOMETRY_KEYS_AC}
 
+    _GEAR_LABELS = {"nlg": "NLG", "mlg_left": "MLG gauche", "mlg_right": "MLG droite"}
+    bottomed = None  # (i_fail, slot, exc) si un train atteint sa butée de compression
+
     for i in range(n_out):
         t = i * dt
 
         # Résolution locale de chaque slot de train sous cinématique support
         # imposée (ordre [NLG, MLG gauche, MLG droite] préservé).
         results = []
-        for slot in slots:
-            station_x, station_z = _rigid_station(p.cg, z_cg, theta, slot.station)
-            zsup = station_z - slot.station_z_ref
-            vsup = vz_cg - slot.x_offset * theta_dot
-            asup = az_cg - slot.x_offset * theta_ddot
-            res = slot.step(
-                station_x=station_x,
-                station_z=station_z,
-                zsup=zsup,
-                vsup=vsup,
-                asup=asup,
-                theta=theta,
-                dt=dt,
-            )
-            results.append((slot, res))
+        try:
+            for slot in slots:
+                station_x, station_z = _rigid_station(p.cg, z_cg, theta, slot.station)
+                zsup = station_z - slot.station_z_ref
+                vsup = vz_cg - slot.x_offset * theta_dot
+                asup = az_cg - slot.x_offset * theta_ddot
+                res = slot.step(
+                    station_x=station_x,
+                    station_z=station_z,
+                    zsup=zsup,
+                    vsup=vsup,
+                    asup=asup,
+                    theta=theta,
+                    dt=dt,
+                )
+                results.append((slot, res))
+        except SimError as exc:
+            if exc.code in OVERSTROKE_CODES:
+                bottomed = (i, slot, exc)
+                break
+            raise
 
         # PFD structure avion (2 DDL : translation Z + tangage). On isole le
         # fuselage : efforts entrants = poids+lift au CG et efforts d'interface
@@ -903,7 +913,34 @@ def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None)
         if progress_callback is not None and (i % 10 == 0 or i == n_steps):
             progress_callback(i, n_steps)
 
-    return EngineOutput(data=out, n_steps=n_steps, geometry=geom)
+    warnings: list[SimError] = []
+    if bottomed is not None:
+        i_fail, slot_f, exc = bottomed
+        # La butée raide peut diverger numériquement sur 1-2 pas avant que le
+        # solveur de gaz n'échoue : on retient les pas réellement physiques, soit
+        # jusqu'au premier dépassement de la course mécanique du train fautif.
+        stroke_key = f"{slot_f.prefix}_stroke"
+        course = float(slot_f.p.course)
+        over = np.where(out[stroke_key][:i_fail] > course)[0]
+        valid = int(over[0]) if over.size else i_fail
+        if valid < 1:
+            # Sur-enfoncement immédiat : on ne peut rien restituer d'exploitable.
+            raise exc
+        last_stroke = float(out[stroke_key][valid - 1])
+        out = {k: v[:valid] for k, v in out.items()}
+        geom = {k: v[:valid] for k, v in geom.items()}
+        n_steps = valid - 1
+        warnings.append(
+            make_overstroke_warning(
+                _GEAR_LABELS.get(slot_f.prefix, slot_f.prefix),
+                valid * dt,
+                last_stroke,
+                course,
+                exc,
+            )
+        )
+
+    return EngineOutput(data=out, n_steps=n_steps, warnings=warnings, geometry=geom)
 
 
 __all__ = ["run_aircraft", "OUTPUT_COLUMNS_AC", "GEOMETRY_KEYS_AC"]
