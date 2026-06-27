@@ -186,20 +186,29 @@ def _trailing_arm_local_step(
     fast_time_scale: float,
     integrator_mode: str,
     It: float,
+    al_y_override: float | None = None,
 ) -> dict[str, float]:
-    """Avance le noyau local TrailingArm sous cinématique support imposée."""
+    """Avance le noyau local TrailingArm sous cinématique support imposée.
+
+    ``al_y_override`` : si fourni, remplace l'accélération angulaire du balancier
+    (modèle historique sans masse, basé sur ``jyy``) par une valeur imposée — sert
+    au modèle rigide complet (PFD §6.7) sans toucher au constitutif/géométrie.
+    """
     state.accms = support_accms
     state.depms += support_dz
     state.vitms = support_vitms
     state.B[2] += support_dz
     state.C[2] += support_dz
 
-    state.al_y = (1.0 / p.jyy) * (
-        (state.A[2] - state.B[2]) * state.ta_x
-        - (state.A[0] - state.B[0]) * state.ta_z
-        + (state.R[2] - state.B[2]) * state.tr_x
-        - (state.R[0] - state.B[0]) * state.tr_z
-    )
+    if al_y_override is not None:
+        state.al_y = al_y_override
+    else:
+        state.al_y = (1.0 / p.jyy) * (
+            (state.A[2] - state.B[2]) * state.ta_x
+            - (state.A[0] - state.B[0]) * state.ta_z
+            + (state.R[2] - state.B[2]) * state.tr_x
+            - (state.R[0] - state.B[0]) * state.tr_z
+        )
     om_prev = state.om_y
     if integrator_mode == "rk4":
         state.om_y = om_prev + state.al_y * It

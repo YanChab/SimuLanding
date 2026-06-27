@@ -43,3 +43,32 @@ def test_balancier_mass_changes_interface():
     assert np.max(np.abs(pfd_m["fb_z"] - pfd0["fb_z"])) > 100.0
     # La rotule C (bielle seule) n'est PAS affectée par la masse du bras.
     assert np.allclose(pfd_m["fc_z"], pfd0["fc_z"])
+
+
+# --- Moteur couplé (balancier corps rigide, doc §6.7) ----------------------
+def test_coupled_matches_legacy_when_massless():
+    """m_arm=0 : la ré-intégration couplée reproduit l'historique (précision machine)."""
+    from dropsim.integration_pfd_trailing import run_trailing_arm_pfd_coupled
+    p = default_trailing_arm_inputs().to_si()
+    hist = run_trailing_arm(p).data
+    cpl = run_trailing_arm_pfd_coupled(p, m_arm=0.0)
+    n = min(len(cpl["d"]), len(hist["trailing_arm_d"]))
+    for kp, kh in [("d", "trailing_arm_d"), ("ftot", "trailing_arm_ftot"),
+                   ("fb_z", "torsB_fz"), ("fb_x", "torsB_fx"), ("fc_z", "torsC_fz")]:
+        a = np.asarray(cpl[kp])[:n]; b = np.asarray(hist[kh])[:n]
+        sc = max(1.0, float(np.max(np.abs(b))))
+        assert np.max(np.abs(a - b)) / sc < 1e-9, f"{kp} ≠ {kh}"
+
+
+def test_coupled_mass_continuity_and_effect():
+    """m_arm→0 continu ; m_arm modéré change la trajectoire ; sur-enfoncement géré."""
+    from dropsim.integration_pfd_trailing import run_trailing_arm_pfd_coupled
+    p = default_trailing_arm_inputs().to_si()
+    base = run_trailing_arm_pfd_coupled(p, m_arm=0.0)
+    tiny = run_trailing_arm_pfd_coupled(p, m_arm=1e-3)
+    assert np.max(np.abs(tiny["d"] - base["d"])) < 1e-6           # continuité
+    moderate = run_trailing_arm_pfd_coupled(p, m_arm=10.0)
+    assert np.all(np.isfinite(moderate["fb_z"]))                  # stable
+    assert np.max(np.abs(moderate["d"] - base["d"])) > 1e-5       # effet réel
+    heavy = run_trailing_arm_pfd_coupled(p, m_arm=50.0)           # sur-enfoncement
+    assert np.all(np.isfinite(heavy["fb_z"]))                     # tronqué, pas de crash
