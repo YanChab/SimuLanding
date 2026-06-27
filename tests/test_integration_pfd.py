@@ -54,13 +54,25 @@ def test_point_A_geometry():
 
 
 def test_trailing_arm_resultant_is_contact():
-    """Sans masse, F_B + F_C = T_R (résultante = réaction de contact, §6.6)."""
+    """Sans masse, F_B + F_C = T_R (résultante = réaction de contact, §6.6), en 3D."""
     ta = trailing_arm_interface(
-        A=np.array([0.1, 0.2]), C=np.array([0.0, 0.6]),
-        f_tot=8000.0, contact_sol=np.array([1500.0, 60000.0]),
+        A=np.array([0.1, -1.19, 0.2]), B=np.array([0.0, -1.19, 0.6]),
+        C=np.array([0.0, -1.19, 0.6]), R=np.array([0.3, -1.35, 0.0]),
+        f_tot=8000.0, contact_sol=np.array([1500.0, 0.0, 60000.0]),
     )
-    assert np.allclose(ta.F_B + ta.F_C, np.array([1500.0, 60000.0]))
+    assert np.allclose(ta.F_B + ta.F_C, np.array([1500.0, 0.0, 60000.0]))
     assert np.allclose(ta.F_C, -ta.T_A)            # rotule : F_C = −T_A
+
+
+def test_trailing_arm_y_offset_gives_moment():
+    """Une roue déportée en Y (R_y ≠ B_y) produit des moments Mx, Mz au pivot (§6.5)."""
+    common = dict(A=np.array([0.1, -1.19, 0.2]), B=np.array([0.0, -1.19, 0.6]),
+                  C=np.array([0.0, -1.19, 0.6]), f_tot=8000.0,
+                  contact_sol=np.array([1500.0, 0.0, 60000.0]))
+    planar = trailing_arm_interface(R=np.array([0.3, -1.19, 0.0]), **common)
+    offset = trailing_arm_interface(R=np.array([0.3, -1.35, 0.0]), **common)
+    assert abs(planar.M_B[0]) < 1e-6 and abs(planar.M_B[2]) < 1e-6  # plan : pas de Mx,Mz
+    assert abs(offset.M_B[0]) > 1.0                                  # déport Y → Mx ≠ 0
 
 
 def test_fuselage_vertical_and_pitch():

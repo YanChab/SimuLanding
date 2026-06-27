@@ -101,40 +101,53 @@ def point_A_strait_strut(Gt: np.ndarray, Gb: np.ndarray, course: float) -> np.nd
 # ===========================================================================
 @dataclass(frozen=True)
 class TrailingArmInterface:
-    F_B: np.ndarray          # effort au pivot B (sol) — train → cellule
-    F_C: np.ndarray          # effort à la rotule C (sol)
-    T_A: np.ndarray          # effort amortisseur sur le balancier en A
+    F_B: np.ndarray          # effort 3D au pivot B (sol) — train → cellule
+    F_C: np.ndarray          # effort 3D à la rotule C (sol)
+    M_B: np.ndarray          # moment 3D au pivot ; My = rotation (non transmise)
+    T_A: np.ndarray          # effort 3D amortisseur sur le balancier en A
 
 
 def trailing_arm_interface(
     *,
-    A: np.ndarray, C: np.ndarray,        # points amortisseur (sol)
+    A: np.ndarray, B: np.ndarray, C: np.ndarray, R: np.ndarray,  # points 3D (sol)
     f_tot: float,                        # effort axial amortisseur (le long de A-C)
-    contact_sol: np.ndarray,             # (Fx, Fz) en R
-    weight: np.ndarray | None = None,    # poids balancier+roue (sol)
+    contact_sol: np.ndarray,             # T_R = (Fx, Fy, Fz) en R (3D)
+    weight: np.ndarray | None = None,    # poids balancier+roue (3D, sol)
     m_arm: float = 0.0,                  # masse balancier+roue
-    accel_G: np.ndarray | None = None,   # accélération du CG balancier (sol)
+    accel_G: np.ndarray | None = None,   # accélération 3D du CG balancier (sol)
 ) -> TrailingArmInterface:
-    """Assemblage TrailingArm strictement conforme au PFD (doc §6).
+    """Assemblage TrailingArm strictement conforme au PFD (doc §6), **en 3D**.
 
     Amortisseur = **bielle à 2 forces** (effort le long de A-C). Balancier **avec
-    masse** (m_arm, inertie de translation conservée — au-delà du code historique).
+    masse** (m_arm). Le torseur d'interface est calculé en 3D : la rotation du
+    balancier est plane (autour de Y), mais les décalages en Y donnent des
+    composantes Fy et des **moments Mx, Mz** au pivot. Le pivot d'axe Y ne
+    transmet **pas** My (équilibré par la rotation, eq (8)).
     """
     A = np.asarray(A, float)
+    B = np.asarray(B, float)
     C = np.asarray(C, float)
+    R = np.asarray(R, float)
     T_R = np.asarray(contact_sol, float)
-    Pw = np.zeros(2) if weight is None else np.asarray(weight, float)
-    aG = np.zeros(2) if accel_G is None else np.asarray(accel_G, float)
+    Pw = np.zeros(3) if weight is None else np.asarray(weight, float)
+    aG = np.zeros(3) if accel_G is None else np.asarray(accel_G, float)
 
-    # Amortisseur (§6.3) : T_A = F_tot · (A − C)/‖A − C‖
+    # Amortisseur (§6.3) : T_A = F_tot · (A − C)/‖A − C‖  (3D)
     u_CA = A - C
     u_CA = u_CA / np.linalg.norm(u_CA)
     T_A = f_tot * u_CA
     F_C = -T_A                      # effort sur la cellule à la rotule C
 
-    # Balancier (§6.5), masse conservée : F_B = T_R + T_A + P' − m'·a_G'
-    F_B = T_R + T_A + Pw - m_arm * aG
-    return TrailingArmInterface(F_B=F_B, F_C=F_C, T_A=T_A)
+    # Balancier (§6.5), masse conservée : inertie de d'Alembert −m'·a_G' en G'
+    inertia_force = Pw - m_arm * aG
+    F_B = T_R + T_A + inertia_force
+
+    # Moment transmis au pivot (§6.5) : M_B = BA×T_A + BR×T_R + BG'×(P'−m'·a_G')
+    Gp = 0.5 * (B + R)
+    M_B = (np.cross(A - B, T_A)
+           + np.cross(R - B, T_R)
+           + np.cross(Gp - B, inertia_force))
+    return TrailingArmInterface(F_B=F_B, F_C=F_C, M_B=M_B, T_A=T_A)
 
 
 # ===========================================================================

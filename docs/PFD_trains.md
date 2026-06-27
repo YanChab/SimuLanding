@@ -299,7 +299,11 @@ $$
 
 ## 6. TrailingArm (MLG)
 
-Même méthode, en **repère sol** (X arrière, Z haut ; plan longitudinal X‑Z).
+Même méthode, en **repère sol** (X arrière, Z haut). ⚠️ **Le torseur d'interface
+se calcule en 3D** (efforts **et** moments) : la rotation du balancier reste plane
+(autour de Y), mais les **décalages en Y** — roue déportée (R_y ≠ B_y),
+amortisseur oblique (A‑C en Y) — produisent des composantes **Fy** et surtout des
+**moments Mx, Mz** au pivot, qu'un calcul purement plan raterait.
 
 ### 6.1 Les solides isolés
 
@@ -341,10 +345,10 @@ $$
 
 | Action | Point | Résultante (rep. sol) | Moment propre |
 |---|---|---|---|
-| Pesanteur | G′ | poids m′g | 0 |
-| Contact sol → roue | R | T_R = (Fx, Fz) | 0 (le moment de spin part en rotation roue) |
-| Amortisseur → balancier | A | T_A = F_tot·(A−C)/‖A−C‖ | 0 |
-| Pivot cellule → balancier | B | T_B = (T_Bx, T_Bz) | 0 (pivot axe Y : pas de moment My) |
+| Pesanteur | G′ | poids m′g = (0, 0, −m′g) | 0 |
+| Contact sol → roue | R | T_R = (Fx, Fy, Fz) **(3D)** | 0 (le moment de spin part en rotation roue) |
+| Amortisseur → balancier | A | T_A = F_tot·(A−C)/‖A−C‖ **(3D)** | 0 |
+| Pivot cellule → balancier | B | T_B **(3D)** | **moments Mx, Mz** (pas de My) |
 
 **Théorème de la résultante dynamique** :
 
@@ -378,6 +382,29 @@ $$
 > + inertie de translation du balancier+roue) à F_B. La rotation θ est, elle, déjà
 > gardée via (8) ; `fc = -ta` (l.334) reste conforme.
 
+**Moment transmis au pivot B (Mx, Mz) — calcul 3D.** Le pivot d'axe Y reprend
+l'effort 3D **et** les moments autour de X et Z (pas autour de Y, axe libre). Le
+moment des efforts du balancier réduit en B (d'Alembert : l'inertie −m′·a_G′ agit
+en G′) est :
+
+$$
+\boxed{\;\vec M_B = \vec{BA}\times\vec T_A + \vec{BR}\times\vec T_R + \vec{BG'}\times(\vec P' - m'\,\vec a_{G'})\;}
+$$
+
+La composante **My n'est pas transmise** (elle équilibre la rotation, eq (8) :
+J_yy·θ̈) ; le pivot ne réagit que **Mx et Mz**. En notant BA = A−B, BR = R−B :
+
+$$
+M_{B,x} = (BA_y\,T_{A,z} - BA_z\,T_{A,y}) + (BR_y\,T_{R,z} - BR_z\,T_{R,y}) + (\text{terme masse})_x
+$$
+$$
+M_{B,z} = (BA_x\,T_{A,y} - BA_y\,T_{A,x}) + (BR_x\,T_{R,y} - BR_y\,T_{R,x}) + (\text{terme masse})_z
+$$
+
+> **Code** (`engine.py` l.342‑343) : `mb_x`, `mb_z` = (BA×T_A + BR×T_R)\_{x,z}
+> (sans terme de masse). **Conforme** pour m′ = 0. C'est le **décalage R_y ≠ B_y**
+> (roue déportée) qui rend Mx, Mz non nuls — d'où la **nécessité du calcul 3D**.
+
 ### 6.6 Lecture du résultat
 
 - **Résultante transmise à la cellule** : F_B + F_C = (T_R + T_A + P′ − m′·a_G′)
@@ -393,6 +420,10 @@ $$
   **la même réaction de contact horizontale** ; seule la **répartition** diffère
   (StraitStrut : tout en B ; TrailingArm : réparti pivot B / rotule C, le terme
   d'amortisseur T_A,x au pivot étant compensé par F_C,x = −T_A,x à la rotule).
+- **Moments 3D au pivot** : Mx, Mz sont non nuls dès qu'il existe un **décalage en
+  Y** (roue déportée, amortisseur oblique). Sur le cas par défaut, R_y − B_y ≈
+  −0,16 m donne **Mx ≈ −7000 N·m** et Mz ≈ −950 N·m : un calcul purement plan les
+  **annulerait à tort**. → l'assemblage TrailingArm **doit** être 3D.
 - **Signe** : comme au §5.4, tout repose sur le **signe de l'effort de contact
   Fx** (convention commune Vx/X). La cohérence NLG↔MLG se joue sur cette
   **définition unique de Fx**, pas sur la mécanique de transmission (identique en
