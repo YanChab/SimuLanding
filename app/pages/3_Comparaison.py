@@ -1,7 +1,7 @@
-"""Page **Comparaison** : compare deux simulations enregistrées (ou la courante).
+"""Page **Comparaison** : compare deux simulations **avion complet**.
 
-Permet de sélectionner deux simulations (A et B) parmi les sauvegardes — ou la
-simulation courante en mémoire — et d'afficher :
+Permet de sélectionner deux simulations avion complet (A et B) — la simulation
+courante en mémoire et/ou des sauvegardes — et d'afficher :
 
 * un tableau comparatif des grandeurs de synthèse (valeurs A, B, écart Δ et Δ %) ;
 * des courbes superposées d'une grandeur au choix en fonction d'une abscisse.
@@ -27,40 +27,42 @@ from theme import apply_theme  # noqa: E402
 
 apply_theme()
 
-st.title("⚖️ Comparaison de deux simulations")
+st.title("⚖️ Comparaison de simulations avion complet")
 
 GRAPH_HEIGHT = 560
 
 # --------------------------------------------------------------------------- #
-#  Sources disponibles : simulation courante + sauvegardes
+#  Sources : simulation avion en mémoire + sauvegardes avion complet
 # --------------------------------------------------------------------------- #
 sources: dict[str, dict] = {}
 
-current = st.session_state.get("result")
+current = st.session_state.get("aircraft_result")
 if current is not None:
-    cur_name = st.session_state.get("result_name", "Simulation courante")
+    cur_name = st.session_state.get("aircraft_result_name", "Simulation avion complet")
     sources[f"🟢 {cur_name} (en mémoire)"] = {"kind": "current"}
 
 for e in list_saved():
+    if e.get("model_kind") != "aircraft":
+        continue
     label = f"[{e.get('project', '—')}] {e['name']}  ·  {e['saved_at'][:16].replace('T', ' ')}"
     sources[label] = {"kind": "file", "path": e["path"]}
 
 if len(sources) < 2:
     st.info(
-        "Il faut au moins **deux** simulations disponibles pour comparer. "
-        "Lancez un calcul puis sauvegardez-le (page **Résultats**), ou enregistrez "
-        "plusieurs simulations.",
+        "Il faut au moins **deux** simulations avion complet disponibles pour comparer. "
+        "Lancez des simulations depuis la page **Avion complet** et sauvegardez-les "
+        "(bloc « Sauvegarder / charger »).",
         icon="ℹ️",
     )
     st.stop()
 
 
 def _load(source: dict):
-    """Renvoie (inputs|None, result) pour une source (courante ou fichier)."""
+    """Renvoie le résultat (avion complet) d'une source (courante ou fichier)."""
     if source["kind"] == "current":
-        return None, st.session_state.get("result")
-    inputs, result, _meta = load_simulation(source["path"])
-    return inputs, result
+        return st.session_state.get("aircraft_result")
+    _inputs, result, _meta = load_simulation(source["path"])
+    return result
 
 
 labels = list(sources.keys())
@@ -71,8 +73,9 @@ with col_b:
     default_b = 1 if len(labels) > 1 else 0
     sel_b = st.selectbox("Simulation B", labels, index=default_b, key="cmp_b")
 
-_, res_a = _load(sources[sel_a])
-_, res_b = _load(sources[sel_b])
+res_a = _load(sources[sel_a])
+res_b = _load(sources[sel_b])
+
 
 def _short_name(label: str) -> str:
     """Extrait le nom de simulation d'un libellé de source."""
@@ -88,26 +91,27 @@ if name_a == name_b:
     name_a, name_b = f"{name_a} (A)", f"{name_b} (B)"
 
 # --------------------------------------------------------------------------- #
-#  Tableau comparatif des grandeurs de synthèse
+#  Tableau comparatif des grandeurs de synthèse (depuis le résumé avion)
 # --------------------------------------------------------------------------- #
 st.subheader("Synthèse comparée")
 
-rows_a = {lbl: (val, unit) for lbl, val, unit in getattr(res_a, "summary_rows", [])}
-rows_b = {lbl: (val, unit) for lbl, val, unit in getattr(res_b, "summary_rows", [])}
+sum_a = dict(getattr(res_a, "summary", {}) or {})
+sum_b = dict(getattr(res_b, "summary", {}) or {})
 
-if rows_a and rows_b:
-    records = []
-    for lbl in rows_a:
-        if lbl not in rows_b:
-            continue
-        va, unit = rows_a[lbl]
-        vb, _ = rows_b[lbl]
-        delta = vb - va
-        pct = (delta / va * 100.0) if va else float("nan")
-        param = f"{lbl} ({unit})" if unit and unit != "-" else lbl
-        records.append(
-            {"Paramètre": param, name_a: va, name_b: vb, "Δ (B−A)": delta, "Δ %": pct}
-        )
+records = []
+for lbl in sum_a:
+    if lbl not in sum_b:
+        continue
+    try:
+        va = float(sum_a[lbl])
+        vb = float(sum_b[lbl])
+    except (TypeError, ValueError):
+        continue
+    delta = vb - va
+    pct = (delta / va * 100.0) if va else float("nan")
+    records.append({"Paramètre": lbl, name_a: va, name_b: vb, "Δ (B−A)": delta, "Δ %": pct})
+
+if records:
     cmp_df = pd.DataFrame(records)
     st.dataframe(
         cmp_df,
@@ -123,7 +127,7 @@ if rows_a and rows_b:
         height=38 + 35 * len(records),
     )
 else:
-    st.caption("Synthèse indisponible pour l'une des simulations.")
+    st.caption("Synthèse comparable indisponible pour ces deux simulations.")
 
 # --------------------------------------------------------------------------- #
 #  Courbes superposées
@@ -144,9 +148,9 @@ with col_x:
         key="cmp_x",
     )
 with col_y:
-    y_default = "Tyre.FTyre (N)" if "Tyre.FTyre (N)" in common_cols else common_cols[min(1, len(common_cols) - 1)]
+    _y_default = "Aircraft.Fz total (N)" if "Aircraft.Fz total (N)" in common_cols else common_cols[min(1, len(common_cols) - 1)]
     y_col = st.selectbox(
-        "Ordonnée (Y)", common_cols, index=common_cols.index(y_default), key="cmp_y"
+        "Ordonnée (Y)", common_cols, index=common_cols.index(_y_default), key="cmp_y"
     )
 
 fig = go.Figure()

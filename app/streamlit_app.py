@@ -21,10 +21,14 @@ from pathlib import Path
 
 import streamlit as st
 
-# Permet d'importer le paquet moteur quel que soit le dossier de lancement.
+# Permet d'importer le paquet moteur (racine) et les modules locaux app/ (theme,
+# components) quel que soit le dossier de lancement.
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+_APP = Path(__file__).resolve().parent
+if str(_APP) not in sys.path:
+    sys.path.insert(0, str(_APP))
 
 from dropsim import default_trailing_arm_inputs, default_strait_strut_inputs  # noqa: E402
 from theme import apply_theme  # noqa: E402
@@ -101,7 +105,7 @@ def accueil() -> None:
         unsafe_allow_html=True,
     )
     st.title("🛬 SimuLanding — Simulation de drop test")
-    st.subheader("Train d'atterrissage: TrailingArm (MLG) ou StraitStrut (NLG)")
+    st.subheader("Avion complet : 1 NLG + 2 MLG couplés (ou train isolé)")
 
     st.markdown(
         """
@@ -112,13 +116,13 @@ cinématique de jambe).
 
 **Comment l'utiliser :**
 
-1. Ouvrez la page **Saisie** (bandeau en haut) pour choisir le modèle
-    (**TrailingArm** ou **StraitStrut**) puis renseigner les données.
-    Les valeurs par défaut correspondent au cas nominal et l'intégrateur est
-    fixé à RK4.
-2. Lancez le calcul : les erreurs éventuelles sont **localisées précisément**
-   (champ concerné, cause, conseil de correction).
-3. Consultez la page **Résultats** pour visualiser les courbes et la synthèse.
+1. Ouvrez la page **Avion complet** (bandeau en haut) : saisissez les données
+    de l'avion et de chaque train, et choisissez le type de chaque train
+    (**StraitStrut** ou **TrailingArm**).
+2. Lancez la simulation voulue avec les trois boutons : **avion complet**,
+    **NLG seul** ou **MLG seul**.
+3. Consultez la page **Résultats avion** pour les courbes et la synthèse, et la
+    page **Comparaison** pour superposer deux simulations avion complet.
 """
     )
 
@@ -147,10 +151,8 @@ cinématique de jambe).
 # --------------------------------------------------------------------------- #
 pages = [
     st.Page(accueil, title="Accueil", icon="🏠", default=True),
-    st.Page("pages/1_Saisie.py", title="Saisie", icon="📝"),
     st.Page("pages/5_Avion_complet.py", title="Avion complet", icon="🛫"),
     st.Page("pages/6_Resultats_avion_complet.py", title="Resultats avion", icon="📊"),
-    st.Page("pages/2_Resultats.py", title="Résultats", icon="📈"),
     st.Page("pages/3_Comparaison.py", title="Comparaison", icon="⚖️"),
     st.Page("pages/4_Loi_hydraulique.py", title="Loi hydraulique", icon="🧮"),
 ]

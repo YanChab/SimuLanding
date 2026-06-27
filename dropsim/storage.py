@@ -247,6 +247,7 @@ def _read_meta(path: Path) -> dict | None:
         "name": data.get("name", path.stem),
         "saved_at": data.get("saved_at", ""),
         "project": data.get("project") or DEFAULT_PROJECT,
+        "model_kind": (data.get("inputs") or {}).get("model_kind", "trailing_arm"),
         "path": str(path),
     }
 
