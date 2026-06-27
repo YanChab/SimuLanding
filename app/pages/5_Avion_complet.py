@@ -237,6 +237,35 @@ _ensure_state()
 inp: Any = st.session_state.aircraft_inputs
 
 
+# --------------------------------------------------------------------------- #
+#  Barre de lancement — toujours visible (sticky en haut de page)
+# --------------------------------------------------------------------------- #
+st.markdown(
+    """
+    <style>
+    div[data-testid="stVerticalBlock"] > div:has(div.ac-launch-anchor) {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background-color: var(--background-color, #ffffff);
+        padding: 0.4rem 0 0.6rem 0;
+        border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+_launch_bar = st.container()
+with _launch_bar:
+    st.markdown('<div class="ac-launch-anchor"></div>', unsafe_allow_html=True)
+    _lb1, _lb2, _lb3 = st.columns(3)
+    launch_ac = _lb1.button("▶️ Avion complet", type="primary", use_container_width=True)
+    launch_nlg = _lb2.button("Lancer NLG seul", use_container_width=True)
+    launch_mlg = _lb3.button("Lancer MLG seul", use_container_width=True)
+# Conteneur de statut (progression / messages), rempli par les handlers plus bas.
+_launch_msg = st.container()
+
+
 def _num(label: str, key: str, value: float, *, step: float = 1.0, min_value=None) -> float:
     if key not in st.session_state:
         st.session_state[key] = float(value)
@@ -433,27 +462,20 @@ def _build_aircraft_inputs():
 
 
 # --------------------------------------------------------------------------- #
-#  Boutons de lancement
+#  Traitement des lancements (boutons créés dans la barre sticky en haut)
 # --------------------------------------------------------------------------- #
-st.divider()
-b1, b2, b3, msg_col = st.columns([1.2, 1, 1, 3])
-launch_ac = b1.button("▶️ Avion complet", type="primary", use_container_width=True)
-launch_nlg = b2.button("Lancer NLG seul", use_container_width=True)
-launch_mlg = b3.button("Lancer MLG seul", use_container_width=True)
-
-
 def _run_single_gear(position: str, store_key: str):
     inputs = _build_aircraft_inputs()
     st.session_state.aircraft_inputs = inputs
     gear = inputs.gear_inputs_for(position)
     collector = gear.validate()
     if collector.has_errors:
-        msg_col.error(f"Validation {position.upper()} invalide.", icon="🛑")
+        _launch_msg.error(f"Validation {position.upper()} invalide.", icon="🛑")
         for err in collector.errors:
-            msg_col.error(f"{err.field or 'général'}: {err.message}")
+            _launch_msg.error(f"{err.field or 'général'}: {err.message}")
         return
     try:
-        progress = st.progress(0.0)
+        progress = _launch_msg.progress(0.0)
 
         def _cb(cur, total):
             if total > 0:
@@ -462,10 +484,10 @@ def _run_single_gear(position: str, store_key: str):
         result = run_simulation(gear, progress_callback=_cb)
         progress.empty()
         st.session_state[store_key] = result
-        msg_col.success(f"Calcul {position.upper()} seul terminé.", icon="✅")
+        _launch_msg.success(f"Calcul {position.upper()} seul terminé.", icon="✅")
     except ds_errors.SimError as exc:
         st.session_state[store_key] = None
-        msg_col.error(f"{exc.code}: {exc.message}", icon="🛑")
+        _launch_msg.error(f"{exc.code}: {exc.message}", icon="🛑")
 
 
 if launch_ac:
@@ -473,12 +495,12 @@ if launch_ac:
     st.session_state.aircraft_inputs = aircraft_inputs
     collector = aircraft_inputs.validate()
     if collector.has_errors:
-        msg_col.error("Validation invalide. Corriger les champs et relancer.", icon="🛑")
+        _launch_msg.error("Validation invalide. Corriger les champs et relancer.", icon="🛑")
         for err in collector.errors:
-            msg_col.error(f"{err.field or 'général'}: {err.message}")
+            _launch_msg.error(f"{err.field or 'général'}: {err.message}")
     else:
         try:
-            progress = st.progress(0.0)
+            progress = _launch_msg.progress(0.0)
 
             def _cb(cur, total):
                 if total > 0:
@@ -488,9 +510,9 @@ if launch_ac:
             progress.empty()
             st.session_state.aircraft_result = result
             st.session_state.aircraft_result_name = "Simulation avion complet"
-            msg_col.success("Calcul avion terminé. Voir la page Résultats avion.", icon="✅")
+            _launch_msg.success("Calcul avion terminé. Voir la page Résultats avion.", icon="✅")
         except ds_errors.SimError as exc:
-            msg_col.error(f"{exc.code}: {exc.message}", icon="🛑")
+            _launch_msg.error(f"{exc.code}: {exc.message}", icon="🛑")
 
 if launch_nlg:
     _run_single_gear("nlg", "aircraft_nlg_result")
