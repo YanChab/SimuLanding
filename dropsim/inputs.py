@@ -958,6 +958,39 @@ class AircraftGearLayoutInputs:
 
 
 @dataclass
+class StraitStrutGeomSI:
+    """Géométrie de jambe StraitStrut convertie en SI, portée par un slot de train.
+
+    Permet à n'importe quelle position (NLG ou MLG) d'héberger un StraitStrut :
+    la géométrie strut voyage désormais avec le slot plutôt que d'être figée sur
+    la position NLG de l'avion.
+    """
+
+    strut_pitch: float  # rad
+    strut_roll: float  # rad
+    h_pivot_z: float  # m
+    h_guide_top_z: float  # m
+    h_guide_bot_z: float  # m
+    bague_guide: float  # m
+    bague_piston: float  # m
+    seal_precomp_pa: float  # Pa
+
+
+def _strut_geom_si(inputs: "TrailingArmInputs") -> StraitStrutGeomSI:
+    """Extrait la géométrie strut (SI) d'un jeu d'entrées StraitStrut."""
+    return StraitStrutGeomSI(
+        strut_pitch=inputs.strut_pitch * U.DEG_TO_RAD,
+        strut_roll=inputs.strut_roll * U.DEG_TO_RAD,
+        h_pivot_z=inputs.h_pivot_z * U.MM_TO_M,
+        h_guide_top_z=inputs.h_guide_top_z * U.MM_TO_M,
+        h_guide_bot_z=inputs.h_guide_bot_z * U.MM_TO_M,
+        bague_guide=inputs.bague_guide * U.MM_TO_M,
+        bague_piston=inputs.bague_piston * U.MM_TO_M,
+        seal_precomp_pa=inputs.seal_precomp_pa,
+    )
+
+
+@dataclass
 class AircraftParamsSI:
     """Paramètres avion complet convertis en SI pour le futur moteur global."""
 
@@ -989,6 +1022,15 @@ class AircraftParamsSI:
     nlg_seal_precomp_pa: float
     nlg: TrailingArmParamsSI
     mlg: TrailingArmParamsSI
+    # Type de train par position (slot générique). Par défaut conforme à la
+    # configuration historique : NLG StraitStrut, MLG TrailingArm.
+    nlg_model_kind: str = "strait_strut"
+    mlg_model_kind: str = "trailing_arm"
+    # Géométrie strut par position (renseignée uniquement si le slot est un
+    # StraitStrut ; None pour un TrailingArm). Les champs plats nlg_strut_*
+    # restent disponibles pour compat ascendante.
+    nlg_strut: StraitStrutGeomSI | None = None
+    mlg_strut: StraitStrutGeomSI | None = None
 
     @property
     def Sc(self) -> float:
@@ -1177,6 +1219,18 @@ class AircraftInputs:
             nlg_seal_precomp_pa=self.nlg.seal_precomp_pa,
             nlg=nlg_inputs.to_si(),
             mlg=mlg_inputs.to_si(),
+            nlg_model_kind=nlg_inputs.model_kind,
+            mlg_model_kind=mlg_inputs.model_kind,
+            nlg_strut=(
+                _strut_geom_si(nlg_inputs)
+                if nlg_inputs.model_kind == "strait_strut"
+                else None
+            ),
+            mlg_strut=(
+                _strut_geom_si(mlg_inputs)
+                if mlg_inputs.model_kind == "strait_strut"
+                else None
+            ),
         )
 
 
