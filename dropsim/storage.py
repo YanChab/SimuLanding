@@ -26,6 +26,7 @@ import pandas as pd
 from .inputs import (
     AircraftBodyInputs,
     AircraftDropConfig,
+    AircraftGearDropOverride,
     AircraftGearLayoutInputs,
     AircraftInputs,
     AircraftSimulationInputs,
@@ -93,6 +94,20 @@ def inputs_from_dict(d: dict) -> AircraftInputs | TrailingArmInputs | StraitStru
                 layout = dict(layout)
                 layout[key] = Point3(**layout[key])
 
+        # Type de train par position : on lit le model_kind du sous-dict, avec
+        # repli sur la convention historique (NLG StraitStrut, MLG TrailingArm)
+        # pour les sauvegardes antérieures au choix de type par position.
+        def _gear_cls(sub: dict, default_kind: str) -> type:
+            kind = sub.get("model_kind", default_kind)
+            return StraitStrutInputs if kind == "strait_strut" else TrailingArmInputs
+
+        def _override(sub: dict) -> AircraftGearDropOverride:
+            known = {f.name for f in fields(AircraftGearDropOverride)}
+            return AircraftGearDropOverride(**{k: v for k, v in sub.items() if k in known})
+
+        nlg_cls = _gear_cls(nlg, "strait_strut")
+        mlg_cls = _gear_cls(mlg, "trailing_arm")
+
         return AircraftInputs(
             model_kind="aircraft",
             body=AircraftBodyInputs(**{k: v for k, v in body.items() if k in {f.name for f in fields(AircraftBodyInputs)}}),
@@ -103,8 +118,10 @@ def inputs_from_dict(d: dict) -> AircraftInputs | TrailingArmInputs | StraitStru
             layout=AircraftGearLayoutInputs(
                 **{k: v for k, v in layout.items() if k in {f.name for f in fields(AircraftGearLayoutInputs)}}
             ),
-            nlg=StraitStrutInputs(**_coerce_trailing_like_inputs(nlg, StraitStrutInputs)),
-            mlg=TrailingArmInputs(**_coerce_trailing_like_inputs(mlg, TrailingArmInputs)),
+            nlg=nlg_cls(**_coerce_trailing_like_inputs(nlg, nlg_cls)),
+            mlg=mlg_cls(**_coerce_trailing_like_inputs(mlg, mlg_cls)),
+            nlg_drop=_override(d.get("nlg_drop", {})),
+            mlg_drop=_override(d.get("mlg_drop", {})),
         )
 
     cls = StraitStrutInputs if model_kind == "strait_strut" else TrailingArmInputs

@@ -40,6 +40,41 @@ def test_aircraft_inputs_roundtrip():
     assert getattr(restored, "model_kind", "") == "aircraft"
 
 
+def test_aircraft_swapped_types_and_overrides_roundtrip():
+    """Types de train inversés par position + surcharges de chute survivent
+    au cycle sérialisation/désérialisation."""
+    from dropsim.inputs import AircraftGearDropOverride
+
+    inp = default_aircraft_inputs()
+    inp.nlg = default_trailing_arm_inputs()
+    inp.mlg = default_strait_strut_inputs()
+    inp.nlg_drop = AircraftGearDropOverride(vz=2.5, masse=500.0)
+    restored = inputs_from_dict(inputs_to_dict(inp))
+    assert restored == inp
+    assert restored.nlg.model_kind == "trailing_arm"
+    assert restored.mlg.model_kind == "strait_strut"
+    assert restored.nlg_drop.vz == 2.5
+    assert restored.nlg_drop.masse == 500.0
+
+
+def test_aircraft_legacy_dict_without_per_position_type_loads():
+    """Une sauvegarde antérieure (sans model_kind par train ni *_drop) se charge
+    avec la convention historique : NLG StraitStrut, MLG TrailingArm."""
+    legacy = inputs_to_dict(default_aircraft_inputs())
+    # Simule un ancien format : on retire les nouveautés.
+    legacy["nlg"].pop("model_kind", None)
+    legacy["mlg"].pop("model_kind", None)
+    legacy.pop("nlg_drop", None)
+    legacy.pop("mlg_drop", None)
+
+    restored = inputs_from_dict(legacy)
+    assert restored.nlg.model_kind == "strait_strut"
+    assert restored.mlg.model_kind == "trailing_arm"
+    # Les surcharges absentes prennent leurs valeurs par défaut (héritage global).
+    assert restored.nlg_drop.vz is None
+    assert restored.mlg_drop.masse is None
+
+
 def test_save_load_roundtrip(tmp_path):
     inp = default_trailing_arm_inputs()
     result = run_simulation(inp)
