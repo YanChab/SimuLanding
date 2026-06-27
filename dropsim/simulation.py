@@ -18,6 +18,9 @@ from .engine_aircraft import OUTPUT_COLUMNS_AC, run_aircraft
 from .engine_strait_strut import OUTPUT_COLUMNS_SS, run_strait_strut
 from .errors import ErrorCollector, ErrorLevel, SimError
 from .inputs import AircraftInputs, TrailingArmInputs, StraitStrutInputs
+from .integration_pfd_aircraft import run_aircraft_pfd
+from .integration_pfd_strait import run_strait_strut_pfd
+from .integration_pfd_trailing import run_trailing_arm_pfd
 
 
 AIRCRAFT_LEGACY_COLUMN_KEYS: tuple[str, ...] = (
@@ -393,4 +396,51 @@ def _build_summary_rows(
 
 
 
-__all__ = ["run_simulation", "SimulationResult"]
+def run_pfd_simulation(
+    inputs: AircraftInputs | TrailingArmInputs | StraitStrutInputs,
+    *,
+    m_arm: float = 0.0,
+) -> dict[str, np.ndarray]:
+    """Point d'entrée du modèle reconstruit **IntegrationPFD**.
+
+    Dispatche vers les moteurs PFD (``integration_pfd_*``) qui réutilisent les
+    sous-modèles constitutifs validés mais assemblent l'interface **strictement
+    selon ``docs/PFD_trains.md``** (signe Fx@B corrigé, torseur MLG 3D, masse
+    balancier optionnelle via ``m_arm``). Renvoie un dict de tableaux numpy.
+
+    Pour ``m_arm = 0`` les résultats reproduisent les moteurs historiques
+    (corrigés) à la précision machine.
+    """
+    collector = ErrorCollector()
+    inputs.validate(collector)
+    if collector.has_errors:
+        collector.raise_if_any()
+
+    params = inputs.to_si()
+    model_kind = getattr(inputs, "model_kind", "")
+    is_aircraft = model_kind == "aircraft" or (
+        getattr(params, "nlg", None) is not None
+        and getattr(params, "mlg", None) is not None
+    )
+
+    if is_aircraft:
+        return run_aircraft_pfd(inputs)
+    if model_kind == "strait_strut":
+        ss = inputs  # type: ignore[assignment]
+        alfap_rad = getattr(ss, "strut_pitch", 0.0) * math.pi / 180.0 + params.pitch
+        alfar_rad = getattr(ss, "strut_roll", 0.0) * math.pi / 180.0 + params.roll
+        return run_strait_strut_pfd(
+            params,
+            seal_precomp_pa=getattr(ss, "seal_precomp_pa", 110_649.0),
+            bague_guide_m=getattr(ss, "bague_guide", 50.0) / 1000.0,
+            bague_piston_m=getattr(ss, "bague_piston", 50.0) / 1000.0,
+            alfap=alfap_rad,
+            alfar=alfar_rad,
+            h_pivot_z_m=getattr(ss, "h_pivot_z", 600.0) / 1000.0,
+            h_guide_top_z_m=getattr(ss, "h_guide_top_z", 500.0) / 1000.0,
+            h_guide_bot_z_m=getattr(ss, "h_guide_bot_z", 200.0) / 1000.0,
+        )
+    return run_trailing_arm_pfd(params, m_arm=m_arm)
+
+
+__all__ = ["run_simulation", "run_pfd_simulation", "SimulationResult"]
