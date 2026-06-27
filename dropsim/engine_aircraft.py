@@ -83,6 +83,7 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "nlg_torsb_fx": "NLG.Torseur@B.Fx (N)",
     "nlg_torsb_fz": "NLG.Torseur@B.Fz (N)",
     "nlg_torsb_mx": "NLG.Torseur@B.Mx (N.m)",
+    "nlg_torsb_my": "NLG.Torseur@B.My tangage (N.m)",
     "nlg_torsb_mz": "NLG.Torseur@B.Mz (N.m)",
     "mlg_left_stroke": "MLG left.d (m)",
     "mlg_left_velocity": "MLG left.v (m/s)",
@@ -121,6 +122,7 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "mlg_left_torsb_fx": "MLG left.Torseur@B.Fx (N)",
     "mlg_left_torsb_fz": "MLG left.Torseur@B.Fz (N)",
     "mlg_left_torsb_mx": "MLG left.Torseur@B.Mx (N.m)",
+    "mlg_left_torsb_my": "MLG left.Torseur@B.My tangage (N.m)",
     "mlg_left_torsb_mz": "MLG left.Torseur@B.Mz (N.m)",
     "mlg_right_stroke": "MLG right.d (m)",
     "mlg_right_velocity": "MLG right.v (m/s)",
@@ -159,6 +161,7 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "mlg_right_torsb_fx": "MLG right.Torseur@B.Fx (N)",
     "mlg_right_torsb_fz": "MLG right.Torseur@B.Fz (N)",
     "mlg_right_torsb_mx": "MLG right.Torseur@B.Mx (N.m)",
+    "mlg_right_torsb_my": "MLG right.Torseur@B.My tangage (N.m)",
     "mlg_right_torsb_mz": "MLG right.Torseur@B.Mz (N.m)",
 }
 
@@ -593,6 +596,7 @@ class StraitStrutSlot:
             "torsb_fx": float(tb_sol[0]),
             "torsb_fz": float(tb_sol[2]),
             "torsb_mx": float(mom_B[0]),
+            "torsb_my": float(mom_B[1]),
             "torsb_mz": float(mom_B[2]),
         }
 
@@ -742,6 +746,7 @@ class TrailingArmSlot:
             "torsb_fx": float(step["fb_x"]),
             "torsb_fz": float(step["fb_z"]),
             "torsb_mx": float(step["mb_x"]),
+            "torsb_my": 0.0,  # B = pivot autour de Y -> aucun couple de tangage
             "torsb_mz": float(step["mb_z"]),
         }
 

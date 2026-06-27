@@ -149,6 +149,9 @@ def _build_aircraft_result_locally(engine_out, *, max_points: int = 1000):
         "Course max MLG droite (mm)": float(np.max(full["mlg_right_stroke"]) * 1000.0),
         "Effort vertical total max Fz (N)": float(np.max(full["aircraft_fz_total"])),
         "Moment de tangage max (N.m)": float(np.max(np.abs(full["aircraft_mx_total"]))),
+        "Couple max en B NLG (N.m)": float(np.max(np.abs(full["nlg_torsb_my"]))),
+        "Couple max en B MLG gauche (N.m)": float(np.max(np.abs(full["mlg_left_torsb_my"]))),
+        "Couple max en B MLG droite (N.m)": float(np.max(np.abs(full["mlg_right_torsb_my"]))),
         "Accélération CG max (g)": float(np.max(np.abs(full["aircraft_cg_az"])) / 9.81),
         "Nombre de pas": int(engine_out.n_steps),
     }
@@ -506,6 +509,14 @@ if res is not None:
     m1.metric("Pas", f"{res.n_steps}")
     m2.metric("Fz total max", f"{res.summary.get('Effort vertical total max Fz (N)', 0.0):.0f} N")
     m3.metric("Acc CG max", f"{res.summary.get('Accélération CG max (g)', 0.0):.3f} g")
+    n1, n2, n3 = st.columns(3)
+    n1.metric("Moment tangage max", f"{res.summary.get('Moment de tangage max (N.m)', 0.0):.0f} N·m")
+    n2.metric("Couple max en B — NLG", f"{res.summary.get('Couple max en B NLG (N.m)', 0.0):.0f} N·m",
+              help="Couple de flexion transmis au fuselage à l'encastrement B du train avant (axe de tangage).")
+    _mlg_couple = max(res.summary.get('Couple max en B MLG gauche (N.m)', 0.0),
+                      res.summary.get('Couple max en B MLG droite (N.m)', 0.0))
+    n3.metric("Couple max en B — MLG", f"{_mlg_couple:.0f} N·m",
+              help="Non nul seulement si un MLG est de type StraitStrut (encastrement). 0 pour un TrailingArm (pivot).")
     for w in getattr(res, "warnings", []) or []:
         if getattr(w, "code", "") == "SUR_ENFONCEMENT":
             st.warning(f"⚠️ {w.message}\n\n💡 {w.hint}")
