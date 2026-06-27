@@ -22,7 +22,7 @@ from .engine_strait_strut import (
     StraitStrutLocalState,
 )
 from .gas import GasSpring
-from .inputs import AircraftParamsSI, TrailingArmParamsSI
+from .inputs import AircraftParamsSI, TrailingArmParamsSI, _strut_geom_si
 from .metering import build_section_table
 from .tyre import build_tyre_tables, f_tyre, mu, r_eff
 from .units import G
@@ -336,146 +336,468 @@ def _mirror_trailing_params_y(p: TrailingArmParamsSI) -> TrailingArmParamsSI:
     )
 
 
+# --------------------------------------------------------------------------- #
+#  Helpers cinématiques corps rigide (repère sol/avion), partagés par les slots
+# --------------------------------------------------------------------------- #
+def _rigid_station(cg: np.ndarray, cg_z_val: float, theta_val: float, station: np.ndarray) -> tuple[float, float]:
+    cg_x_val = float(cg[0])
+    cg_z_val_abs = float(cg[2] + cg_z_val)
+    rel_x = float(station[0] - cg[0])
+    rel_z = float(station[2] - cg[2])
+    cos_t = math.cos(theta_val)
+    sin_t = math.sin(theta_val)
+    return (
+        cg_x_val + rel_x * cos_t - rel_z * sin_t,
+        cg_z_val_abs + rel_x * sin_t + rel_z * cos_t,
+    )
+
+
+def _off_world_to_body(off_x: float, off_z: float, theta_ref: float) -> tuple[float, float]:
+    cos_t = math.cos(theta_ref)
+    sin_t = math.sin(theta_ref)
+    return (off_x * cos_t + off_z * sin_t, -off_x * sin_t + off_z * cos_t)
+
+
+def _off_body_to_world(body_x: float, body_z: float, theta_val: float) -> tuple[float, float]:
+    cos_t = math.cos(theta_val)
+    sin_t = math.sin(theta_val)
+    return (body_x * cos_t - body_z * sin_t, body_x * sin_t + body_z * cos_t)
+
+
+# --------------------------------------------------------------------------- #
+#  Abstraction de slot de train générique
+# --------------------------------------------------------------------------- #
+@dataclass
+class InterfaceContribution:
+    """Effort d'interface d'un train sur la structure avion, en repère sol.
+
+    ``mx``/``mz`` (moment au point) sont conservés pour diagnostic mais NE sont
+    PAS injectés dans le PFD du corps (seul l'effort ``r x F`` compte, conforme
+    au comportement historique)."""
+
+    px: float
+    pz: float
+    fx: float
+    fz: float
+    mx: float = 0.0
+    mz: float = 0.0
+
+
+@dataclass
+class SlotStepResult:
+    contributions: list  # list[InterfaceContribution]
+    fz_slot: float
+    diag: dict
+    geom: dict
+
+
+class StraitStrutSlot:
+    """Slot de train de type StraitStrut (interface = point B unique)."""
+
+    def __init__(self, *, prefix, params, strut_geom, station, cg, vx, pitch_init, ground_z=0.0):
+        self.prefix = prefix
+        self.model_kind = "strait_strut"
+        self.p = params
+        self.cg = cg
+        self.vx = vx
+        self.ground_z = ground_z
+        self.station = station
+        self.unload_radius = float(params.unload_radius)
+        self.x_offset = float(station[0] - cg[0])
+        self.strut_pitch = strut_geom.strut_pitch
+        self.strut_roll = strut_geom.strut_roll
+        self.seal_precomp_pa = strut_geom.seal_precomp_pa
+        self.bague_guide = strut_geom.bague_guide
+        self.bague_piston = strut_geom.bague_piston
+
+        self.gas = GasSpring(params)
+        self.tab_pos, self.tab_sec = build_section_table(params)
+        self.tyre_defl, self.tyre_load = build_tyre_tables(params)
+        R_sol_to_lg_init = _rot_sol_to_lg(self.strut_pitch - pitch_init, self.strut_roll)
+        self.R_lg_to_sol_init = R_sol_to_lg_init.T
+        self.state = _init_strait_strut_local_state(
+            params,
+            self.gas,
+            R_sol_to_lg_init,
+            self.R_lg_to_sol_init,
+            h_pivot_z_m=strut_geom.h_pivot_z,
+            h_guide_top_z_m=strut_geom.h_guide_top_z,
+            h_guide_bot_z_m=strut_geom.h_guide_bot_z,
+        )
+        self.r0_sol = self.R_lg_to_sol_init @ self.state.ptR_lg.copy()
+        # Renseignés par finalize_reference().
+        self.station_z_ref = 0.0
+        self.b_body = (0.0, 0.0)
+        self.gt_body = (0.0, 0.0)
+        self.gb_body = (0.0, 0.0)
+
+    def reference_bottom_z(self, pitch_init: float) -> float:
+        _, station_z0 = _rigid_station(self.cg, 0.0, pitch_init, self.station)
+        r_sol_0 = self.R_lg_to_sol_init @ self.state.ptR_lg
+        rz0 = station_z0 + float(r_sol_0[2] - self.r0_sol[2])
+        return rz0 - self.unload_radius
+
+    def finalize_reference(self, z_cg: float, pitch_init: float) -> None:
+        _, self.station_z_ref = _rigid_station(self.cg, z_cg, pitch_init, self.station)
+        b_sol_ref = self.R_lg_to_sol_init @ self.state.ptB_lg
+        gt_sol_ref = self.R_lg_to_sol_init @ self.state.ptGt_lg
+        gb_sol_ref = self.R_lg_to_sol_init @ self.state.ptGb_lg
+        b_off = b_sol_ref - self.r0_sol
+        gt_off = gt_sol_ref - self.r0_sol
+        gb_off = gb_sol_ref - self.r0_sol
+        self.b_body = _off_world_to_body(float(b_off[0]), float(b_off[2]), pitch_init)
+        self.gt_body = _off_world_to_body(float(gt_off[0]), float(gt_off[2]), pitch_init)
+        self.gb_body = _off_world_to_body(float(gb_off[0]), float(gb_off[2]), pitch_init)
+        self.state.z_ms = 0.0
+
+    def step(self, *, station_x, station_z, zsup, vsup, asup, theta, dt) -> SlotStepResult:
+        p = self.p
+        R_sol_to_lg_step = _rot_sol_to_lg(self.strut_pitch - theta, self.strut_roll)
+        R_lg_to_sol_step = R_sol_to_lg_step.T
+
+        st = self.state
+        st.z_ms = zsup
+        st.vz_ms = vsup
+        v_ms_lg_vec = R_sol_to_lg_step @ np.array([0.0, 0.0, vsup])
+        st.v_damper = -(float(v_ms_lg_vec[2]) - st.vz_mns_lg)
+        damp = _strait_strut_resolve_damper_step(p, self.gas, self.tab_pos, self.tab_sec, st)
+        pg = damp["pg"]
+        pc = damp["pc"]
+        pd = damp["pd"]
+        st.delta_pc = damp["delta_pc"]
+        st.delta_pd = damp["delta_pd"]
+        st.pg_prev = pg
+        b_off_x_step, b_off_z_step = _off_body_to_world(self.b_body[0], self.b_body[1], theta)
+        bx_step = station_x + b_off_x_step
+        bz_step = station_z + b_off_z_step
+
+        pt_b_sol_now = R_lg_to_sol_step @ st.ptB_lg
+        pt_r_sol_now = R_lg_to_sol_step @ st.ptR_lg
+        br_sol_now = pt_r_sol_now - pt_b_sol_now
+        rz_world_now = bz_step + float(br_sol_now[2])
+        defl_world = p.unload_radius - (rz_world_now - self.ground_z)
+        if defl_world <= 0.0:
+            st.tyre_defl_val = 0.0
+        else:
+            st.tyre_defl_val = defl_world
+        tyre_defl_curr = st.tyre_defl_val
+        tyre_ftyre = max(0.0, f_tyre(st.tyre_defl_val, self.tyre_defl, self.tyre_load))
+        ffrijoi = _ffrijoi_nlg(st.v_damper, pd, p, self.seal_precomp_pa)
+        fx_spring_wheel = -p.kx * st.tyre_depx - p.cx * st.tyre_vx
+        tr_sol = np.array([fx_spring_wheel, 0.0, tyre_ftyre])
+        tr_lg = R_sol_to_lg_step @ tr_sol
+        r_eff_v = r_eff(p.unload_radius, st.tyre_defl_val)
+        slip = 0.0
+        if abs(self.vx) > 1.0e-9:
+            slip = (self.vx - st.tyre_omega * r_eff_v) / abs(self.vx)
+        mu_v = mu(slip, p.mu_x, p.mu_y)
+        fspin = mu_v * tyre_ftyre * math.copysign(1.0, slip) if tyre_ftyre > 0 else 0.0
+        tyre_alpha = (fspin * r_eff_v) / p.wheel_inertia if tyre_ftyre > 0 else 0.0
+        xr = abs(float(tr_lg[0]))
+        z_r_lg = float(st.ptR_lg[2])
+        z_gt_lg = float(st.ptGt_lg[2])
+        z_gb_lg = float(st.ptGb_lg[2])
+        if abs(z_gb_lg - z_gt_lg) > 1.0e-9:
+            xgb = -(z_r_lg - z_gt_lg) * xr / (z_gb_lg - z_gt_lg)
+        else:
+            xgb = 0.0
+        xgt = -xgb - xr
+        ffribag = _ffribag_nlg(st.v_damper, xgt, xgb, p.Dt, self.bague_guide, self.bague_piston)
+        fendstop = _endstop(st.d, p.course, smooth_len=p.endstop_smooth)
+        ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + ffribag + fendstop
+        st.ftot = ftot
+        tb_lg = np.array([tr_lg[0], 0.0, ftot])
+        tb_sol_raw = R_lg_to_sol_step @ tb_lg
+        in_contact = tyre_ftyre > 1.0e-9
+        tb_sol = tb_sol_raw if in_contact else np.zeros(3)
+        ptB_sol = R_lg_to_sol_step @ st.ptB_lg
+        ptR_sol_cur = R_lg_to_sol_step @ st.ptR_lg
+        mom_B = np.cross(ptR_sol_cur - ptB_sol, tr_sol) if in_contact else np.zeros(3)
+
+        self.state = _strait_strut_advance_local_state(
+            p,
+            st,
+            R_sol_to_lg_step,
+            R_lg_to_sol_step,
+            support_acc_ms_z=asup,
+            ftot=ftot,
+            tyre_ftyre_i=tyre_ftyre,
+            dt=dt,
+            method=p.integrator,
+        )
+        adv = self.state
+
+        fz_slot = float(tb_sol[2])
+        contributions = [
+            InterfaceContribution(
+                px=bx_step,
+                pz=bz_step,
+                fx=float(tb_sol[0]),
+                fz=float(tb_sol[2]),
+                mx=float(mom_B[0]),
+                mz=float(mom_B[2]),
+            )
+        ]
+
+        diag = {
+            "stroke": max(0.0, adv.d),
+            "velocity": adv.v_damper,
+            "ftot": ftot,
+            "fhyd": float(damp["fhyd"]),
+            "ffrijoi": ffrijoi,
+            "ffribag": ffribag,
+            "fgas": float(damp["fgas"]),
+            "pg": pg / 1.0e5,
+            "pc": pc / 1.0e5,
+            "pd": pd / 1.0e5,
+            "delta_pc": adv.delta_pc / 1.0e5,
+            "delta_pd": adv.delta_pd / 1.0e5,
+            "hyd_qc_total": float(damp["qc_total"]),
+            "hyd_qc_bh": float(damp["qc_bh"]),
+            "hyd_qc_leak": float(damp["qc_leak"]),
+            "hyd_leak_ratio": float(damp["leak_ratio"]),
+            "hyd_re_leak": float(damp["re_leak"]),
+            "hyd_conv_err": float(damp["hyd_conv_err"]),
+            "hyd_conv_iter": float(damp["hyd_conv_iter"]),
+            "secbh": float(damp["sec"]) * 1.0e6,
+            "tyre_defl": tyre_defl_curr,
+            "tyre_ftyre": tyre_ftyre,
+            "tyre_mu": mu_v,
+            "tyre_slip": slip,
+            "tyre_omega": adv.tyre_omega,
+            "tyre_alpha": tyre_alpha,
+            "tr_x": -fx_spring_wheel,
+            "reaction_h": -fx_spring_wheel,
+            "reaction_v": tyre_ftyre,
+            "xgt": xgt,
+            "xgb": xgb,
+            "accms": asup,
+            "accmns": (-ftot + tyre_ftyre - p.unsprung_mass * G) / p.unsprung_mass,
+            "vitmns": adv.vz_mns_lg,
+            "depmns": adv.z_mns_lg,
+            "tors_res_x": float(tb_sol[0]),
+            "tors_res_z": float(tb_sol[2]),
+            "tors_res_norm": math.hypot(float(tb_sol[0]), float(tb_sol[2])),
+            "torsb_fx": float(tb_sol[0]),
+            "torsb_fz": float(tb_sol[2]),
+            "torsb_mx": float(mom_B[0]),
+            "torsb_mz": float(mom_B[2]),
+        }
+
+        b_sol = R_lg_to_sol_step @ adv.ptB_lg
+        gt_sol = R_lg_to_sol_step @ adv.ptGt_lg
+        gb_sol = R_lg_to_sol_step @ adv.ptGb_lg
+        r_sol = R_lg_to_sol_step @ adv.ptR_lg
+        gt_off_x, gt_off_z = _off_body_to_world(self.gt_body[0], self.gt_body[1], theta)
+        gb_off_x, gb_off_z = _off_body_to_world(self.gb_body[0], self.gb_body[1], theta)
+        br_sol_x = float(r_sol[0] - b_sol[0])
+        br_sol_z = float(r_sol[2] - b_sol[2])
+        geom = {
+            "bx": bx_step,
+            "bz": bz_step,
+            "gtx": station_x + gt_off_x,
+            "gtz": station_z + gt_off_z,
+            "gbx": station_x + gb_off_x,
+            "gbz": station_z + gb_off_z,
+            "rx": bx_step + br_sol_x,
+            "rz": bz_step + br_sol_z,
+            "wheel_radius": p.unload_radius,
+        }
+
+        return SlotStepResult(contributions=contributions, fz_slot=fz_slot, diag=diag, geom=geom)
+
+
+class TrailingArmSlot:
+    """Slot de train de type TrailingArm (interfaces = points B et C)."""
+
+    def __init__(self, *, prefix, params, station, cg, vx, pitch_init):
+        self.prefix = prefix
+        self.model_kind = "trailing_arm"
+        self.cg = cg
+        self.station = station
+        self.unload_radius = float(params.unload_radius)
+        self.x_offset = float(station[0] - cg[0])
+        self.rt = _init_trailing_runtime(params)
+        self.station_z_ref = 0.0
+        self.b_body = (0.0, 0.0)
+        self.c_body = (0.0, 0.0)
+
+    def reference_bottom_z(self, pitch_init: float) -> float:
+        _, station_z0 = _rigid_station(self.cg, 0.0, pitch_init, self.station)
+        rz0 = station_z0 + float(self.rt.state.R[2] - self.rt.r0[2])
+        return rz0 - self.unload_radius
+
+    def finalize_reference(self, z_cg: float, pitch_init: float) -> None:
+        _, self.station_z_ref = _rigid_station(self.cg, z_cg, pitch_init, self.station)
+        b_off = self.rt.state.B - self.rt.r0
+        c_off = self.rt.state.C - self.rt.r0
+        self.b_body = _off_world_to_body(float(b_off[0]), float(b_off[2]), pitch_init)
+        self.c_body = _off_world_to_body(float(c_off[0]), float(c_off[2]), pitch_init)
+        self.rt.state.depms = 0.0
+
+    def step(self, *, station_x, station_z, zsup, vsup, asup, theta, dt) -> SlotStepResult:
+        rt = self.rt
+        step = _trailing_arm_local_step(
+            rt.p,
+            rt.gas,
+            rt.tab_pos,
+            rt.tab_sec,
+            rt.tyre_defl,
+            rt.tyre_load,
+            rt.mu_x,
+            rt.mu_y,
+            rt.state,
+            support_dz=zsup - rt.state.depms,
+            support_vitms=vsup,
+            support_accms=asup,
+            entraxe_init=rt.entraxe_init,
+            lg_ab=rt.lg_ab,
+            lg_rb=rt.lg_rb,
+            dy_ca=rt.dy_ca,
+            fast_time_scale=rt.fast_time_scale,
+            integrator_mode=rt.integrator_mode,
+            It=dt * rt.fast_time_scale,
+        )
+        state = rt.state
+
+        b_off_x, b_off_z = _off_body_to_world(self.b_body[0], self.b_body[1], theta)
+        c_off_x, c_off_z = _off_body_to_world(self.c_body[0], self.c_body[1], theta)
+        bx = station_x + b_off_x
+        bz = station_z + b_off_z
+        cx = station_x + c_off_x
+        cz = station_z + c_off_z
+
+        fb_x = float(step["fb_x"])
+        fb_z = float(step["fb_z"])
+        fc_x = float(step["fc_x"])
+        fc_z = float(step["fc_z"])
+
+        contributions = [
+            InterfaceContribution(
+                px=bx, pz=bz, fx=fb_x, fz=fb_z, mx=float(step["mb_x"]), mz=float(step["mb_z"])
+            ),
+            InterfaceContribution(px=cx, pz=cz, fx=fc_x, fz=fc_z),
+        ]
+        fz_slot = fb_z + fc_z
+
+        diag = {
+            "stroke": max(0.0, state.d),
+            "velocity": state.v,
+            "ftot": state.ftot,
+            "fhyd": float(step["fhyd"]),
+            "ffrijoi": float(step["ffrijoi"]),
+            "fgas": float(step["fgas"]),
+            "pg": float(step["pg"]) / 1.0e5,
+            "pc": float(step["pc"]) / 1.0e5,
+            "pd": float(step["pd"]) / 1.0e5,
+            "delta_pc": state.delta_pc / 1.0e5,
+            "delta_pd": state.delta_pd / 1.0e5,
+            "hyd_qc_total": state.qc_total,
+            "hyd_qc_bh": state.qc_bh,
+            "hyd_qc_leak": state.qc_leak,
+            "hyd_leak_ratio": state.leak_ratio,
+            "hyd_re_leak": state.re_leak,
+            "hyd_conv_err": state.hyd_conv_err,
+            "hyd_conv_iter": state.hyd_conv_iter,
+            "secbh": state.sec * 1.0e6,
+            "tyre_defl": max(0.0, state.defl),
+            "tyre_ftyre": float(step["ftyre"]),
+            "tyre_mu": float(step["mu_val"]),
+            "tyre_slip": float(step["slip"]),
+            "tyre_omega": state.omega,
+            "tyre_alpha": state.alpha,
+            "fx": float(step["fb_x"] + step["fc_x"]),
+            "reaction_h": float(step["fb_x"] + step["fc_x"]),
+            "reaction_v": float(step["ftyre"]),
+            "accms": asup,
+            "tors_res_x": float(step["res_x"]),
+            "tors_res_z": float(step["res_z"]),
+            "tors_res_norm": float(step["res_norm"]),
+            "torsc_fx": float(step["fc_x"]),
+            "torsc_fz": float(step["fc_z"]),
+            "torsb_fx": float(step["fb_x"]),
+            "torsb_fz": float(step["fb_z"]),
+            "torsb_mx": float(step["mb_x"]),
+            "torsb_mz": float(step["mb_z"]),
+        }
+
+        a_dx = float(state.A[0] - state.B[0])
+        a_dz = float(state.A[2] - state.B[2])
+        r_dx = float(state.R[0] - state.B[0])
+        r_dz = float(state.R[2] - state.B[2])
+        geom = {
+            "ax": bx + a_dx,
+            "az": bz + a_dz,
+            "bx": bx,
+            "bz": bz,
+            "cx": cx,
+            "cz": cz,
+            "rx": bx + r_dx,
+            "rz": bz + r_dz,
+            "wheel_radius": rt.p.unload_radius,
+        }
+
+        return SlotStepResult(contributions=contributions, fz_slot=fz_slot, diag=diag, geom=geom)
+
+
+def _build_slot(prefix, model_kind, params, strut_geom, station, cg, vx, pitch_init):
+    """Construit le slot adapté au type de train choisi pour la position."""
+    if model_kind == "strait_strut":
+        if strut_geom is None:
+            strut_geom = _strut_geom_si(params)
+        return StraitStrutSlot(
+            prefix=prefix,
+            params=params,
+            strut_geom=strut_geom,
+            station=station,
+            cg=cg,
+            vx=vx,
+            pitch_init=pitch_init,
+        )
+    return TrailingArmSlot(
+        prefix=prefix, params=params, station=station, cg=cg, vx=vx, pitch_init=pitch_init
+    )
+
+
 def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None) -> EngineOutput:
     dt = p.it
     n_steps = max(1, round(p.temps_simu / dt))
     n_out = n_steps + 1
 
-    nlg_p = p.nlg
-    mlg_l_p = p.mlg
-    mlg_r_p = _mirror_trailing_params_y(p.mlg)
+    # Type de train par position (slot générique). Le slot droit reçoit des
+    # paramètres miroir en Y lorsqu'il s'agit d'un TrailingArm.
+    if p.mlg_model_kind == "trailing_arm":
+        mlg_r_params = _mirror_trailing_params_y(p.mlg)
+    else:
+        mlg_r_params = p.mlg
+    mlg_r_strut = p.mlg_strut
 
-    nlg_gas = GasSpring(nlg_p)
-    nlg_tab_pos, nlg_tab_sec = build_section_table(nlg_p)
-    nlg_tyre_defl, nlg_tyre_load = build_tyre_tables(nlg_p)
-    nlg_R_sol_to_lg = _rot_sol_to_lg(p.nlg_strut_pitch - p.pitch, p.nlg_strut_roll)
-    nlg_R_lg_to_sol = nlg_R_sol_to_lg.T
-    nlg_state: StraitStrutLocalState = _init_strait_strut_local_state(
-        nlg_p,
-        nlg_gas,
-        nlg_R_sol_to_lg,
-        nlg_R_lg_to_sol,
-        h_pivot_z_m=p.nlg_h_pivot_z,
-        h_guide_top_z_m=p.nlg_h_guide_top_z,
-        h_guide_bot_z_m=p.nlg_h_guide_bot_z,
+    nlg_slot = _build_slot(
+        "nlg", p.nlg_model_kind, p.nlg, p.nlg_strut, p.nlg_station, p.cg, p.vx, p.pitch
     )
-    nlg_r0_sol = nlg_R_lg_to_sol @ nlg_state.ptR_lg.copy()
+    mlg_l_slot = _build_slot(
+        "mlg_left", p.mlg_model_kind, p.mlg, p.mlg_strut, p.mlg_left_station, p.cg, p.vx, p.pitch
+    )
+    mlg_r_slot = _build_slot(
+        "mlg_right", p.mlg_model_kind, mlg_r_params, mlg_r_strut, p.mlg_right_station, p.cg, p.vx, p.pitch
+    )
+    slots = [nlg_slot, mlg_l_slot, mlg_r_slot]
 
-    mlg_l = _init_trailing_runtime(mlg_l_p)
-    mlg_r = _init_trailing_runtime(mlg_r_p)
+    # Sol global (repère sol absolu) : z = 0.
+    ground_z = 0.0
 
-    z_cg = 0.0
+    # Position initiale avion imposée : roue la plus basse tangente au sol,
+    # après équilibrage local de chaque train.
+    z_bottom_ref = min(slot.reference_bottom_z(p.pitch) for slot in slots)
+    z_cg = -z_bottom_ref
+    for slot in slots:
+        slot.finalize_reference(z_cg, p.pitch)
+
     vz_cg = -p.vz
     az_cg = 0.0
     theta = p.pitch
     theta_dot = p.pitch_rate
     theta_ddot = 0.0
-
-    x_nlg = float(p.nlg_station[0] - p.cg[0])
-    x_mlg_l = float(p.mlg_left_station[0] - p.cg[0])
-    x_mlg_r = float(p.mlg_right_station[0] - p.cg[0])
-
-    def _rigid_station(cg_z_val: float, theta_val: float, station: np.ndarray) -> tuple[float, float]:
-        cg_x_val = float(p.cg[0])
-        cg_z_val_abs = float(p.cg[2] + cg_z_val)
-        rel_x = float(station[0] - p.cg[0])
-        rel_z = float(station[2] - p.cg[2])
-        cos_t = math.cos(theta_val)
-        sin_t = math.sin(theta_val)
-        return (
-            cg_x_val + rel_x * cos_t - rel_z * sin_t,
-            cg_z_val_abs + rel_x * sin_t + rel_z * cos_t,
-        )
-
-    def _shift_from_reference(station_x: float, station_z: float, point: np.ndarray, ref: np.ndarray) -> tuple[float, float]:
-        return (
-            station_x + float(point[0] - ref[0]),
-            station_z + float(point[2] - ref[2]),
-        )
-
-    def _off_world_to_body(off_x: float, off_z: float, theta_ref: float) -> tuple[float, float]:
-        cos_t = math.cos(theta_ref)
-        sin_t = math.sin(theta_ref)
-        return (
-            off_x * cos_t + off_z * sin_t,
-            -off_x * sin_t + off_z * cos_t,
-        )
-
-    def _off_body_to_world(body_x: float, body_z: float, theta_val: float) -> tuple[float, float]:
-        cos_t = math.cos(theta_val)
-        sin_t = math.sin(theta_val)
-        return (
-            body_x * cos_t - body_z * sin_t,
-            body_x * sin_t + body_z * cos_t,
-        )
-
-    # Sol global (repère sol absolu) : z = 0.
-    ground_z = 0.0
-
-    # Géométrie initiale avec z_cg=0 pour le bornage du solveur d'équilibre.
-    nlg_station_x0, nlg_station_z0 = _rigid_station(z_cg, theta, p.nlg_station)
-    mlg_l_station_x0, mlg_l_station_z0 = _rigid_station(z_cg, theta, p.mlg_left_station)
-    mlg_r_station_x0, mlg_r_station_z0 = _rigid_station(z_cg, theta, p.mlg_right_station)
-
-    nlg_r_sol_0 = nlg_R_lg_to_sol @ nlg_state.ptR_lg
-    nlg_rx0, nlg_rz0 = _shift_from_reference(nlg_station_x0, nlg_station_z0, nlg_r_sol_0, nlg_r0_sol)
-    mlg_l_rx0, mlg_l_rz0 = _shift_from_reference(mlg_l_station_x0, mlg_l_station_z0, mlg_l.state.R, mlg_l.r0)
-    mlg_r_rx0, mlg_r_rz0 = _shift_from_reference(mlg_r_station_x0, mlg_r_station_z0, mlg_r.state.R, mlg_r.r0)
-
-    z_bottom_ref = min(
-        nlg_rz0 - float(p.nlg.unload_radius),
-        mlg_l_rz0 - float(p.mlg.unload_radius),
-        mlg_r_rz0 - float(p.mlg.unload_radius),
-    )
-
-    def _fz_total_for_zcg(z_cg_trial: float) -> tuple[float, float, float, float]:
-        nlg_station_x_t, nlg_station_z_t = _rigid_station(z_cg_trial, theta, p.nlg_station)
-        mlg_l_station_x_t, mlg_l_station_z_t = _rigid_station(z_cg_trial, theta, p.mlg_left_station)
-        mlg_r_station_x_t, mlg_r_station_z_t = _rigid_station(z_cg_trial, theta, p.mlg_right_station)
-
-        nlg_rz_t = nlg_station_z_t + float(nlg_r_sol_0[2] - nlg_r0_sol[2])
-        mlg_l_rz_t = mlg_l_station_z_t + float(mlg_l.state.R[2] - mlg_l.r0[2])
-        mlg_r_rz_t = mlg_r_station_z_t + float(mlg_r.state.R[2] - mlg_r.r0[2])
-
-        nlg_defl_t = max(0.0, float(p.nlg.unload_radius) - (nlg_rz_t - ground_z))
-        mlg_l_defl_t = max(0.0, float(p.mlg.unload_radius) - (mlg_l_rz_t - ground_z))
-        mlg_r_defl_t = max(0.0, float(p.mlg.unload_radius) - (mlg_r_rz_t - ground_z))
-
-        fz_nlg_t = max(0.0, float(f_tyre(nlg_defl_t, nlg_tyre_defl, nlg_tyre_load)))
-        fz_mlg_l_t = max(0.0, float(f_tyre(mlg_l_defl_t, mlg_l.tyre_defl, mlg_l.tyre_load)))
-        fz_mlg_r_t = max(0.0, float(f_tyre(mlg_r_defl_t, mlg_r.tyre_defl, mlg_r.tyre_load)))
-        return fz_nlg_t + fz_mlg_l_t + fz_mlg_r_t, fz_nlg_t, fz_mlg_l_t, fz_mlg_r_t
-
-    # Position initiale avion imposée: roue la plus basse tangente au sol,
-    # après équilibrage local de chaque train.
-    z_cg = -z_bottom_ref
-
-    nlg_station_x_ref, nlg_station_z_ref = _rigid_station(z_cg, p.pitch, p.nlg_station)
-    mlg_l_station_x_ref, mlg_l_station_z_ref = _rigid_station(z_cg, p.pitch, p.mlg_left_station)
-    mlg_r_station_x_ref, mlg_r_station_z_ref = _rigid_station(z_cg, p.pitch, p.mlg_right_station)
-
-    # Offsets rigides des points attachés à la structure avion, mesurés au repos.
-    nlg_b_sol_ref = nlg_R_lg_to_sol @ nlg_state.ptB_lg
-    nlg_gt_sol_ref = nlg_R_lg_to_sol @ nlg_state.ptGt_lg
-    nlg_gb_sol_ref = nlg_R_lg_to_sol @ nlg_state.ptGb_lg
-    nlg_b_off = nlg_b_sol_ref - nlg_r0_sol
-    nlg_gt_off = nlg_gt_sol_ref - nlg_r0_sol
-    nlg_gb_off = nlg_gb_sol_ref - nlg_r0_sol
-    mlg_l_b_off = mlg_l.state.B - mlg_l.r0
-    mlg_l_c_off = mlg_l.state.C - mlg_l.r0
-    mlg_r_b_off = mlg_r.state.B - mlg_r.r0
-    mlg_r_c_off = mlg_r.state.C - mlg_r.r0
-    nlg_b_body = _off_world_to_body(float(nlg_b_off[0]), float(nlg_b_off[2]), p.pitch)
-    nlg_gt_body = _off_world_to_body(float(nlg_gt_off[0]), float(nlg_gt_off[2]), p.pitch)
-    nlg_gb_body = _off_world_to_body(float(nlg_gb_off[0]), float(nlg_gb_off[2]), p.pitch)
-    mlg_l_b_body = _off_world_to_body(float(mlg_l_b_off[0]), float(mlg_l_b_off[2]), p.pitch)
-    mlg_l_c_body = _off_world_to_body(float(mlg_l_c_off[0]), float(mlg_l_c_off[2]), p.pitch)
-    mlg_r_b_body = _off_world_to_body(float(mlg_r_b_off[0]), float(mlg_r_b_off[2]), p.pitch)
-    mlg_r_c_body = _off_world_to_body(float(mlg_r_c_off[0]), float(mlg_r_c_off[2]), p.pitch)
-
-    nlg_state.z_ms = 0.0
-    mlg_l.state.depms = 0.0
-    mlg_r.state.depms = 0.0
 
     out = {k: np.zeros(n_out) for k in OUTPUT_COLUMNS_AC}
     geom = {k: np.zeros(n_out) for k in GEOMETRY_KEYS_AC}
@@ -483,203 +805,36 @@ def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None)
     for i in range(n_out):
         t = i * dt
 
-        nlg_R_sol_to_lg_step = _rot_sol_to_lg(p.nlg_strut_pitch - theta, p.nlg_strut_roll)
-        nlg_R_lg_to_sol_step = nlg_R_sol_to_lg_step.T
+        # Résolution locale de chaque slot de train sous cinématique support
+        # imposée (ordre [NLG, MLG gauche, MLG droite] préservé).
+        results = []
+        for slot in slots:
+            station_x, station_z = _rigid_station(p.cg, z_cg, theta, slot.station)
+            zsup = station_z - slot.station_z_ref
+            vsup = vz_cg - slot.x_offset * theta_dot
+            asup = az_cg - slot.x_offset * theta_ddot
+            res = slot.step(
+                station_x=station_x,
+                station_z=station_z,
+                zsup=zsup,
+                vsup=vsup,
+                asup=asup,
+                theta=theta,
+                dt=dt,
+            )
+            results.append((slot, res))
 
-        nlg_station_x, nlg_station_z = _rigid_station(z_cg, theta, p.nlg_station)
-        mlg_l_station_x, mlg_l_station_z = _rigid_station(z_cg, theta, p.mlg_left_station)
-        mlg_r_station_x, mlg_r_station_z = _rigid_station(z_cg, theta, p.mlg_right_station)
-
-        zsup_nlg = nlg_station_z - nlg_station_z_ref
-        vsup_nlg = vz_cg - x_nlg * theta_dot
-        asup_nlg = az_cg - x_nlg * theta_ddot
-
-        zsup_mlg_l = mlg_l_station_z - mlg_l_station_z_ref
-        zsup_mlg_r = mlg_r_station_z - mlg_r_station_z_ref
-        vsup_mlg_l = vz_cg - x_mlg_l * theta_dot
-        vsup_mlg_r = vz_cg - x_mlg_r * theta_dot
-        asup_mlg_l = az_cg - x_mlg_l * theta_ddot
-        asup_mlg_r = az_cg - x_mlg_r * theta_ddot
-
-        # Keep local ground reference fixed for trailing-arm local dynamics.
-        # Support motion is already imposed through support_dz; moving S here would
-        # double-count relative wheel/ground motion and inflate tyre forces.
-
-        # NLG local resolution
-        nlg_state.z_ms = zsup_nlg
-        nlg_state.vz_ms = vsup_nlg
-        v_ms_lg_vec = nlg_R_sol_to_lg_step @ np.array([0.0, 0.0, vsup_nlg])
-        nlg_state.v_damper = -(float(v_ms_lg_vec[2]) - nlg_state.vz_mns_lg)
-        damp_nlg = _strait_strut_resolve_damper_step(nlg_p, nlg_gas, nlg_tab_pos, nlg_tab_sec, nlg_state)
-        pg = damp_nlg["pg"]
-        pc = damp_nlg["pc"]
-        pd = damp_nlg["pd"]
-        nlg_state.delta_pc = damp_nlg["delta_pc"]
-        nlg_state.delta_pd = damp_nlg["delta_pd"]
-        nlg_state.pg_prev = pg
-        nlg_b_off_x_step, nlg_b_off_z_step = _off_body_to_world(nlg_b_body[0], nlg_b_body[1], theta)
-        nlg_bx_step = nlg_station_x + nlg_b_off_x_step
-        nlg_bz_step = nlg_station_z + nlg_b_off_z_step
-
-        pt_b_sol_now = nlg_R_lg_to_sol_step @ nlg_state.ptB_lg
-        pt_r_sol_now = nlg_R_lg_to_sol_step @ nlg_state.ptR_lg
-        br_sol_now = pt_r_sol_now - pt_b_sol_now
-        # Deflection calculation: use world-frame geometry exclusively.
-        # Wheel center position R in world frame (using rigid attachment point B).
-        nlg_rz_world_now = nlg_bz_step + float(br_sol_now[2])
-        # Tyre deflection: gap between unload radius and actual wheel-ground distance.
-        nlg_defl_world = nlg_p.unload_radius - (nlg_rz_world_now - ground_z)
-        if nlg_defl_world <= 0.0:
-            nlg_state.tyre_defl_val = 0.0
-        else:
-            nlg_state.tyre_defl_val = nlg_defl_world
-        nlg_tyre_defl_curr = nlg_state.tyre_defl_val
-        tyre_ftyre_nlg = max(0.0, f_tyre(nlg_state.tyre_defl_val, nlg_tyre_defl, nlg_tyre_load))
-        ffrijoi = _ffrijoi_nlg(nlg_state.v_damper, pd, nlg_p, p.nlg_seal_precomp_pa)
-        fx_spring_wheel = -nlg_p.kx * nlg_state.tyre_depx - nlg_p.cx * nlg_state.tyre_vx
-        tr_sol = np.array([fx_spring_wheel, 0.0, tyre_ftyre_nlg])
-        tr_lg = nlg_R_sol_to_lg_step @ tr_sol
-        r_eff_nlg = r_eff(nlg_p.unload_radius, nlg_state.tyre_defl_val)
-        slip_nlg = 0.0
-        if abs(p.vx) > 1.0e-9:
-            slip_nlg = (p.vx - nlg_state.tyre_omega * r_eff_nlg) / abs(p.vx)
-        mu_nlg = mu(slip_nlg, nlg_p.mu_x, nlg_p.mu_y)
-        fspin_nlg = mu_nlg * tyre_ftyre_nlg * math.copysign(1.0, slip_nlg) if tyre_ftyre_nlg > 0 else 0.0
-        tyre_alpha_nlg = (fspin_nlg * r_eff_nlg) / nlg_p.wheel_inertia if tyre_ftyre_nlg > 0 else 0.0
-        xr = abs(float(tr_lg[0]))
-        z_r_lg = float(nlg_state.ptR_lg[2])
-        z_gt_lg = float(nlg_state.ptGt_lg[2])
-        z_gb_lg = float(nlg_state.ptGb_lg[2])
-        if abs(z_gb_lg - z_gt_lg) > 1.0e-9:
-            xgb = -(z_r_lg - z_gt_lg) * xr / (z_gb_lg - z_gt_lg)
-        else:
-            xgb = 0.0
-        xgt = -xgb - xr
-        ffribag = _ffribag_nlg(
-            nlg_state.v_damper,
-            xgt,
-            xgb,
-            nlg_p.Dt,
-            p.nlg_bague_guide,
-            p.nlg_bague_piston,
-        )
-        fendstop_nlg = _endstop(nlg_state.d, nlg_p.course, smooth_len=nlg_p.endstop_smooth)
-        ftot_nlg = nlg_p.Sc * pc - nlg_p.Sd * pd + nlg_p.Sbh * pg + ffrijoi + ffribag + fendstop_nlg
-        nlg_state.ftot = ftot_nlg
-        tb_lg = np.array([tr_lg[0], 0.0, ftot_nlg])
-        tb_sol_raw = nlg_R_lg_to_sol_step @ tb_lg
-        nlg_in_contact = tyre_ftyre_nlg > 1.0e-9
-        # In aircraft-mode PFD, only ground-contact loads should be injected.
-        # Internal strut preload must not excite the aircraft when the wheel is airborne.
-        tb_sol = tb_sol_raw if nlg_in_contact else np.zeros(3)
-        ptB_sol = nlg_R_lg_to_sol_step @ nlg_state.ptB_lg
-        ptR_sol_cur = nlg_R_lg_to_sol_step @ nlg_state.ptR_lg
-        mom_B_nlg = np.cross(ptR_sol_cur - ptB_sol, tr_sol) if nlg_in_contact else np.zeros(3)
-        nlg_state = _strait_strut_advance_local_state(
-            nlg_p,
-            nlg_state,
-            nlg_R_sol_to_lg_step,
-            nlg_R_lg_to_sol_step,
-            support_acc_ms_z=asup_nlg,
-            ftot=ftot_nlg,
-            tyre_ftyre_i=tyre_ftyre_nlg,
-            dt=dt,
-            method=nlg_p.integrator,
-        )
-        # MLG locals resolution
-        step_l = _trailing_arm_local_step(
-            mlg_l.p,
-            mlg_l.gas,
-            mlg_l.tab_pos,
-            mlg_l.tab_sec,
-            mlg_l.tyre_defl,
-            mlg_l.tyre_load,
-            mlg_l.mu_x,
-            mlg_l.mu_y,
-            mlg_l.state,
-            support_dz=zsup_mlg_l - mlg_l.state.depms,
-            support_vitms=vsup_mlg_l,
-            support_accms=asup_mlg_l,
-            entraxe_init=mlg_l.entraxe_init,
-            lg_ab=mlg_l.lg_ab,
-            lg_rb=mlg_l.lg_rb,
-            dy_ca=mlg_l.dy_ca,
-            fast_time_scale=mlg_l.fast_time_scale,
-            integrator_mode=mlg_l.integrator_mode,
-            It=dt * mlg_l.fast_time_scale,
-        )
-        step_r = _trailing_arm_local_step(
-            mlg_r.p,
-            mlg_r.gas,
-            mlg_r.tab_pos,
-            mlg_r.tab_sec,
-            mlg_r.tyre_defl,
-            mlg_r.tyre_load,
-            mlg_r.mu_x,
-            mlg_r.mu_y,
-            mlg_r.state,
-            support_dz=zsup_mlg_r - mlg_r.state.depms,
-            support_vitms=vsup_mlg_r,
-            support_accms=asup_mlg_r,
-            entraxe_init=mlg_r.entraxe_init,
-            lg_ab=mlg_r.lg_ab,
-            lg_rb=mlg_r.lg_rb,
-            dy_ca=mlg_r.dy_ca,
-            fast_time_scale=mlg_r.fast_time_scale,
-            integrator_mode=mlg_r.integrator_mode,
-            It=dt * mlg_r.fast_time_scale,
-        )
-
-        # PFD structure avion (2 DDL: translation Z + tangage) :
-        # efforts entrants = NLG@B + MLG gauche@B/C + MLG droite@B/C.
-        fx_nlg_b = float(tb_sol[0])
-        fz_nlg_b = float(tb_sol[2])
-        fx_mlg_l_b = float(step_l["fb_x"])
-        fz_mlg_l_b = float(step_l["fb_z"])
-        fx_mlg_l_c = float(step_l["fc_x"])
-        fz_mlg_l_c = float(step_l["fc_z"])
-        fx_mlg_r_b = float(step_r["fb_x"])
-        fz_mlg_r_b = float(step_r["fb_z"])
-        fx_mlg_r_c = float(step_r["fc_x"])
-        fz_mlg_r_c = float(step_r["fc_z"])
-
-        fz_nlg = fz_nlg_b
-        fz_mlg_l = fz_mlg_l_b + fz_mlg_l_c
-        fz_mlg_r = fz_mlg_r_b + fz_mlg_r_c
-        fz_total = fz_nlg + fz_mlg_l + fz_mlg_r
-
+        # PFD structure avion (2 DDL : translation Z + tangage). On isole le
+        # fuselage : efforts entrants = poids+lift au CG et efforts d'interface
+        # de chaque train (1 point B pour un StraitStrut, points B et C pour un
+        # TrailingArm). Le moment se calcule en r x F, indépendamment du type.
+        fz_total = sum(res.fz_slot for _, res in results)
         cg_x = float(p.cg[0])
         cg_z = float(p.cg[2] + z_cg)
-
-        nlg_b_off_x, nlg_b_off_z = _off_body_to_world(nlg_b_body[0], nlg_b_body[1], theta)
-        mlg_l_b_off_x, mlg_l_b_off_z = _off_body_to_world(mlg_l_b_body[0], mlg_l_b_body[1], theta)
-        mlg_l_c_off_x, mlg_l_c_off_z = _off_body_to_world(mlg_l_c_body[0], mlg_l_c_body[1], theta)
-        mlg_r_b_off_x, mlg_r_b_off_z = _off_body_to_world(mlg_r_b_body[0], mlg_r_b_body[1], theta)
-        mlg_r_c_off_x, mlg_r_c_off_z = _off_body_to_world(mlg_r_c_body[0], mlg_r_c_body[1], theta)
-
-        nlg_bx = nlg_station_x + nlg_b_off_x
-        nlg_bz = nlg_station_z + nlg_b_off_z
-        mlg_l_bx = mlg_l_station_x + mlg_l_b_off_x
-        mlg_l_bz = mlg_l_station_z + mlg_l_b_off_z
-        mlg_l_cx = mlg_l_station_x + mlg_l_c_off_x
-        mlg_l_cz = mlg_l_station_z + mlg_l_c_off_z
-        mlg_r_bx = mlg_r_station_x + mlg_r_b_off_x
-        mlg_r_bz = mlg_r_station_z + mlg_r_b_off_z
-        mlg_r_cx = mlg_r_station_x + mlg_r_c_off_x
-        mlg_r_cz = mlg_r_station_z + mlg_r_c_off_z
-
-        def _my(px: float, pz: float, fx: float, fz: float) -> float:
-            rx = px - cg_x
-            rz = pz - cg_z
-            return rx * fz - rz * fx
-
-        mpitch = (
-            _my(nlg_bx, nlg_bz, fx_nlg_b, fz_nlg_b)
-            + _my(mlg_l_bx, mlg_l_bz, fx_mlg_l_b, fz_mlg_l_b)
-            + _my(mlg_l_cx, mlg_l_cz, fx_mlg_l_c, fz_mlg_l_c)
-            + _my(mlg_r_bx, mlg_r_bz, fx_mlg_r_b, fz_mlg_r_b)
-            + _my(mlg_r_cx, mlg_r_cz, fx_mlg_r_c, fz_mlg_r_c)
-        )
+        mpitch = 0.0
+        for _, res in results:
+            for c in res.contributions:
+                mpitch += (c.px - cg_x) * c.fz - (c.pz - cg_z) * c.fx
 
         az_cg = (fz_total - p.masse * G * (1.0 - p.lift)) / p.masse
         theta_ddot = mpitch / p.jyy
@@ -695,181 +850,27 @@ def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None)
         out["aircraft_pitch_rate"][i] = theta_dot
         out["aircraft_pitch_acc"][i] = theta_ddot
         out["aircraft_fz_total"][i] = fz_total
-        out["aircraft_fz_nlg"][i] = fz_nlg
-        out["aircraft_fz_mlg_left"][i] = fz_mlg_l
-        out["aircraft_fz_mlg_right"][i] = fz_mlg_r
         out["aircraft_mx_total"][i] = mpitch
-        out["nlg_stroke"][i] = max(0.0, nlg_state.d)
-        out["nlg_velocity"][i] = nlg_state.v_damper
-        out["nlg_ftot"][i] = ftot_nlg
-        out["nlg_fhyd"][i] = float(damp_nlg["fhyd"])
-        out["nlg_ffrijoi"][i] = ffrijoi
-        out["nlg_ffribag"][i] = ffribag
-        out["nlg_fgas"][i] = float(damp_nlg["fgas"])
-        out["nlg_pg"][i] = pg / 1.0e5
-        out["nlg_pc"][i] = pc / 1.0e5
-        out["nlg_pd"][i] = pd / 1.0e5
-        out["nlg_delta_pc"][i] = nlg_state.delta_pc / 1.0e5
-        out["nlg_delta_pd"][i] = nlg_state.delta_pd / 1.0e5
-        out["nlg_hyd_qc_total"][i] = float(damp_nlg["qc_total"])
-        out["nlg_hyd_qc_bh"][i] = float(damp_nlg["qc_bh"])
-        out["nlg_hyd_qc_leak"][i] = float(damp_nlg["qc_leak"])
-        out["nlg_hyd_leak_ratio"][i] = float(damp_nlg["leak_ratio"])
-        out["nlg_hyd_re_leak"][i] = float(damp_nlg["re_leak"])
-        out["nlg_hyd_conv_err"][i] = float(damp_nlg["hyd_conv_err"])
-        out["nlg_hyd_conv_iter"][i] = float(damp_nlg["hyd_conv_iter"])
-        out["nlg_secbh"][i] = float(damp_nlg["sec"]) * 1.0e6
-        out["nlg_tyre_defl"][i] = nlg_tyre_defl_curr
-        out["nlg_tyre_ftyre"][i] = tyre_ftyre_nlg
-        out["nlg_tyre_mu"][i] = mu_nlg
-        out["nlg_tyre_slip"][i] = slip_nlg
-        out["nlg_tyre_omega"][i] = nlg_state.tyre_omega
-        out["nlg_tyre_alpha"][i] = tyre_alpha_nlg
-        out["nlg_tr_x"][i] = -fx_spring_wheel
-        out["nlg_reaction_h"][i] = -fx_spring_wheel
-        out["nlg_reaction_v"][i] = tyre_ftyre_nlg
-        out["nlg_xgt"][i] = xgt
-        out["nlg_xgb"][i] = xgb
-        out["nlg_accms"][i] = asup_nlg
-        out["nlg_accmns"][i] = (-ftot_nlg + tyre_ftyre_nlg - nlg_p.unsprung_mass * G) / nlg_p.unsprung_mass
-        out["nlg_vitmns"][i] = nlg_state.vz_mns_lg
-        out["nlg_depmns"][i] = nlg_state.z_mns_lg
-        out["nlg_tors_res_x"][i] = float(tb_sol[0])
-        out["nlg_tors_res_z"][i] = float(tb_sol[2])
-        out["nlg_tors_res_norm"][i] = math.hypot(float(tb_sol[0]), float(tb_sol[2]))
-        out["nlg_torsb_fx"][i] = float(tb_sol[0])
-        out["nlg_torsb_fz"][i] = float(tb_sol[2])
-        out["nlg_torsb_mx"][i] = float(mom_B_nlg[0])
-        out["nlg_torsb_mz"][i] = float(mom_B_nlg[2])
-        out["mlg_left_stroke"][i] = max(0.0, mlg_l.state.d)
-        out["mlg_left_velocity"][i] = mlg_l.state.v
-        out["mlg_left_ftot"][i] = mlg_l.state.ftot
-        out["mlg_left_fhyd"][i] = float(step_l["fhyd"])
-        out["mlg_left_ffrijoi"][i] = float(step_l["ffrijoi"])
-        out["mlg_left_fgas"][i] = float(step_l["fgas"])
-        out["mlg_left_pg"][i] = float(step_l["pg"]) / 1.0e5
-        out["mlg_left_pc"][i] = float(step_l["pc"]) / 1.0e5
-        out["mlg_left_pd"][i] = float(step_l["pd"]) / 1.0e5
-        out["mlg_left_delta_pc"][i] = mlg_l.state.delta_pc / 1.0e5
-        out["mlg_left_delta_pd"][i] = mlg_l.state.delta_pd / 1.0e5
-        out["mlg_left_hyd_qc_total"][i] = mlg_l.state.qc_total
-        out["mlg_left_hyd_qc_bh"][i] = mlg_l.state.qc_bh
-        out["mlg_left_hyd_qc_leak"][i] = mlg_l.state.qc_leak
-        out["mlg_left_hyd_leak_ratio"][i] = mlg_l.state.leak_ratio
-        out["mlg_left_hyd_re_leak"][i] = mlg_l.state.re_leak
-        out["mlg_left_hyd_conv_err"][i] = mlg_l.state.hyd_conv_err
-        out["mlg_left_hyd_conv_iter"][i] = mlg_l.state.hyd_conv_iter
-        out["mlg_left_secbh"][i] = mlg_l.state.sec * 1.0e6
-        out["mlg_left_tyre_defl"][i] = max(0.0, mlg_l.state.defl)
-        out["mlg_left_tyre_ftyre"][i] = float(step_l["ftyre"])
-        out["mlg_left_tyre_mu"][i] = float(step_l["mu_val"])
-        out["mlg_left_tyre_slip"][i] = float(step_l["slip"])
-        out["mlg_left_tyre_omega"][i] = mlg_l.state.omega
-        out["mlg_left_tyre_alpha"][i] = mlg_l.state.alpha
-        out["mlg_left_fx"][i] = float(step_l["fb_x"] + step_l["fc_x"])
-        out["mlg_left_reaction_h"][i] = float(step_l["fb_x"] + step_l["fc_x"])
-        out["mlg_left_reaction_v"][i] = float(step_l["ftyre"])
-        out["mlg_left_accms"][i] = asup_mlg_l
-        out["mlg_left_tors_res_x"][i] = float(step_l["res_x"])
-        out["mlg_left_tors_res_z"][i] = float(step_l["res_z"])
-        out["mlg_left_tors_res_norm"][i] = float(step_l["res_norm"])
-        out["mlg_left_torsc_fx"][i] = float(step_l["fc_x"])
-        out["mlg_left_torsc_fz"][i] = float(step_l["fc_z"])
-        out["mlg_left_torsb_fx"][i] = float(step_l["fb_x"])
-        out["mlg_left_torsb_fz"][i] = float(step_l["fb_z"])
-        out["mlg_left_torsb_mx"][i] = float(step_l["mb_x"])
-        out["mlg_left_torsb_mz"][i] = float(step_l["mb_z"])
-        out["mlg_right_stroke"][i] = max(0.0, mlg_r.state.d)
-        out["mlg_right_velocity"][i] = mlg_r.state.v
-        out["mlg_right_ftot"][i] = mlg_r.state.ftot
-        out["mlg_right_fhyd"][i] = float(step_r["fhyd"])
-        out["mlg_right_ffrijoi"][i] = float(step_r["ffrijoi"])
-        out["mlg_right_fgas"][i] = float(step_r["fgas"])
-        out["mlg_right_pg"][i] = float(step_r["pg"]) / 1.0e5
-        out["mlg_right_pc"][i] = float(step_r["pc"]) / 1.0e5
-        out["mlg_right_pd"][i] = float(step_r["pd"]) / 1.0e5
-        out["mlg_right_delta_pc"][i] = mlg_r.state.delta_pc / 1.0e5
-        out["mlg_right_delta_pd"][i] = mlg_r.state.delta_pd / 1.0e5
-        out["mlg_right_hyd_qc_total"][i] = mlg_r.state.qc_total
-        out["mlg_right_hyd_qc_bh"][i] = mlg_r.state.qc_bh
-        out["mlg_right_hyd_qc_leak"][i] = mlg_r.state.qc_leak
-        out["mlg_right_hyd_leak_ratio"][i] = mlg_r.state.leak_ratio
-        out["mlg_right_hyd_re_leak"][i] = mlg_r.state.re_leak
-        out["mlg_right_hyd_conv_err"][i] = mlg_r.state.hyd_conv_err
-        out["mlg_right_hyd_conv_iter"][i] = mlg_r.state.hyd_conv_iter
-        out["mlg_right_secbh"][i] = mlg_r.state.sec * 1.0e6
-        out["mlg_right_tyre_defl"][i] = max(0.0, mlg_r.state.defl)
-        out["mlg_right_tyre_ftyre"][i] = float(step_r["ftyre"])
-        out["mlg_right_tyre_mu"][i] = float(step_r["mu_val"])
-        out["mlg_right_tyre_slip"][i] = float(step_r["slip"])
-        out["mlg_right_tyre_omega"][i] = mlg_r.state.omega
-        out["mlg_right_tyre_alpha"][i] = mlg_r.state.alpha
-        out["mlg_right_fx"][i] = float(step_r["fb_x"] + step_r["fc_x"])
-        out["mlg_right_reaction_h"][i] = float(step_r["fb_x"] + step_r["fc_x"])
-        out["mlg_right_reaction_v"][i] = float(step_r["ftyre"])
-        out["mlg_right_accms"][i] = asup_mlg_r
-        out["mlg_right_tors_res_x"][i] = float(step_r["res_x"])
-        out["mlg_right_tors_res_z"][i] = float(step_r["res_z"])
-        out["mlg_right_tors_res_norm"][i] = float(step_r["res_norm"])
-        out["mlg_right_torsc_fx"][i] = float(step_r["fc_x"])
-        out["mlg_right_torsc_fz"][i] = float(step_r["fc_z"])
-        out["mlg_right_torsb_fx"][i] = float(step_r["fb_x"])
-        out["mlg_right_torsb_fz"][i] = float(step_r["fb_z"])
-        out["mlg_right_torsb_mx"][i] = float(step_r["mb_x"])
-        out["mlg_right_torsb_mz"][i] = float(step_r["mb_z"])
-
-        # Géométrie avion + points caractéristiques trains (repère X-Z avion, m).
-
-        nlg_b_sol = nlg_R_lg_to_sol_step @ nlg_state.ptB_lg
-        nlg_gt_sol = nlg_R_lg_to_sol_step @ nlg_state.ptGt_lg
-        nlg_gb_sol = nlg_R_lg_to_sol_step @ nlg_state.ptGb_lg
-        nlg_r_sol = nlg_R_lg_to_sol_step @ nlg_state.ptR_lg
 
         geom["cg_x"][i] = cg_x
         geom["cg_z"][i] = cg_z
         geom["ground_z"][i] = ground_z
-        nlg_gt_off_x, nlg_gt_off_z = _off_body_to_world(nlg_gt_body[0], nlg_gt_body[1], theta)
-        nlg_gb_off_x, nlg_gb_off_z = _off_body_to_world(nlg_gb_body[0], nlg_gb_body[1], theta)
-        geom["nlg_bx"][i] = nlg_bx
-        geom["nlg_bz"][i] = nlg_bz
-        geom["nlg_gtx"][i] = nlg_station_x + nlg_gt_off_x
-        geom["nlg_gtz"][i] = nlg_station_z + nlg_gt_off_z
-        geom["nlg_gbx"][i] = nlg_station_x + nlg_gb_off_x
-        geom["nlg_gbz"][i] = nlg_station_z + nlg_gb_off_z
-        nlg_br_sol_x = float(nlg_r_sol[0] - nlg_b_sol[0])
-        nlg_br_sol_z = float(nlg_r_sol[2] - nlg_b_sol[2])
-        geom["nlg_rx"][i] = nlg_bx + nlg_br_sol_x
-        geom["nlg_rz"][i] = nlg_bz + nlg_br_sol_z
-        geom["nlg_wheel_radius"][i] = p.nlg.unload_radius
 
-        # Rebuild A/R from rigid B anchor and local arm vectors to keep B-R-A rigid in animation export.
-        mlg_l_a_dx = float(mlg_l.state.A[0] - mlg_l.state.B[0])
-        mlg_l_a_dz = float(mlg_l.state.A[2] - mlg_l.state.B[2])
-        mlg_l_r_dx = float(mlg_l.state.R[0] - mlg_l.state.B[0])
-        mlg_l_r_dz = float(mlg_l.state.R[2] - mlg_l.state.B[2])
-        geom["mlg_left_ax"][i] = mlg_l_bx + mlg_l_a_dx
-        geom["mlg_left_az"][i] = mlg_l_bz + mlg_l_a_dz
-        geom["mlg_left_bx"][i] = mlg_l_bx
-        geom["mlg_left_bz"][i] = mlg_l_bz
-        geom["mlg_left_cx"][i] = mlg_l_cx
-        geom["mlg_left_cz"][i] = mlg_l_cz
-        geom["mlg_left_rx"][i] = mlg_l_bx + mlg_l_r_dx
-        geom["mlg_left_rz"][i] = mlg_l_bz + mlg_l_r_dz
-        geom["mlg_left_wheel_radius"][i] = p.mlg.unload_radius
-
-        mlg_r_a_dx = float(mlg_r.state.A[0] - mlg_r.state.B[0])
-        mlg_r_a_dz = float(mlg_r.state.A[2] - mlg_r.state.B[2])
-        mlg_r_r_dx = float(mlg_r.state.R[0] - mlg_r.state.B[0])
-        mlg_r_r_dz = float(mlg_r.state.R[2] - mlg_r.state.B[2])
-        geom["mlg_right_ax"][i] = mlg_r_bx + mlg_r_a_dx
-        geom["mlg_right_az"][i] = mlg_r_bz + mlg_r_a_dz
-        geom["mlg_right_bx"][i] = mlg_r_bx
-        geom["mlg_right_bz"][i] = mlg_r_bz
-        geom["mlg_right_cx"][i] = mlg_r_cx
-        geom["mlg_right_cz"][i] = mlg_r_cz
-        geom["mlg_right_rx"][i] = mlg_r_bx + mlg_r_r_dx
-        geom["mlg_right_rz"][i] = mlg_r_bz + mlg_r_r_dz
-        geom["mlg_right_wheel_radius"][i] = p.mlg.unload_radius
+        # Sorties par train : chaque slot fournit les diagnostics/géométrie
+        # propres à son type. Les colonnes non pertinentes (type opposé)
+        # restent à zéro.
+        for slot, res in results:
+            fz_col = out.get("aircraft_fz_" + slot.prefix)
+            if fz_col is not None:
+                fz_col[i] = res.fz_slot
+            for suffix, val in res.diag.items():
+                col = out.get(slot.prefix + "_" + suffix)
+                if col is not None:
+                    col[i] = val
+            for suffix, val in res.geom.items():
+                gcol = geom.get(slot.prefix + "_" + suffix)
+                if gcol is not None:
+                    gcol[i] = val
 
         if progress_callback is not None and (i % 10 == 0 or i == n_steps):
             progress_callback(i, n_steps)
