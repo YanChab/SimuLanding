@@ -100,7 +100,11 @@ a, a:visited {{ color: var(--sp-bordeaux); text-decoration: none; }}
 a:hover {{ color: var(--sp-rose); text-decoration: underline; }}
 
 /* --- Navigation en bandeau supérieur ---------------------------------- */
-header[data-testid="stHeader"] {{ background: transparent; }}
+/* En-tête OPAQUE : sinon le contenu défile visiblement derrière la barre de
+   navigation (effet de transparence illisible au scroll). */
+header[data-testid="stHeader"] {{
+    background: var(--background-color, #FFFFFF);
+}}
 [data-testid="stNavBar"], [data-testid="stTopNav"] {{
     background-color: var(--sp-bordeaux);
 }}
