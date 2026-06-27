@@ -430,6 +430,57 @@ $$
   résultante). Or `tr_x = kx·δx + cx·(dδx/dt)` (code, l.229) est **de signe
   opposé à `fx_spring_wheel`** du StraitStrut (§1.3) → décalage à instruire.
 
+### 6.7 Balancier corps rigide — masse active (modèle PFD complet)
+
+> ⚠️ **Modèle nouveau.** Le modèle historique est **incohérent** : balancier sans
+> masse en translation (fb = ta + tr) **mais** doté d'une inertie de rotation
+> jyy ≠ 0. Le modèle ci‑dessous traite le balancier comme un **vrai corps
+> rigide** (masse m′, centre d'inertie G′, inertie propre I_{G′}). Il **change la
+> trajectoire** (la masse agit dans la dynamique).
+>
+> **Référence de validation.** En **réutilisant jyy comme inertie au pivot**
+> (I_B = jyy fixe) et G′ = milieu(B, R), la limite **m′ → 0 redonne exactement
+> l'historique** — y compris la rotation : avec m′ = 0, (6a) donne
+> T_B = −(T_A+T_R) et (6b) se réduit à jyy·θ̈ = [(A−B)×T_A + (R−B)×T_R]_Y, soit
+> l'équation de rotation du code (l.197‑202). On valide donc m′ = 0 contre
+> l'historique, et m′ > 0 par **bilan d'énergie**.
+
+**Paramétrage retenu** (un seul nouveau paramètre d'entrée) :
+- **m′** : masse balancier + roue (nouveau, = `m_arm`) ;
+- **G′ = milieu(B, R)** par défaut (pas de nouvel input) ;
+- **I_B = jyy** (réutilisé), d'où I_{G′} = jyy − m′·‖BG′‖² (rester I_{G′} ≥ 0 ⇒
+  m′ ≤ jyy/‖BG′‖²).
+
+**Cinématique** (plan X–Z ; pivot B en translation verticale avec la cellule,
+bras en rotation θ autour de B) :
+
+$$
+\vec a_{G'} = \vec a_B + \ddot\theta\,(\hat y \times \vec r_{BG'}) - \dot\theta^{2}\,\vec r_{BG'},
+\qquad \vec r_{BG'} = G' - B
+$$
+
+**PFD du balancier (corps rigide).** Inconnues : réaction pivot $\vec T_B$ (2
+comp.) et $\ddot\theta$ (1).
+
+$$
+\boxed{\;m'\,\vec a_{G'} = \vec T_A + \vec T_R + \vec T_B + \vec P'\;}\tag{6a}
+$$
+$$
+\boxed{\;I_{G'}\,\ddot\theta = \big[(A-G')\times\vec T_A + (R-G')\times\vec T_R + (B-G')\times\vec T_B\big]_Y\;}\tag{6b}
+$$
+
+(6a)+(6b) = 3 équations scalaires → $\vec T_B$ et $\ddot\theta$. Effort transmis à
+la cellule : $\vec F_B = -\vec T_B$ (pivot), $\vec F_C = -\vec T_A$ (rotule).
+
+**Couplage structure.** $\vec F_B + \vec F_C$ pilotent la masse suspendue (train
+isolé) ou le fuselage (avion, §7) ; $\ddot\theta$ remplace l'équation de rotation
+historique (jyy). La **boucle d'intégration** avance θ, θ̇ **et** la cellule de
+façon couplée.
+
+**Différences clés avec §6.5** (modèle interface) : ici la rotation est pilotée
+par I_{G′} (et non jyy), le poids m′g crée un moment, et l'inertie m′·a_{G′}
+entre **dans la trajectoire** (pas seulement dans l'effort reporté).
+
 ---
 
 ## 7. Structure (fuselage) — PFD avion 2 DDL
