@@ -156,6 +156,61 @@ def test_single_gear_overstroke_stops_gracefully():
         assert not any(w.code == "SUR_ENFONCEMENT" for w in run_simulation(base).warnings)
 
 
+def test_strait_strut_B_is_encastrement_trailing_arm_is_pivot():
+    """Liaison au point B : un StraitStrut (encastrement) transmet le couple de
+    flexion de tangage à l'avion ; un TrailingArm (pivot/rotule) n'en transmet
+    aucun. On vérifie le champ `my` des contributions d'interface en contact."""
+    from dropsim.engine_aircraft import _build_slot, _rigid_station
+
+    p = default_aircraft_inputs().to_si()
+
+    def drive(prefix, kind, params, strut, station, push=0.05):
+        slot = _build_slot(prefix, kind, params, strut, station, p.cg, p.vx, p.pitch)
+        zbr = slot.reference_bottom_z(p.pitch)
+        slot.finalize_reference(-zbr, p.pitch)
+        slot.apply_ground_gap(0.0)
+        z_cg = -zbr - push  # abaisse l'avion -> roue en contact
+        sx, sz = _rigid_station(p.cg, z_cg, p.pitch, slot.station)
+        return slot.step(
+            station_x=sx, station_z=sz, zsup=sz - slot.station_z_ref,
+            vsup=-1.0, asup=0.0, theta=p.pitch, dt=5.0e-5,
+        )
+
+    ss = drive("nlg", "strait_strut", p.nlg, p.nlg_strut, p.nlg_station)
+    ta = drive("mlg_left", "trailing_arm", p.mlg, p.mlg_strut, p.mlg_left_station)
+
+    # StraitStrut en contact : effort non nul ET couple de tangage non nul.
+    assert any(abs(c.fz) > 1.0 for c in ss.contributions)
+    assert any(abs(c.my) > 1.0 for c in ss.contributions)
+    # TrailingArm : aucune contribution ne transmet de couple de tangage.
+    assert all(c.my == 0.0 for c in ta.contributions)
+
+
+def test_encastrement_couple_changes_pitch_trajectory():
+    """Le couple d'encastrement modifie la trajectoire de tangage de l'avion
+    (sinon B se comporterait comme une rotule). Comparaison avec/sans couple."""
+    import dropsim.engine_aircraft as ea
+
+    base = run_aircraft(default_aircraft_inputs().to_si()).data["aircraft_pitch"]
+
+    original_step = ea.StraitStrutSlot.step
+
+    def _no_couple(self, *args, **kwargs):
+        res = original_step(self, *args, **kwargs)
+        for c in res.contributions:
+            c.my = 0.0
+        return res
+
+    ea.StraitStrutSlot.step = _no_couple
+    try:
+        pin = run_aircraft(default_aircraft_inputs().to_si()).data["aircraft_pitch"]
+    finally:
+        ea.StraitStrutSlot.step = original_step
+
+    # Les trajectoires de tangage diffèrent de façon mesurable.
+    assert abs(float(base[-1]) - float(pin[-1])) > 1.0e-5
+
+
 def test_gear_drop_override_layering():
     """Les surcharges train isolé prennent le pas, le reste hérite du train."""
     ac = default_aircraft_inputs()

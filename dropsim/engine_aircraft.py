@@ -372,15 +372,20 @@ def _off_body_to_world(body_x: float, body_z: float, theta_val: float) -> tuple[
 class InterfaceContribution:
     """Effort d'interface d'un train sur la structure avion, en repère sol.
 
-    ``mx``/``mz`` (moment au point) sont conservés pour diagnostic mais NE sont
-    PAS injectés dans le PFD du corps (seul l'effort ``r x F`` compte, conforme
-    au comportement historique)."""
+    ``my`` est le couple transmis autour de l'axe de tangage (Y), non nul
+    seulement pour une liaison **encastrement** (StraitStrut au point B) : il est
+    injecté dans le PFD du corps en plus du moment ``r x F`` de l'effort. Pour une
+    rotule/pivot (TrailingArm en B et C), ``my`` reste nul.
+
+    ``mx``/``mz`` (composantes du couple hors plan) sont conservés pour
+    diagnostic et ne sont pas injectés dans le PFD 2 DDL (heave + tangage)."""
 
     px: float
     pz: float
     fx: float
     fz: float
     mx: float = 0.0
+    my: float = 0.0
     mz: float = 0.0
 
 
@@ -541,6 +546,7 @@ class StraitStrutSlot:
                 fx=float(tb_sol[0]),
                 fz=float(tb_sol[2]),
                 mx=float(mom_B[0]),
+                my=float(mom_B[1]),
                 mz=float(mom_B[2]),
             )
         ]
@@ -864,15 +870,18 @@ def run_aircraft(p: AircraftParamsSI, progress_callback: callable | None = None)
 
         # PFD structure avion (2 DDL : translation Z + tangage). On isole le
         # fuselage : efforts entrants = poids+lift au CG et efforts d'interface
-        # de chaque train (1 point B pour un StraitStrut, points B et C pour un
-        # TrailingArm). Le moment se calcule en r x F, indépendamment du type.
+        # de chaque train. Le moment de tangage somme, pour chaque point
+        # d'interface, le moment de l'effort (r x F) ET, pour une liaison
+        # encastrement (StraitStrut en B), le couple de flexion transmis (c.my,
+        # autour de l'axe de tangage Y). Convention : mpitch = -M_y standard, donc
+        # le couple s'ajoute en -c.my, cohérent avec le terme d'effort.
         fz_total = sum(res.fz_slot for _, res in results)
         cg_x = float(p.cg[0])
         cg_z = float(p.cg[2] + z_cg)
         mpitch = 0.0
         for _, res in results:
             for c in res.contributions:
-                mpitch += (c.px - cg_x) * c.fz - (c.pz - cg_z) * c.fx
+                mpitch += (c.px - cg_x) * c.fz - (c.pz - cg_z) * c.fx - c.my
 
         az_cg = (fz_total - p.masse * G * (1.0 - p.lift)) / p.masse
         theta_ddot = mpitch / p.jyy
