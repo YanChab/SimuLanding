@@ -657,7 +657,7 @@ et les tolérances saisies (en valeur absolue, positives) :
 Les cas sont construits par :
 
 $$
-	ext{Nominal}:
+\text{Nominal}:
 \begin{cases}
 D_{pal}=D_{pal,0}\\
 D_{bh}=D_{bh,0}\\
@@ -666,7 +666,7 @@ p_i=p_{i,0}
 $$
 
 $$
-	ext{Tolérance mini}:
+\text{Tolérance mini}:
 \begin{cases}
 D_{pal}=D_{pal,0}+\Delta D_{pal}\\
 D_{bh}=D_{bh,0}-\Delta D_{bh}\\
@@ -675,7 +675,7 @@ p_i=\max(0,\,p_{i,0}-\Delta p)
 $$
 
 $$
-	ext{Tolérance maxi}:
+\text{Tolérance maxi}:
 \begin{cases}
 D_{pal}=D_{pal,0}-\Delta D_{pal}\\
 D_{bh}=D_{bh,0}+\Delta D_{bh}\\
@@ -1255,7 +1255,7 @@ $$
 L'effort total jambe NLG suit la même forme que le modèle NLG isolé :
 
 $$
-F_{tot,NLG}=S_cP_c-S_dP_d+S_{bh}P_g+F_{fric,joint}+F_{fric,bagues}+F_{but\acute ee}
+F_{tot,NLG}=S_c\,P_c-S_d\,P_d+S_{bh}\,P_g+F_{fric,joint}+F_{fric,bagues}+F_{butée}
 $$
 
 Forçage de contact vers le PFD avion :
