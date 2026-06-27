@@ -115,7 +115,7 @@ def _num_table(specs, prefix, base, *, key):
         pd.DataFrame(rows),
         column_config={
             "Paramètre": st.column_config.TextColumn("Paramètre", alignment="right"),
-            "Valeur": st.column_config.NumberColumn("Valeur", width="small", alignment="center"),
+            "Valeur": st.column_config.NumberColumn("Valeur", width="small", alignment="center", format="%.12g"),
         },
         disabled=["Paramètre"],
         hide_index=True,
