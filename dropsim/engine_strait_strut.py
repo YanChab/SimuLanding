@@ -286,9 +286,10 @@ def _strait_strut_advance_local_state(
     ptB_lg = state.ptB_lg.copy()
     ptB_lg[2] += vz_ms_lg * dt
     ptGb_lg = state.ptGb_lg.copy()
-    ptGb_lg[2] += vz_ms_lg * dt
+    ptGb_lg[2] += vz_ms_lg * dt          # bague basse : sur le fût (corps fixe)
     ptGt_lg = state.ptGt_lg.copy()
-    ptGt_lg[2] += vz_ms_lg * dt
+    ptGt_lg[2] += vz_mns_lg * dt         # bague haute : sur la TIGE → suit la tige
+    #   (impacte la répartition des bagues xgt/xgb, donc la friction ffribag)
 
     ptR_sol = R_lg_to_sol @ ptR_lg
     tyre_defl_val = max(0.0, p.unload_radius - float(ptR_sol[2]))

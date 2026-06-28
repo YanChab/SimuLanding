@@ -609,15 +609,18 @@ class StraitStrutSlot:
         gt_sol = R_lg_to_sol_step @ adv.ptGt_lg
         gb_sol = R_lg_to_sol_step @ adv.ptGb_lg
         r_sol = R_lg_to_sol_step @ adv.ptR_lg
-        gt_off_x, gt_off_z = _off_body_to_world(self.gt_body[0], self.gt_body[1], theta)
+        # Gb : bague basse sur le fût (corps fixe) → offset corps figé.
         gb_off_x, gb_off_z = _off_body_to_world(self.gb_body[0], self.gb_body[1], theta)
+        # Gt : bague haute sur la TIGE → suit la position vive (comme R, relatif à B).
+        bgt_sol_x = float(gt_sol[0] - b_sol[0])
+        bgt_sol_z = float(gt_sol[2] - b_sol[2])
         br_sol_x = float(r_sol[0] - b_sol[0])
         br_sol_z = float(r_sol[2] - b_sol[2])
         geom = {
             "bx": bx_step,
             "bz": bz_step,
-            "gtx": station_x + gt_off_x,
-            "gtz": station_z + gt_off_z,
+            "gtx": bx_step + bgt_sol_x,
+            "gtz": bz_step + bgt_sol_z,
             "gbx": station_x + gb_off_x,
             "gbz": station_z + gb_off_z,
             "rx": bx_step + br_sol_x,

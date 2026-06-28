@@ -137,6 +137,14 @@ avec l'enfoncement.
 **Centre d'inertie de la tige.** G₁ est placé au **milieu de R et Gt** :
 G₁ = (R + Gt)/2, soit ξ₁ = ξR/2 et ζ₁ = (ζR + ζt)/2.
 
+**Appartenance des bagues (important pour la friction).** La bague haute **Gt est
+portée par la tige** (elle **coulisse** : sa position avance avec la masse non
+suspendue, comme R) ; la bague basse **Gb est portée par le corps fixe** (solidaire
+de la cellule). L'**entraxe Gt–Gb varie donc avec la course**, ce qui modifie la
+répartition des réactions de bague Xgt/Xgb (§2.2, règle du levier) et **donc
+l'effort de frottement de bague** ``ffribag``. (Le modèle initial figeait Gt sur le
+corps fixe — corrigé.)
+
 Le point de contact S est sous R : vecteur RS = −R_eff·Z.
 
 ---

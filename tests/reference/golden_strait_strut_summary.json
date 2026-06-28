@@ -2,94 +2,94 @@
   "nominal": {
     "overrides": {},
     "summary": {
-      "Course max (mm)": 165.08419659683432,
-      "Effort vertical max Fz (N)": 30372.701825284807,
-      "Effort horizontal max Fx (N)": 11961.12253371544,
-      "Effort amortisseur max (N)": 30083.23381475688,
-      "Pression gaz max (bar)": 142.09728902554053,
-      "Pression compression max (bar)": 201.86714710731474,
-      "Accélération max (g)": 2.930371697035069,
+      "Course max (mm)": 167.83650872207411,
+      "Effort vertical max Fz (N)": 31184.701619951902,
+      "Effort horizontal max Fx (N)": 11871.049907198878,
+      "Effort amortisseur max (N)": 30982.272473289315,
+      "Pression gaz max (bar)": 150.2279497394808,
+      "Pression compression max (bar)": 199.31349989495985,
+      "Accélération max (g)": 3.0274607619800302,
       "Nombre de pas": 5000
     },
     "summary_rows": [
       [
         "Fx Spin up",
-        11961.12253371544,
+        11871.049907198878,
         "N"
       ],
       [
         "Fz Spin up",
-        22335.782786748794,
+        22100.864729294975,
         "N"
       ],
       [
         "Stroke spin up",
-        24.694203301752434,
+        25.363959105719125,
         "mm"
       ],
       [
         "Fx Spring back",
-        -5431.949029457041,
+        -5401.182081221186,
         "N"
       ],
       [
         "Fz Spring back",
-        25582.97315325035,
+        25211.79187549605,
         "N"
       ],
       [
         "Stroke Spring back",
-        42.56542592764329,
+        43.65340463590993,
         "mm"
       ],
       [
         "Fz Max",
-        30372.701825284807,
+        31184.701619951902,
         "N"
       ],
       [
         "Stroke Fzmax",
-        164.43842229756223,
+        167.77951486323246,
         "mm"
       ],
       [
         "Max damper stroke",
-        165.08419659683432,
+        167.83650872207411,
         "mm"
       ],
       [
         "Max damper velocity",
-        2.259021568916173,
+        2.2417080680309613,
         "m/s"
       ],
       [
         "Max gas pressure",
-        142.09728902554053,
+        150.2279497394808,
         "bar"
       ],
       [
         "Max comp pressure",
-        201.86714710731474,
+        199.31349989495985,
         "bar"
       ],
       [
         "Max rebound pressure",
-        272.0035307152617,
+        276.85819106331894,
         "bar"
       ],
       [
         "Max Vertical acc",
-        2.930371697035069,
+        3.0274607619800302,
         "g"
       ],
       [
         "Load factor",
-        3.911985347282643,
+        3.9986582896981817,
         "-"
       ],
       [
         "Ground load factor",
-        3.241985347282643,
+        3.328658289698182,
         "-"
       ]
     ]
@@ -99,94 +99,94 @@
       "temperature": -20.0
     },
     "summary": {
-      "Course max (mm)": 170.09481775976332,
-      "Effort vertical max Fz (N)": 30778.986750970445,
-      "Effort horizontal max Fx (N)": 11987.290192490032,
-      "Effort amortisseur max (N)": 29529.747342794737,
-      "Pression gaz max (bar)": 121.19463923952775,
-      "Pression compression max (bar)": 201.2995045847287,
-      "Accélération max (g)": 2.8749285174424446,
+      "Course max (mm)": 172.298849204957,
+      "Effort vertical max Fz (N)": 28189.417925854304,
+      "Effort horizontal max Fx (N)": 11899.133513078317,
+      "Effort amortisseur max (N)": 27231.17824991751,
+      "Pression gaz max (bar)": 126.80968526115333,
+      "Pression compression max (bar)": 198.88837155672505,
+      "Accélération max (g)": 2.6080066462052645,
       "Nombre de pas": 5000
     },
     "summary_rows": [
       [
         "Fx Spin up",
-        11987.290192490032,
+        11899.133513078317,
         "N"
       ],
       [
         "Fz Spin up",
-        22379.060651743108,
+        22149.077978312784,
         "N"
       ],
       [
         "Stroke spin up",
-        24.88573568660068,
+        25.541799726618855,
         "mm"
       ],
       [
         "Fx Spring back",
-        -5430.629794609413,
+        -5400.396446339802,
         "N"
       ],
       [
         "Fz Spring back",
-        25741.506467588602,
+        25381.47436689594,
         "N"
       ],
       [
         "Stroke Spring back",
-        42.43109768081866,
+        43.48740426165034,
         "mm"
       ],
       [
         "Fz Max",
-        30778.986750970445,
+        28189.417925854304,
         "N"
       ],
       [
         "Stroke Fzmax",
-        74.34905266576256,
+        78.73243526047372,
         "mm"
       ],
       [
         "Max damper stroke",
-        170.09481775976332,
+        172.298849204957,
         "mm"
       ],
       [
         "Max damper velocity",
-        2.2107954784435964,
+        2.1951252508667998,
         "m/s"
       ],
       [
         "Max gas pressure",
-        121.19463923952775,
+        126.80968526115333,
         "bar"
       ],
       [
         "Max comp pressure",
-        201.2995045847287,
+        198.88837155672505,
         "bar"
       ],
       [
         "Max rebound pressure",
-        257.84928615746105,
+        262.6541241220099,
         "bar"
       ],
       [
         "Max Vertical acc",
-        2.8749285174424446,
+        2.6080066462052645,
         "g"
       ],
       [
         "Load factor",
-        3.955352242446317,
+        3.678941397105668,
         "-"
       ],
       [
         "Ground load factor",
-        3.285352242446317,
+        3.008941397105668,
         "-"
       ]
     ]
@@ -196,94 +196,94 @@
       "masse": 1100.0
     },
     "summary": {
-      "Course max (mm)": 176.39295245758987,
-      "Effort vertical max Fz (N)": 37980.67405759969,
-      "Effort horizontal max Fx (N)": 12016.33374002926,
-      "Effort amortisseur max (N)": 37697.78293707883,
-      "Pression gaz max (bar)": 179.0439488112336,
-      "Pression compression max (bar)": 216.13872364894402,
-      "Accélération max (g)": 3.2166354388167564,
+      "Course max (mm)": 179.41108381219198,
+      "Effort vertical max Fz (N)": 39441.2153881172,
+      "Effort horizontal max Fx (N)": 11925.995384118803,
+      "Effort amortisseur max (N)": 39152.47524689745,
+      "Pression gaz max (bar)": 190.5548384645876,
+      "Pression compression max (bar)": 212.94989479618377,
+      "Accélération max (g)": 3.353376937516926,
       "Nombre de pas": 5000
     },
     "summary_rows": [
       [
         "Fx Spin up",
-        12016.33374002926,
+        11925.995384118803,
         "N"
       ],
       [
         "Fz Spin up",
-        22424.73062290658,
+        22242.456779705328,
         "N"
       ],
       [
         "Stroke spin up",
-        24.691618035099822,
+        25.489477418452246,
         "mm"
       ],
       [
         "Fx Spring back",
-        -5436.683904967442,
+        -5406.5893215237,
         "N"
       ],
       [
         "Fz Spring back",
-        25908.804870382377,
+        25533.964905181776,
         "N"
       ],
       [
         "Stroke Spring back",
-        42.85354791140866,
+        43.943745392645454,
         "mm"
       ],
       [
         "Fz Max",
-        37980.67405759969,
+        39441.2153881172,
         "N"
       ],
       [
         "Stroke Fzmax",
-        176.18835714121516,
+        179.324736948143,
         "mm"
       ],
       [
         "Max damper stroke",
-        176.39295245758987,
+        179.41108381219198,
         "mm"
       ],
       [
         "Max damper velocity",
-        2.281036625139635,
+        2.2635365683823667,
         "m/s"
       ],
       [
         "Max gas pressure",
-        179.0439488112336,
+        190.5548384645876,
         "bar"
       ],
       [
         "Max comp pressure",
-        216.13872364894402,
+        212.94989479618377,
         "bar"
       ],
       [
         "Max rebound pressure",
-        285.85733033279763,
+        290.9936846577143,
         "bar"
       ],
       [
         "Max Vertical acc",
-        3.2166354388167564,
+        3.353376937516926,
         "g"
       ],
       [
         "Load factor",
-        4.189662131183365,
+        4.325010229646669,
         "-"
       ],
       [
         "Ground load factor",
-        3.5196621311833645,
+        3.655010229646668,
         "-"
       ]
     ]
