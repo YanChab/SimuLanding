@@ -771,6 +771,7 @@ class TrailingArmSlot:
     def __init__(self, *, prefix, params, station, cg, vx, pitch_init, arm_mass=0.0):
         self.prefix = prefix
         self.model_kind = "trailing_arm"
+        self.p = params  # exposé comme StraitStrutSlot (gestion sur-enfoncement)
         self.cg = cg
         self.station = station
         self.unload_radius = float(params.unload_radius)
