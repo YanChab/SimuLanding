@@ -19,9 +19,11 @@ from dropsim import (
     StraitStrutInputs,
     StraitStrutDragBraceInputs,
     TrailingArmInputs,
+    TrailingArmDragBraceInputs,
     default_strait_strut_inputs,
     default_strait_strut_drag_brace_inputs,
     default_trailing_arm_inputs,
+    default_trailing_arm_drag_brace_inputs,
 )
 from dropsim.inputs import Point3, Rainure
 
@@ -29,8 +31,10 @@ GEAR_TYPE_LABELS = {
     "strait_strut": "StraitStrut (jambe droite)",
     "strait_strut_drag_brace": "StraitStrut + drag brace",
     "trailing_arm": "TrailingArm (balancier)",
+    "trailing_arm_drag_brace": "TrailingArm + jambe/bielle",
 }
-_GEAR_TYPE_OPTIONS = ["strait_strut", "strait_strut_drag_brace", "trailing_arm"]
+_GEAR_TYPE_OPTIONS = ["strait_strut", "strait_strut_drag_brace",
+                      "trailing_arm", "trailing_arm_drag_brace"]
 
 # Groupes de paramètres scalaires (label, attribut). Les réglages numériques
 # globaux (intégrateur, solveur, tolérance, température) sont gérés au niveau
@@ -116,6 +120,8 @@ def _default_for(kind: str):
         return default_strait_strut_drag_brace_inputs()
     if kind == "strait_strut":
         return default_strait_strut_inputs()
+    if kind == "trailing_arm_drag_brace":
+        return default_trailing_arm_drag_brace_inputs()
     return default_trailing_arm_inputs()
 
 
@@ -229,19 +235,34 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
             st.markdown("**Balancier**")
             _num_table([("Inertie balancier Jyy (kg·m²)", "jyy")], prefix, base_inputs, key=f"{prefix}_jyy_tbl")
             st.markdown("**Points (mm, repère avion)**")
+            # Variante jambe/bielle : on ajoute l'ancrage F1/F2 + bielle D–E.
+            # Libellés UI → attributs : D→Dbr, E→Ebr.
+            if kind == "trailing_arm_drag_brace":
+                _ta_spec = [
+                    ("B", "B"), ("A", "A"), ("C", "C"), ("R", "R"), ("S", "S"),
+                    ("F1", "F1"), ("F2", "F2"), ("D", "Dbr"), ("E", "Ebr"),
+                ]
+            else:
+                _ta_spec = [("B", "B"), ("A", "A"), ("C", "C"), ("R", "R"), ("S", "S")]
             pkey = f"{prefix}_points"
             if pkey not in st.session_state:
                 st.session_state[pkey] = pd.DataFrame({
-                    "Point": ["B", "A", "C", "R", "S"],
-                    "X": [base_inputs.B.x, base_inputs.A.x, base_inputs.C.x, base_inputs.R.x, base_inputs.S.x],
-                    "Y": [base_inputs.B.y, base_inputs.A.y, base_inputs.C.y, base_inputs.R.y, base_inputs.S.y],
-                    "Z": [base_inputs.B.z, base_inputs.A.z, base_inputs.C.z, base_inputs.R.z, base_inputs.S.z],
+                    "Point": [lbl for lbl, _ in _ta_spec],
+                    "X": [getattr(base_inputs, a).x for _, a in _ta_spec],
+                    "Y": [getattr(base_inputs, a).y for _, a in _ta_spec],
+                    "Z": [getattr(base_inputs, a).z for _, a in _ta_spec],
                 })
             points_df = st.data_editor(
                 st.session_state[pkey], hide_index=True, disabled=["Point"],
                 width="stretch", key=f"{prefix}_points_ed",
             )
             st.session_state[pkey] = points_df  # persiste les éditions au rerun (lancement)
+            if kind == "trailing_arm_drag_brace":
+                st.caption(
+                    "B/A/C/R/S = balancier+amortisseur (inchangé). Ancrage de la jambe : "
+                    "F1 (rotule) + F2 (linéaire annulaire d'axe F1-F2) + bielle D–E "
+                    "(D sur la jambe, E sur la structure). Cf. PFD §6b."
+                )
     with dmp_col:
         st.markdown("**Amortisseur (géométrie)**")
         _num_table(_DAMPER_FIELDS, prefix, base_inputs, key=f"{prefix}_dmp_tbl")
@@ -339,7 +360,15 @@ def _build_gear_inputs(prefix, kind, base, points_df, rainures_df, tyre_df, mu_d
         return replace(base_ss, **common, **strut_scalars,
                        B=pts["B"], Gt=pts["Gt"], Gb=pts["Gb"], R=pts["R"])
 
-    return replace(base if isinstance(base, TrailingArmInputs) and base.model_kind == "trailing_arm"
+    if kind == "trailing_arm_drag_brace":
+        base_jb = base if isinstance(base, TrailingArmDragBraceInputs) else default_trailing_arm_drag_brace_inputs()
+        return replace(base_jb, **common, jyy=g("jyy"),
+                       B=pts["B"], A=pts["A"], C=pts["C"], R=pts["R"], S=pts["S"],
+                       F1=pts["F1"], F2=pts["F2"], Dbr=pts["D"], Ebr=pts["E"])
+
+    return replace(base if (isinstance(base, TrailingArmInputs)
+                            and not isinstance(base, (StraitStrutInputs, TrailingArmDragBraceInputs))
+                            and base.model_kind == "trailing_arm")
                    else default_trailing_arm_inputs(),
                    **common, jyy=g("jyy"),
                    B=pts["B"], A=pts["A"], C=pts["C"], R=pts["R"], S=pts["S"])
@@ -564,21 +593,23 @@ def render_full_gear_result(result, label: str) -> None:
 
     if _has_db:
         with tabs[8]:
-            b1 = np.sqrt(df["DragBrace.B1 Fx (N)"] ** 2 + df["DragBrace.B1 Fy (N)"] ** 2
-                         + df["DragBrace.B1 Fz (N)"] ** 2)
-            b2 = np.sqrt(df["DragBrace.B2 Fx (N)"] ** 2 + df["DragBrace.B2 Fy (N)"] ** 2
-                         + df["DragBrace.B2 Fz (N)"] ** 2)
+            # Deux schémas d'ancrage : StraitStrut → B1/B2 ; TrailingArm → F1/F2.
+            a1, a2 = ("B1", "B2") if f"DragBrace.B1 Fx (N)" in cols else ("F1", "F2")
+            r1 = np.sqrt(df[f"DragBrace.{a1} Fx (N)"] ** 2 + df[f"DragBrace.{a1} Fy (N)"] ** 2
+                         + df[f"DragBrace.{a1} Fz (N)"] ** 2)
+            r2 = np.sqrt(df[f"DragBrace.{a2} Fx (N)"] ** 2 + df[f"DragBrace.{a2} Fy (N)"] ** 2
+                         + df[f"DragBrace.{a2} Fz (N)"] ** 2)
             st.plotly_chart(_gline(t, [
-                ("Effort bielle (drag brace)", df["DragBrace.Effort bielle (N)"]),
-                ("|R| rotule B1", b1),
-                ("|R| linéaire annulaire B2", b2),
-            ], f"{label} — Ancrage drag brace (efforts structure↔corps)",
+                ("Effort bielle", df["DragBrace.Effort bielle (N)"]),
+                (f"|R| rotule {a1}", r1),
+                (f"|R| linéaire annulaire {a2}", r2),
+            ], f"{label} — Ancrage (efforts structure↔corps)",
                "Temps (s)", "Effort (N)"), use_container_width=True)
-            with st.expander(f"Composantes B1 / B2 (repère jambe) — {label}"):
+            with st.expander(f"Composantes {a1} / {a2} (repère corps) — {label}"):
                 st.plotly_chart(_gline(t, [
-                    ("B1 Fx", df["DragBrace.B1 Fx (N)"]), ("B1 Fy", df["DragBrace.B1 Fy (N)"]),
-                    ("B1 Fz", df["DragBrace.B1 Fz (N)"]), ("B2 Fx", df["DragBrace.B2 Fx (N)"]),
-                    ("B2 Fy", df["DragBrace.B2 Fy (N)"]), ("B2 Fz", df["DragBrace.B2 Fz (N)"]),
+                    (f"{a1} Fx", df[f"DragBrace.{a1} Fx (N)"]), (f"{a1} Fy", df[f"DragBrace.{a1} Fy (N)"]),
+                    (f"{a1} Fz", df[f"DragBrace.{a1} Fz (N)"]), (f"{a2} Fx", df[f"DragBrace.{a2} Fx (N)"]),
+                    (f"{a2} Fy", df[f"DragBrace.{a2} Fy (N)"]), (f"{a2} Fz", df[f"DragBrace.{a2} Fz (N)"]),
                 ], f"{label} — Composantes d'ancrage", "Temps (s)", "Effort (N)"),
                    use_container_width=True)
 

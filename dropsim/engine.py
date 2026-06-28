@@ -81,6 +81,14 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "torsB_fz": "Torseur@B (pivot).Effort Z (N)",
     "torsB_mx": "Torseur@B (pivot).Moment X (N·m)",
     "torsB_mz": "Torseur@B (pivot).Moment Z (N·m)",
+    # Ancrage « jambe + bielle » (cf. PFD §6b) : efforts STRUCTURE→JAMBE, repère corps.
+    "db_brace_T": "DragBrace.Effort bielle (N)",
+    "db_f1_fx": "DragBrace.F1 Fx (N)",
+    "db_f1_fy": "DragBrace.F1 Fy (N)",
+    "db_f1_fz": "DragBrace.F1 Fz (N)",
+    "db_f2_fx": "DragBrace.F2 Fx (N)",
+    "db_f2_fy": "DragBrace.F2 Fy (N)",
+    "db_f2_fz": "DragBrace.F2 Fz (N)",
     # Bilan énergétique (diagnostic, purement passif) : bilan COMPLET du
     # système (masse suspendue + balancier + roue + amortisseur). On suit les
     # réservoirs cinétiques (translation verticale de la masse suspendue,
@@ -851,6 +859,27 @@ def damper_force_step_implicit_adaptive(
     return last_step
 
 
+def _jambe_brace_step(F_B, M_B, F_C, jambe, pitch, roll):
+    """Efforts d'ancrage de la jambe (PFD §6b) — repère CORPS. ``F_B/M_B/F_C`` :
+    torseur du train (repère monde) au pivot B et à la rotule C. ``jambe`` : dict
+    des points repère corps (m) B, C, F1, F2, Dbr, Ebr. ``pitch/roll`` : attitude
+    (rotation monde→corps via chgt_rep). Retourne (T, R_F1, R_F2) ou None.
+
+    Réutilise le solveur isostatique du drag brace (rotule + linéaire annulaire +
+    bielle), la jambe jouant le rôle du « corps » et F1/F2/D/E celui de B1/B2/C/D.
+    """
+    from .geometry import chgt_rep
+    from .engine_strait_strut import _drag_brace_reactions
+
+    Fb = chgt_rep(np.asarray(F_B, dtype=float), pitch, roll)
+    Fc = chgt_rep(np.asarray(F_C, dtype=float), pitch, roll)
+    Mb = chgt_rep(np.asarray(M_B, dtype=float), pitch, roll)
+    F1 = jambe["F1"]
+    R_int = Fb + Fc
+    M_int = Mb + np.cross(jambe["B"] - F1, Fb) + np.cross(jambe["C"] - F1, Fc)
+    return _drag_brace_reactions(R_int, M_int, F1, jambe["F2"], jambe["Dbr"], jambe["Ebr"])
+
+
 def run_trailing_arm(
     p: TrailingArmParamsSI,
     collector: ErrorCollector | None = None,
@@ -1318,6 +1347,14 @@ def run_trailing_arm(
         out["torsB_fz"][i] = fb_z
         out["torsB_mx"][i] = mb_x
         out["torsB_mz"][i] = mb_z
+        if p.jambe is not None:
+            _jb = _jambe_brace_step([fb_x, fb_y, fb_z], [mb_x, 0.0, mb_z],
+                                    [fc_x, fc_y, fc_z], p.jambe, p.pitch, p.roll)
+            if _jb is not None:
+                _T, _RF1, _RF2 = _jb
+                out["db_brace_T"][i] = _T
+                out["db_f1_fx"][i] = _RF1[0]; out["db_f1_fy"][i] = _RF1[1]; out["db_f1_fz"][i] = _RF1[2]
+                out["db_f2_fx"][i] = _RF2[0]; out["db_f2_fy"][i] = _RF2[1]; out["db_f2_fz"][i] = _RF2[2]
 
         # Bilan énergétique (diagnostic)
         out["e_kin"][i] = e_kin

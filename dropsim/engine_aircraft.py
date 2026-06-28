@@ -10,6 +10,7 @@ from .engine import (
     _endstop,
     _integrate_const_acc,
     _trailing_arm_local_step,
+    _jambe_brace_step,
     TrailingArmLocalState,
 )
 from .engine_strait_strut import (
@@ -88,6 +89,12 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "nlg_db_b2_fx": "NLG.DragBrace.B2 Fx (N)",
     "nlg_db_b2_fy": "NLG.DragBrace.B2 Fy (N)",
     "nlg_db_b2_fz": "NLG.DragBrace.B2 Fz (N)",
+    "nlg_db_f1_fx": "NLG.DragBrace.F1 Fx (N)",
+    "nlg_db_f1_fy": "NLG.DragBrace.F1 Fy (N)",
+    "nlg_db_f1_fz": "NLG.DragBrace.F1 Fz (N)",
+    "nlg_db_f2_fx": "NLG.DragBrace.F2 Fx (N)",
+    "nlg_db_f2_fy": "NLG.DragBrace.F2 Fy (N)",
+    "nlg_db_f2_fz": "NLG.DragBrace.F2 Fz (N)",
     "nlg_accms": "NLG.AccMs (m/s²)",
     "nlg_accmns": "NLG.AccMns (m/s²)",
     "nlg_vitmns": "NLG.VitMns (m/s)",
@@ -136,6 +143,12 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "mlg_left_db_b2_fx": "MLG left.DragBrace.B2 Fx (N)",
     "mlg_left_db_b2_fy": "MLG left.DragBrace.B2 Fy (N)",
     "mlg_left_db_b2_fz": "MLG left.DragBrace.B2 Fz (N)",
+    "mlg_left_db_f1_fx": "MLG left.DragBrace.F1 Fx (N)",
+    "mlg_left_db_f1_fy": "MLG left.DragBrace.F1 Fy (N)",
+    "mlg_left_db_f1_fz": "MLG left.DragBrace.F1 Fz (N)",
+    "mlg_left_db_f2_fx": "MLG left.DragBrace.F2 Fx (N)",
+    "mlg_left_db_f2_fy": "MLG left.DragBrace.F2 Fy (N)",
+    "mlg_left_db_f2_fz": "MLG left.DragBrace.F2 Fz (N)",
     "mlg_left_tors_res_x": "MLG left.Torseur.Resultante X (N)",
     "mlg_left_tors_res_z": "MLG left.Torseur.Resultante Z (N)",
     "mlg_left_tors_res_norm": "MLG left.Torseur.Resultante norme (N)",
@@ -182,6 +195,12 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "mlg_right_db_b2_fx": "MLG right.DragBrace.B2 Fx (N)",
     "mlg_right_db_b2_fy": "MLG right.DragBrace.B2 Fy (N)",
     "mlg_right_db_b2_fz": "MLG right.DragBrace.B2 Fz (N)",
+    "mlg_right_db_f1_fx": "MLG right.DragBrace.F1 Fx (N)",
+    "mlg_right_db_f1_fy": "MLG right.DragBrace.F1 Fy (N)",
+    "mlg_right_db_f1_fz": "MLG right.DragBrace.F1 Fz (N)",
+    "mlg_right_db_f2_fx": "MLG right.DragBrace.F2 Fx (N)",
+    "mlg_right_db_f2_fy": "MLG right.DragBrace.F2 Fy (N)",
+    "mlg_right_db_f2_fz": "MLG right.DragBrace.F2 Fz (N)",
     "mlg_right_tors_res_x": "MLG right.Torseur.Resultante X (N)",
     "mlg_right_tors_res_z": "MLG right.Torseur.Resultante Z (N)",
     "mlg_right_tors_res_norm": "MLG right.Torseur.Resultante norme (N)",
@@ -365,13 +384,16 @@ def _init_trailing_runtime(p: TrailingArmParamsSI) -> _TrailingRuntime:
 
 
 def _mirror_trailing_params_y(p: TrailingArmParamsSI) -> TrailingArmParamsSI:
+    def _my(v):
+        return np.array([v[0], -v[1], v[2]], dtype=float)
+
+    jambe = None
+    if getattr(p, "jambe", None) is not None:
+        jambe = {k: _my(v) for k, v in p.jambe.items()}
     return replace(
         p,
-        B=np.array([p.B[0], -p.B[1], p.B[2]], dtype=float),
-        A=np.array([p.A[0], -p.A[1], p.A[2]], dtype=float),
-        C=np.array([p.C[0], -p.C[1], p.C[2]], dtype=float),
-        R=np.array([p.R[0], -p.R[1], p.R[2]], dtype=float),
-        S=np.array([p.S[0], -p.S[1], p.S[2]], dtype=float),
+        B=_my(p.B), A=_my(p.A), C=_my(p.C), R=_my(p.R), S=_my(p.S),
+        jambe=jambe,
     )
 
 
@@ -859,6 +881,18 @@ class TrailingArmSlot:
         fc_x = float(step["fc_x"])
         fc_z = float(step["fc_z"])
 
+        # Ancrage « jambe + bielle » (§6b) : efforts F1/F2/bielle, si configuré.
+        jb_T = jb_f1 = jb_f2 = None
+        if getattr(rt.p, "jambe", None) is not None:
+            _jb = _jambe_brace_step(
+                [fb_x, float(step["fb_y"]), fb_z],
+                [float(step["mb_x"]), 0.0, float(step["mb_z"])],
+                [fc_x, float(step["fc_y"]), fc_z],
+                rt.p.jambe, rt.p.pitch, rt.p.roll,
+            )
+            if _jb is not None:
+                jb_T, jb_f1, jb_f2 = _jb
+
         contributions = [
             InterfaceContribution(
                 px=bx, pz=bz, fx=fb_x, fz=fb_z, mx=float(step["mb_x"]), mz=float(step["mb_z"])
@@ -976,6 +1010,12 @@ class TrailingArmSlot:
             "e_grav": 0.0,  # masse suspendue exclue (fuselage) ; tige massless
             "e_kin_init": self._e_kin_init,
         }
+        if jb_T is not None:
+            diag.update({
+                "db_brace_T": jb_T,
+                "db_f1_fx": float(jb_f1[0]), "db_f1_fy": float(jb_f1[1]), "db_f1_fz": float(jb_f1[2]),
+                "db_f2_fx": float(jb_f2[0]), "db_f2_fy": float(jb_f2[1]), "db_f2_fz": float(jb_f2[2]),
+            })
 
         a_dx = float(state.A[0] - state.B[0])
         a_dz = float(state.A[2] - state.B[2])
@@ -1028,7 +1068,7 @@ def run_aircraft(
 
     # Type de train par position (slot générique). Le slot droit reçoit des
     # paramètres miroir en Y lorsqu'il s'agit d'un TrailingArm.
-    if p.mlg_model_kind == "trailing_arm":
+    if p.mlg_model_kind in ("trailing_arm", "trailing_arm_drag_brace"):
         mlg_r_params = _mirror_trailing_params_y(p.mlg)
         mlg_r_strut = p.mlg_strut
     else:

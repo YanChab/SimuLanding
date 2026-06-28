@@ -35,6 +35,7 @@ from .inputs import (
     StraitStrutInputs,
     StraitStrutDragBraceInputs,
     TrailingArmInputs,
+    TrailingArmDragBraceInputs,
 )
 from .simulation import SimulationResult
 
@@ -60,7 +61,8 @@ def _coerce_trailing_like_inputs(data: dict, cls: type[TrailingArmInputs] | type
     out = dict(data)
     if out.get("damper_core_solver") in {"legacy", "implicit_adaptive", "auto"}:
         out["damper_core_solver"] = "auto_precise"
-    for key in ("B", "A", "C", "R", "S", "Gt", "Gb", "B1", "B2", "Cdb", "Ddb"):
+    for key in ("B", "A", "C", "R", "S", "Gt", "Gb", "B1", "B2", "Cdb", "Ddb",
+                "F1", "F2", "Dbr", "Ebr"):
         if key in out and isinstance(out[key], dict):
             out[key] = Point3(**out[key])
     if "rainures" in out:
@@ -102,6 +104,8 @@ def inputs_from_dict(d: dict) -> AircraftInputs | TrailingArmInputs | StraitStru
             kind = sub.get("model_kind", default_kind)
             if kind == "strait_strut_drag_brace":
                 return StraitStrutDragBraceInputs
+            if kind == "trailing_arm_drag_brace":
+                return TrailingArmDragBraceInputs
             return StraitStrutInputs if kind == "strait_strut" else TrailingArmInputs
 
         def _override(sub: dict) -> AircraftGearDropOverride:
@@ -131,6 +135,8 @@ def inputs_from_dict(d: dict) -> AircraftInputs | TrailingArmInputs | StraitStru
         cls = StraitStrutDragBraceInputs
     elif model_kind == "strait_strut":
         cls = StraitStrutInputs
+    elif model_kind == "trailing_arm_drag_brace":
+        cls = TrailingArmDragBraceInputs
     else:
         cls = TrailingArmInputs
     data = _coerce_trailing_like_inputs(d, cls)

@@ -378,11 +378,13 @@ class TrailingArmInputs:
             hint="Saisir une valeur entière >= 4.",
         )
         c.check(
-            self.model_kind not in {"trailing_arm", "strait_strut", "strait_strut_drag_brace"},
+            self.model_kind not in {"trailing_arm", "strait_strut",
+                                    "strait_strut_drag_brace", "trailing_arm_drag_brace"},
             code="MODEL_KIND_INVALIDE",
             message=(
-                "Le type de modèle doit être 'trailing_arm', 'strait_strut' ou "
-                f"'strait_strut_drag_brace' (reçu : {self.model_kind})."
+                "Le type de modèle doit être 'trailing_arm', 'strait_strut', "
+                "'strait_strut_drag_brace' ou 'trailing_arm_drag_brace' "
+                f"(reçu : {self.model_kind})."
             ),
             field="model_kind",
             hint="Choisir un type de modèle supporté.",
@@ -618,6 +620,7 @@ class TrailingArmInputs:
             rainures_debut=np.array([r.debut for r in self.rainures]),
             rainures_fin=np.array([r.fin for r in self.rainures]),
             rainures_profondeur=rainures_profondeur_eff,
+            jambe=_jambe_geom_si(self),
         )
 
 
@@ -699,6 +702,10 @@ class TrailingArmParamsSI:
     rainures_debut: "object"
     rainures_fin: "object"
     rainures_profondeur: "object"
+
+    # Ancrage « jambe + bielle » (cf. PFD §6b) : points repère CORPS (m) F1, F2,
+    # Dbr, Ebr. None pour un TrailingArm standard.
+    jambe: "object" = None
 
     # --- Sections dérivées (m²) ------------------------------------------ #
     @property
@@ -822,6 +829,56 @@ def default_strait_strut_drag_brace_inputs() -> StraitStrutDragBraceInputs:
 def default_trailing_arm_inputs() -> TrailingArmInputs:
     """Retourne les entrées par défaut (cas nominal trailing arm)."""
     return TrailingArmInputs()
+
+
+@dataclass
+class TrailingArmDragBraceInputs(TrailingArmInputs):
+    """TrailingArm dont le balancier (pivot B) et l'amortisseur (rotule C) sont
+    fixés sur une **jambe** intermédiaire, montée isostatiquement sur la structure
+    par rotule **F1** + linéaire annulaire **F2** (axe F1-F2) + bielle **D–E**
+    (D sur la jambe, E sur la structure). Cf. PFD §6b.
+
+    La dynamique (balancier + amortisseur, §6) est IDENTIQUE au TrailingArm.
+    """
+
+    model_kind: str = "trailing_arm_drag_brace"
+
+    # Points d'ancrage de la jambe (repère avion, mm, à pitch 0°).
+    F1: Point3 = field(default_factory=lambda: Point3(5350.0, -1200.0, 1000.0))
+    F2: Point3 = field(default_factory=lambda: Point3(5750.0, -1100.0, 1030.0))
+    Dbr: Point3 = field(default_factory=lambda: Point3(5650.0, -1050.0, 600.0))
+    Ebr: Point3 = field(default_factory=lambda: Point3(5550.0, -600.0, 1050.0))
+
+
+def default_trailing_arm_drag_brace_inputs() -> TrailingArmDragBraceInputs:
+    """Entrées par défaut du TrailingArm + jambe/bielle : géométrie TrailingArm
+    nominale (mêmes B/A/C/R/S) + points d'ancrage F1/F2/D/E par défaut."""
+    base = default_trailing_arm_inputs()
+    data = {f.name: getattr(base, f.name) for f in fields(base)}
+    data["model_kind"] = "trailing_arm_drag_brace"
+    return TrailingArmDragBraceInputs(
+        **data,
+        F1=Point3(5350.0, -1200.0, 1000.0),
+        F2=Point3(5750.0, -1100.0, 1030.0),
+        Dbr=Point3(5650.0, -1050.0, 600.0),
+        Ebr=Point3(5550.0, -600.0, 1050.0),
+    )
+
+
+def _jambe_geom_si(inputs: "TrailingArmInputs") -> dict | None:
+    """Géométrie d'ancrage « jambe + bielle » (PFD §6b) en repère CORPS (m, pitch 0).
+    Points B, C (pivot/amortisseur) et F1, F2, D, E. None si pas ce modèle."""
+    if getattr(inputs, "model_kind", "") != "trailing_arm_drag_brace":
+        return None
+    import numpy as np
+
+    def _p(p):
+        return np.array([p.x, p.y, p.z], dtype=float) * U.MM_TO_M
+
+    return dict(
+        B=_p(inputs.B), C=_p(inputs.C),
+        F1=_p(inputs.F1), F2=_p(inputs.F2), Dbr=_p(inputs.Dbr), Ebr=_p(inputs.Ebr),
+    )
 
 
 def default_strait_strut_inputs() -> StraitStrutInputs:
