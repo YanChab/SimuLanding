@@ -25,6 +25,7 @@ if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
 from theme import apply_theme  # noqa: E402
+from components.gear_form import render_full_gear_result  # noqa: E402
 
 apply_theme()
 
@@ -75,12 +76,26 @@ with st.expander("Charger une simulation avion complet sauvegardée", expanded=F
 
 
 result = st.session_state.get("aircraft_result")
+nlg_seul = st.session_state.get("aircraft_nlg_result")
+mlg_seul = st.session_state.get("aircraft_mlg_result")
+
 if result is None:
-    st.info(
-        "Aucun resultat avion complet en session. Lancez une simulation depuis la page "
-        "Avion complet, ou chargez une simulation sauvegardée ci-dessus.",
-        icon="ℹ️",
-    )
+    # Pas de run avion complet : on affiche quand même les résultats train isolé
+    # (NLG seul / MLG seul) s'ils existent, chacun dans son onglet.
+    if nlg_seul is None and mlg_seul is None:
+        st.info(
+            "Aucun resultat avion complet en session. Lancez une simulation depuis la page "
+            "Avion complet, ou chargez une simulation sauvegardée ci-dessus.",
+            icon="ℹ️",
+        )
+        st.stop()
+    st.caption("Aucun run avion complet en session — affichage des résultats train isolé.")
+    seul_specs = ([("MLG seul", mlg_seul)] if mlg_seul is not None else []) + \
+                 ([("NLG seul", nlg_seul)] if nlg_seul is not None else [])
+    seul_tabs = st.tabs([lbl for lbl, _ in seul_specs])
+    for tab, (lbl, res_seul) in zip(seul_tabs, seul_specs):
+        with tab:
+            render_full_gear_result(res_seul, lbl)
     st.stop()
 
 loaded_name = st.session_state.get("aircraft_result_name")
@@ -699,7 +714,19 @@ def _liaison_charts(label: str, base: str, *, has_c: bool, b_kind: str) -> None:
             )
 
 
-tab_aircraft, tab_mlg, tab_nlg = st.tabs(["Avion complet", "Section MLG", "Section NLG"])
+_tab_labels = ["Avion complet", "Section MLG", "Section NLG"]
+if mlg_seul is not None:
+    _tab_labels.append("MLG seul")
+if nlg_seul is not None:
+    _tab_labels.append("NLG seul")
+_tabs = st.tabs(_tab_labels)
+tab_aircraft, tab_mlg, tab_nlg = _tabs[0], _tabs[1], _tabs[2]
+_seul_idx = 3
+if mlg_seul is not None:
+    tab_mlg_seul = _tabs[_seul_idx]
+    _seul_idx += 1
+if nlg_seul is not None:
+    tab_nlg_seul = _tabs[_seul_idx]
 
 with tab_aircraft:
     st.markdown("### Animation")
@@ -1202,6 +1229,14 @@ with tab_nlg:
 
     with nlg_tabs[6]:
         _liaison_charts("NLG", "NLG", has_c=False, b_kind="encastrement")
+
+# --- Onglets train isolé (NLG seul / MLG seul) : mêmes courbes + bilan énerg. ---
+if mlg_seul is not None:
+    with tab_mlg_seul:
+        render_full_gear_result(mlg_seul, "MLG seul")
+if nlg_seul is not None:
+    with tab_nlg_seul:
+        render_full_gear_result(nlg_seul, "NLG seul")
 
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button(

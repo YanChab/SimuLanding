@@ -35,7 +35,7 @@ from dropsim import inputs as ds_inputs  # noqa: E402
 from dropsim import storage as ds_storage  # noqa: E402
 from dropsim.engine_aircraft import OUTPUT_COLUMNS_AC, run_aircraft  # noqa: E402
 from dropsim.simulation import run_simulation  # noqa: E402
-from components.gear_form import render_gear_form, render_single_gear_result  # noqa: E402
+from components.gear_form import render_gear_form  # noqa: E402
 from theme import apply_theme  # noqa: E402
 
 apply_theme()
@@ -487,7 +487,11 @@ def _run_single_gear(position: str, store_key: str):
         result = run_simulation(gear, progress_callback=_cb)
         progress.empty()
         st.session_state[store_key] = result
-        _launch_msg.success(f"Calcul {position.upper()} seul terminé.", icon="✅")
+        _launch_msg.success(
+            f"Calcul {position.upper()} seul terminé. "
+            f"Voir l'onglet « {position.upper()} seul » dans la page Résultats avion.",
+            icon="✅",
+        )
     except ds_errors.SimError as exc:
         st.session_state[store_key] = None
         _launch_msg.error(f"{exc.code}: {exc.message}", icon="🛑")
@@ -548,14 +552,12 @@ if res is not None:
         else:
             st.warning(str(w))
 
-nlg_res = st.session_state.aircraft_nlg_result
-if nlg_res is not None:
+if st.session_state.get("aircraft_nlg_result") is not None or \
+        st.session_state.get("aircraft_mlg_result") is not None:
     st.divider()
-    st.subheader("Résultat NLG seul")
-    render_single_gear_result(nlg_res, "NLG")
-
-mlg_res = st.session_state.aircraft_mlg_result
-if mlg_res is not None:
-    st.divider()
-    st.subheader("Résultat MLG seul")
-    render_single_gear_result(mlg_res, "MLG")
+    st.info(
+        "Les résultats des simulations train isolé (NLG seul / MLG seul) sont "
+        "affichés dans la page **Résultats avion**, onglets « NLG seul » / « MLG seul » "
+        "(avec toutes les courbes et le bilan énergétique).",
+        icon="➡️",
+    )

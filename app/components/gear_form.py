@@ -283,80 +283,218 @@ def _build_gear_inputs(prefix, kind, base, points_df, rainures_df, tyre_df, mu_d
                    B=pts["B"], A=pts["A"], C=pts["C"], R=pts["R"], S=pts["S"])
 
 
-def render_single_gear_result(result, label: str) -> None:
-    """Affiche un résumé compact + courbes clés d'un résultat train isolé."""
+# --------------------------------------------------------------------------- #
+#  Rendu complet d'un train isolé (mêmes onglets que les sections NLG/MLG de la
+#  page Résultats avion + bilan énergétique). Utilisé par les onglets
+#  « NLG seul » / « MLG seul » de la page Résultats avion.
+# --------------------------------------------------------------------------- #
+def _energy_layout(fig, title, b=90):
+    fig.update_layout(
+        height=420,
+        title=dict(text=title, y=0.98, yanchor="top"),
+        margin=dict(l=10, r=10, t=56, b=b),
+        xaxis_title="Temps (s)", yaxis_title="Énergie (J)",
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
+    )
+    return fig
+
+
+def _render_energy_balance(df, label: str) -> None:
+    """Trace le bilan énergétique (synthèse + détail) si les colonnes
+    ``Énergie.*`` sont présentes. Partagé par tous les affichages train isolé."""
+    import plotly.graph_objects as go
+
+    cols = list(df.columns)
+    e_cols = [c for c in cols if c.startswith("Énergie.")]
+    if not e_cols:
+        return
+    t = df[cols[0]]
+    apport = next((c for c in e_cols if "Apport" in c), None)
+    residual = next((c for c in e_cols if "Résidu" in c), None)
+    kin = [c for c in e_cols if "Cinétique" in c]
+    stock = [c for c in e_cols if "Stockée" in c or "Emmagasinée" in c]
+    diss = [c for c in e_cols if "Dissipée" in c]
+    zero = t * 0.0
+    e_kin_tot = df[kin].sum(axis=1) if kin else zero
+    e_stock_tot = df[stock].sum(axis=1) if stock else zero
+    e_diss_tot = df[diss].sum(axis=1) if diss else zero
+    somme = e_kin_tot + e_stock_tot + e_diss_tot
+
+    st.markdown(f"#### Bilan énergétique — {label}")
+    if apport is not None and residual is not None:
+        ref = max(1.0, float(np.max(np.abs(df[apport]))))
+        res_max = float(np.max(np.abs(df[residual])))
+        st.caption(
+            f"Résidu max = {res_max:.1f} J ({100.0 * res_max / ref:.3f} % de l'apport) "
+            "— doit rester au niveau de l'erreur d'intégration."
+        )
+
+    fig = go.Figure()
+    if apport is not None:
+        fig.add_trace(go.Scatter(x=t, y=df[apport], mode="lines", name="Apport (à absorber)"))
+    fig.add_trace(go.Scatter(x=t, y=e_diss_tot, mode="lines", name="Dissipée (absorbée déf.)"))
+    fig.add_trace(go.Scatter(x=t, y=e_stock_tot, mode="lines", name="Stockée (ressorts)"))
+    fig.add_trace(go.Scatter(x=t, y=e_kin_tot, mode="lines", name="Cinétique (pièces en mvt)"))
+    fig.add_trace(go.Scatter(x=t, y=somme, mode="lines", name="Somme cin+stock+diss", line=dict(dash="dot")))
+    if residual is not None:
+        fig.add_trace(go.Scatter(x=t, y=df[residual], mode="lines", name="Résidu"))
+    st.plotly_chart(_energy_layout(fig, f"Bilan énergétique — {label}"), use_container_width=True)
+
+    with st.expander(f"Détail des réservoirs / dissipations — {label}"):
+        fig2 = go.Figure()
+        for c in e_cols:
+            if c not in (apport, residual):
+                fig2.add_trace(go.Scatter(
+                    x=t, y=df[c], mode="lines",
+                    name=c.replace("Énergie.", "").replace(" (J)", ""),
+                ))
+        st.plotly_chart(_energy_layout(fig2, f"Détail énergétique — {label}", b=130),
+                        use_container_width=True)
+
+
+def _gline(x, ys, title, xlab, ylab):
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    for name, y in ys:
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name))
+    fig.update_layout(
+        title=dict(text=title, y=0.98, yanchor="top"),
+        xaxis_title=xlab, yaxis_title=ylab, height=520,
+        margin=dict(l=8, r=8, t=56, b=110),
+        legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0),
+    )
+    return fig
+
+
+def _gline_dual(x, left, right, title, xlab, left_lab, right_lab):
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    for name, y in left:
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name))
+    for name, y in right:
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name, yaxis="y2", line=dict(dash="dot")))
+    fig.update_layout(
+        title=dict(text=title, y=0.98, yanchor="top"),
+        xaxis_title=xlab, yaxis=dict(title=left_lab),
+        yaxis2=dict(title=right_lab, overlaying="y", side="right", showgrid=False),
+        height=520, margin=dict(l=8, r=8, t=56, b=110),
+        legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0),
+    )
+    return fig
+
+
+def _req(df, needed, title) -> bool:
+    missing = [c for c in needed if c not in df.columns]
+    if missing:
+        st.info(f"{title} : colonnes indisponibles ({', '.join(missing)}).", icon="ℹ️")
+        return False
+    return True
+
+
+def render_full_gear_result(result, label: str) -> None:
+    """Affiche le jeu complet de courbes d'un train isolé — mêmes onglets que les
+    sections NLG/MLG de la page Résultats avion (efforts, pressions, hydraulique,
+    course/déflexion, accél./vitesse, liaisons) **plus** le bilan énergétique.
+
+    Auto-détecte le type de train (StraitStrut / TrailingArm) d'après les colonnes.
+    """
     df = result.df
     cols = list(df.columns)
-    t = df[cols[0]]
-    # Heuristique : repérer une colonne d'effort total et de course.
-    ftot_col = next((c for c in cols if "Ftot" in c), None)
-    stroke_col = next((c for c in cols if ".d (" in c or "Course" in c or "stroke" in c.lower()), None)
+    t = df["Temps (s)"] if "Temps (s)" in cols else df[cols[0]]
+    p = "StraitStrut" if any(c.startswith("StraitStrut.") for c in cols) else "TrailingArm"
+    is_ta = p == "TrailingArm"
+
     m1, m2, m3 = st.columns(3)
     m1.metric("Pas de temps", f"{len(df)}")
-    if ftot_col is not None:
-        m2.metric("Effort total max", f"{float(np.max(np.abs(df[ftot_col]))):.0f} N")
-    if stroke_col is not None:
-        m3.metric("Course max", f"{float(np.max(df[stroke_col])) * 1000.0:.1f} mm")
-    plot_cols = [c for c in (ftot_col, stroke_col) if c is not None]
-    if plot_cols:
-        st.line_chart(df.set_index(cols[0])[plot_cols])
+    if f"{p}.Ftot (N)" in cols:
+        m2.metric("Effort amortisseur max", f"{float(np.max(np.abs(df[f'{p}.Ftot (N)']))):.0f} N")
+    if "Tyre.FTyre (N)" in cols:
+        m3.metric("Fz pneu max", f"{float(np.max(np.abs(df['Tyre.FTyre (N)']))):.0f} N")
 
-    # --- Bilan énergétique (si les colonnes Énergie.* sont présentes) ---------
-    e_cols = [c for c in cols if c.startswith("Énergie.")]
-    if e_cols:
-        import plotly.graph_objects as go
+    tabs = st.tabs([
+        "Efforts (temps)", "Effort / course", "Pressions", "Conv. hydraulique",
+        "Course & déflexion", "Accél. & vitesse", "Liaisons", "Bilan énergétique",
+    ])
 
-        apport = next((c for c in e_cols if "Apport" in c), None)
-        residual = next((c for c in e_cols if "Résidu" in c), None)
-        kin = [c for c in e_cols if "Cinétique" in c]
-        stock = [c for c in e_cols if "Stockée" in c or "Emmagasinée" in c]
-        diss = [c for c in e_cols if "Dissipée" in c]
-        zero = t * 0.0
-        e_kin_tot = df[kin].sum(axis=1) if kin else zero
-        e_stock_tot = df[stock].sum(axis=1) if stock else zero
-        e_diss_tot = df[diss].sum(axis=1) if diss else zero
-        somme = e_kin_tot + e_stock_tot + e_diss_tot
+    with tabs[0]:
+        if _req(df, ["Tyre.FTyre (N)", "Reaction sol horizontale (N)", f"{p}.Ftot (N)"], f"{label} - Efforts"):
+            st.plotly_chart(_gline(t, [
+                ("Fz (pneu/sol)", df["Tyre.FTyre (N)"]),
+                ("Fx (horizontal)", df["Reaction sol horizontale (N)"]),
+                ("Effort amortisseur", df[f"{p}.Ftot (N)"]),
+            ], f"{label} - Efforts en fonction du temps", "Temps (s)", "Effort (N)"), use_container_width=True)
 
-        st.markdown(f"#### Bilan énergétique — {label}")
-        if apport is not None and residual is not None:
-            ref = max(1.0, float(np.max(np.abs(df[apport]))))
-            res_max = float(np.max(np.abs(df[residual])))
-            st.caption(
-                f"Résidu max = {res_max:.1f} J ({100.0 * res_max / ref:.3f} % de l'apport) "
-                "— doit rester au niveau de l'erreur d'intégration."
-            )
+    with tabs[1]:
+        if _req(df, [f"{p}.d (m)", "Tyre.FTyre (N)", "Reaction sol horizontale (N)"], f"{label} - Effort/course"):
+            st.plotly_chart(_gline(df[f"{p}.d (m)"] * 1000.0, [
+                ("Fz (pneu/sol)", df["Tyre.FTyre (N)"]),
+                ("Fx (horizontal)", df["Reaction sol horizontale (N)"]),
+            ], f"{label} - Effort en fonction de la course", "Course amortisseur (mm)", "Effort (N)"), use_container_width=True)
 
-        def _energy_layout(fig, title, b=90):
-            fig.update_layout(
-                height=420,
-                title=dict(text=title, y=0.98, yanchor="top"),
-                margin=dict(l=10, r=10, t=56, b=b),
-                xaxis_title="Temps (s)", yaxis_title="Énergie (J)",
-                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
-            )
-            return fig
+    with tabs[2]:
+        pcols = [f"{p}.Pc (bar)", f"{p}.Pg (bar)", f"{p}.Pd (bar)", f"{p}.DeltaPc (bar)", f"{p}.DeltaPd (bar)"]
+        if _req(df, pcols, f"{label} - Pressions"):
+            st.plotly_chart(_gline(t, [
+                ("Pc", df[f"{p}.Pc (bar)"]), ("Pg", df[f"{p}.Pg (bar)"]), ("Pd", df[f"{p}.Pd (bar)"]),
+                ("DeltaPc", df[f"{p}.DeltaPc (bar)"]), ("DeltaPd", df[f"{p}.DeltaPd (bar)"]),
+            ], f"{label} - Pressions en fonction du temps", "Temps (s)", "Pression (bar)"), use_container_width=True)
 
-        fig = go.Figure()
-        if apport is not None:
-            fig.add_trace(go.Scatter(x=t, y=df[apport], mode="lines", name="Apport (à absorber)"))
-        fig.add_trace(go.Scatter(x=t, y=e_diss_tot, mode="lines", name="Dissipée (absorbée déf.)"))
-        fig.add_trace(go.Scatter(x=t, y=e_stock_tot, mode="lines", name="Stockée (ressorts)"))
-        fig.add_trace(go.Scatter(x=t, y=e_kin_tot, mode="lines", name="Cinétique (pièces en mvt)"))
-        fig.add_trace(go.Scatter(x=t, y=somme, mode="lines", name="Somme cin+stock+diss", line=dict(dash="dot")))
-        if residual is not None:
-            fig.add_trace(go.Scatter(x=t, y=df[residual], mode="lines", name="Résidu"))
-        st.plotly_chart(_energy_layout(fig, f"Bilan énergétique — {label}"), use_container_width=True)
+    with tabs[3]:
+        if _req(df, ["Hydrau.Erreur convergence (-)", "Hydrau.Itérations convergence (-)"], f"{label} - Conv. hydraulique"):
+            st.plotly_chart(_gline_dual(
+                t,
+                [("Erreur convergence", df["Hydrau.Erreur convergence (-)"])],
+                [("Itérations", df["Hydrau.Itérations convergence (-)"])],
+                f"{label} - Convergence hydraulique",
+                "Temps (s)", "Erreur convergence (-)", "Itérations (-)",
+            ), use_container_width=True)
 
-        with st.expander(f"Détail des réservoirs / dissipations — {label}"):
-            fig2 = go.Figure()
-            for c in e_cols:
-                if c not in (apport, residual):
-                    fig2.add_trace(go.Scatter(
-                        x=t, y=df[c], mode="lines",
-                        name=c.replace("Énergie.", "").replace(" (J)", ""),
-                    ))
-            st.plotly_chart(_energy_layout(fig2, f"Détail énergétique — {label}", b=130),
-                            use_container_width=True)
+    with tabs[4]:
+        if _req(df, [f"{p}.d (m)", "Tyre.Defl (m)"], f"{label} - Course/déflexion"):
+            st.plotly_chart(_gline(t, [
+                ("Course amortisseur (mm)", df[f"{p}.d (m)"] * 1000.0),
+                ("Déflexion pneu (mm)", df["Tyre.Defl (m)"] * 1000.0),
+            ], f"{label} - Course et déflexion", "Temps (s)", "Déplacement (mm)"), use_container_width=True)
+
+    with tabs[5]:
+        ys = []
+        if "AccMs.RsolZ (m/s²)" in cols:
+            ys.append(("Accélération masse susp. (g)", df["AccMs.RsolZ (m/s²)"] / 9.81))
+        if f"{p}.v (m/s)" in cols:
+            ys.append(("Vitesse amortisseur (m/s)", df[f"{p}.v (m/s)"]))
+        if is_ta and "OmY (rad/s)" in cols:
+            ys.append(("Vitesse rotation balancier (rad/s)", df["OmY (rad/s)"]))
+        if ys:
+            st.plotly_chart(_gline(t, ys, f"{label} - Accélération et vitesse",
+                                   "Temps (s)", "g / m.s⁻¹ / rad.s⁻¹"), use_container_width=True)
+        else:
+            st.info(f"{label} - Accél./vitesse : colonnes indisponibles.", icon="ℹ️")
+
+    with tabs[6]:
+        bx, bz = "Torseur@B (pivot).Effort X (N)", "Torseur@B (pivot).Effort Z (N)"
+        mx, mz = "Torseur@B (pivot).Moment X (N·m)", "Torseur@B (pivot).Moment Z (N·m)"
+        b_kind = "pivot" if is_ta else "encastrement"
+        if _req(df, [bx, bz, mx, mz], f"{label} - Liaison B"):
+            st.plotly_chart(_gline_dual(
+                t,
+                [("Effort Fx", df[bx]), ("Effort Fz", df[bz])],
+                [("Moment Mx", df[mx]), ("Moment Mz", df[mz])],
+                f"{label} — Liaison {b_kind} B : efforts (gauche) + moments (axe secondaire)",
+                "Temps (s)", "Effort (N)", "Moment (N.m)",
+            ), use_container_width=True)
+        if is_ta:
+            cfx, cfz = "Torseur@C (rotule).Effort X (N)", "Torseur@C (rotule).Effort Z (N)"
+            if _req(df, [cfx, cfz], f"{label} - Liaison C"):
+                st.plotly_chart(_gline(
+                    t, [("Effort Fx", df[cfx]), ("Effort Fz", df[cfz])],
+                    f"{label} — Liaison rotule C : efforts (pas de moment transmis)",
+                    "Temps (s)", "Effort (N)",
+                ), use_container_width=True)
+
+    with tabs[7]:
+        _render_energy_balance(df, label)
 
     if getattr(result, "warnings", None):
         with st.expander(f"⚠️ {len(result.warnings)} avertissement(s) — {label}"):
