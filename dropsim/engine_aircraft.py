@@ -229,6 +229,8 @@ GEOMETRY_KEYS_AC: tuple[str, ...] = (
     "nlg_wheel_radius",
     "nlg_b1x", "nlg_b1z", "nlg_b2x", "nlg_b2z",
     "nlg_cdbx", "nlg_cdbz", "nlg_ddbx", "nlg_ddbz",
+    "nlg_f1x", "nlg_f1z", "nlg_f2x", "nlg_f2z",
+    "nlg_jdx", "nlg_jdz", "nlg_jex", "nlg_jez",
     "mlg_left_ax",
     "mlg_left_az",
     "mlg_left_bx",
@@ -240,6 +242,8 @@ GEOMETRY_KEYS_AC: tuple[str, ...] = (
     "mlg_left_wheel_radius",
     "mlg_left_b1x", "mlg_left_b1z", "mlg_left_b2x", "mlg_left_b2z",
     "mlg_left_cdbx", "mlg_left_cdbz", "mlg_left_ddbx", "mlg_left_ddbz",
+    "mlg_left_f1x", "mlg_left_f1z", "mlg_left_f2x", "mlg_left_f2z",
+    "mlg_left_jdx", "mlg_left_jdz", "mlg_left_jex", "mlg_left_jez",
     "mlg_right_ax",
     "mlg_right_az",
     "mlg_right_bx",
@@ -251,6 +255,8 @@ GEOMETRY_KEYS_AC: tuple[str, ...] = (
     "mlg_right_wheel_radius",
     "mlg_right_b1x", "mlg_right_b1z", "mlg_right_b2x", "mlg_right_b2z",
     "mlg_right_cdbx", "mlg_right_cdbz", "mlg_right_ddbx", "mlg_right_ddbz",
+    "mlg_right_f1x", "mlg_right_f1z", "mlg_right_f2x", "mlg_right_f2z",
+    "mlg_right_jdx", "mlg_right_jdz", "mlg_right_jex", "mlg_right_jez",
 )
 
 
@@ -1032,6 +1038,15 @@ class TrailingArmSlot:
             "rz": bz + r_dz,
             "wheel_radius": rt.p.unload_radius,
         }
+        # Ancrage « jambe + bielle » (§6b) : points solidaires de la structure,
+        # placés rigidement par rapport à B (offsets repère corps → monde).
+        if getattr(rt.p, "jambe", None) is not None:
+            jb = rt.p.jambe
+            B0 = jb["B"]
+            for key, pt in (("f1", jb["F1"]), ("f2", jb["F2"]), ("jd", jb["Dbr"]), ("je", jb["Ebr"])):
+                ox, oz = _off_body_to_world(float(pt[0] - B0[0]), float(pt[2] - B0[2]), theta)
+                geom[key + "x"] = bx + ox
+                geom[key + "z"] = bz + oz
 
         return SlotStepResult(contributions=contributions, fz_slot=fz_slot, diag=diag, geom=geom)
 

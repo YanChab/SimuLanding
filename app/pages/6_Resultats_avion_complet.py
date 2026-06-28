@@ -310,6 +310,8 @@ def _render_aircraft_animation() -> None:
     ]
     use_geom = geom is not None and not geom.empty and all(col in geom.columns for col in geom_required)
     nlg_has_db = False  # ancrage drag brace (renseigné si géométrie disponible)
+    mlg_l_has_jb = False  # ancrage jambe/bielle MLG gauche
+    mlg_r_has_jb = False  # ancrage jambe/bielle MLG droite
 
     st.caption(
         "Vue de côté du fuselage, du centre de gravité et des trains. "
@@ -425,6 +427,19 @@ def _render_aircraft_animation() -> None:
             mlg_r_rz = geom["mlg_right_rz"].to_numpy(dtype=float) * 1000.0
             mlg_r_radius_anim = geom["mlg_right_wheel_radius"].to_numpy(dtype=float) * 1000.0
             cg_z_plot = cg_z_anim
+
+            # Ancrage jambe/bielle MLG (§6b) : F1, F2, D, E si renseignés.
+            def _jb_cols(prefix):
+                if not (f"{prefix}_jdx" in geom.columns
+                        and bool(np.any(geom[f"{prefix}_jdx"].to_numpy(dtype=float) != 0.0))):
+                    return None
+                return {k: geom[f"{prefix}_{k}"].to_numpy(dtype=float) * 1000.0
+                        for k in ("f1x", "f1z", "f2x", "f2z", "jdx", "jdz", "jex", "jez")}
+
+            mlg_l_jb = _jb_cols("mlg_left")
+            mlg_r_jb = _jb_cols("mlg_right")
+            mlg_l_has_jb = mlg_l_jb is not None
+            mlg_r_has_jb = mlg_r_jb is not None
 
             body_x_world, body_z_world = _rotate_xz(body_x_local[:, None], body_z_local[:, None], pitch[None, :])
             body_x_world = body_x_world + cg_x0
@@ -603,6 +618,24 @@ def _render_aircraft_animation() -> None:
                 mode="markers+text", text=["B1", "B2", "C", "D"], textposition="top center",
                 marker=dict(size=8, color="#1F7A3D"), name="Points drag brace",
             ))
+
+        def _jb_traces(jb, color, name):
+            return [
+                go.Scatter(x=[jb["jdx"][i], jb["jex"][i]], y=[jb["jdz"][i], jb["jez"][i]],
+                           mode="lines", line=dict(color=color, width=4), name=f"Bielle {name}"),
+                go.Scatter(x=[jb["f1x"][i], jb["f2x"][i]], y=[jb["f1z"][i], jb["f2z"][i]],
+                           mode="lines", line=dict(color=color, width=2, dash="dot"),
+                           name=f"Trunnion {name}"),
+                go.Scatter(x=[jb["f1x"][i], jb["f2x"][i], jb["jdx"][i], jb["jex"][i]],
+                           y=[jb["f1z"][i], jb["f2z"][i], jb["jdz"][i], jb["jez"][i]],
+                           mode="markers+text", text=["F1", "F2", "D", "E"], textposition="top center",
+                           marker=dict(size=8, color=color), name=f"Points jambe {name}"),
+            ]
+
+        if mlg_l_has_jb:
+            traces.extend(_jb_traces(mlg_l_jb, "#1F7A3D", "MLG g."))
+        if mlg_r_has_jb:
+            traces.extend(_jb_traces(mlg_r_jb, "#2E9E55", "MLG d."))
         return traces
 
     if use_geom:
@@ -616,6 +649,13 @@ def _render_aircraft_animation() -> None:
             xmin = min(xmin, float(_dbx.min()) - 120.0)
             xmax = max(xmax, float(_dbx.max()) + 120.0)
             zmax = max(zmax, float(_dbz.max()) + 120.0)
+        for _jb in (mlg_l_jb if mlg_l_has_jb else None, mlg_r_jb if mlg_r_has_jb else None):
+            if _jb is not None:
+                _jx = np.concatenate([_jb["f1x"], _jb["f2x"], _jb["jdx"], _jb["jex"]])
+                _jz = np.concatenate([_jb["f1z"], _jb["f2z"], _jb["jdz"], _jb["jez"]])
+                xmin = min(xmin, float(_jx.min()) - 120.0)
+                xmax = max(xmax, float(_jx.max()) + 120.0)
+                zmax = max(zmax, float(_jz.max()) + 120.0)
     else:
         xmin = float(min(body_x_world.min(), nlg_wheel_x.min() - nlg_radius, mlg_l_wheel_x.min() - mlg_radius, mlg_r_wheel_x.min() - mlg_radius) - 120.0)
         xmax = float(max(body_x_world.max(), nlg_wheel_x.max() + nlg_radius, mlg_l_wheel_x.max() + mlg_radius, mlg_r_wheel_x.max() + mlg_radius) + 120.0)
