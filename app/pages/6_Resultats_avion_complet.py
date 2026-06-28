@@ -1010,14 +1010,15 @@ with tab_mlg:
 
     with mlg_l_tabs[3]:
         if _require_columns([
-            "MLG left.Hyd.Erreur conv (-)", "MLG left.Hyd.Iter conv (-)", "MLG left.Hyd.Qc total (m³/s)", "MLG left.Hyd.Part fuite (-)"
+            "MLG left.Hyd.Erreur conv (-)", "MLG left.Hyd.Iter conv (-)"
         ], "MLG gauche - Convergence hydraulique"):
-            st.plotly_chart(_line(t, [
-                ("Erreur convergence", df["MLG left.Hyd.Erreur conv (-)"]),
-                ("Itérations", df["MLG left.Hyd.Iter conv (-)"]),
-                ("Qc total", df["MLG left.Hyd.Qc total (m³/s)"]),
-                ("Part fuite", df["MLG left.Hyd.Part fuite (-)"]),
-            ], "MLG gauche - Convergence hydraulique", "Temps (s)", "- / m³.s⁻¹"), use_container_width=True)
+            st.plotly_chart(_line_dual(
+                t,
+                [("Erreur convergence", df["MLG left.Hyd.Erreur conv (-)"])],
+                [("Itérations", df["MLG left.Hyd.Iter conv (-)"])],
+                "MLG gauche - Convergence hydraulique",
+                "Temps (s)", "Erreur convergence (-)", "Itérations (-)",
+            ), use_container_width=True)
 
     with mlg_l_tabs[4]:
         if _require_columns([
@@ -1086,14 +1087,15 @@ with tab_mlg:
 
     with mlg_r_tabs[3]:
         if _require_columns([
-            "MLG right.Hyd.Erreur conv (-)", "MLG right.Hyd.Iter conv (-)", "MLG right.Hyd.Qc total (m³/s)", "MLG right.Hyd.Part fuite (-)"
+            "MLG right.Hyd.Erreur conv (-)", "MLG right.Hyd.Iter conv (-)"
         ], "MLG droite - Convergence hydraulique"):
-            st.plotly_chart(_line(t, [
-                ("Erreur convergence", df["MLG right.Hyd.Erreur conv (-)"]),
-                ("Itérations", df["MLG right.Hyd.Iter conv (-)"]),
-                ("Qc total", df["MLG right.Hyd.Qc total (m³/s)"]),
-                ("Part fuite", df["MLG right.Hyd.Part fuite (-)"]),
-            ], "MLG droite - Convergence hydraulique", "Temps (s)", "- / m³.s⁻¹"), use_container_width=True)
+            st.plotly_chart(_line_dual(
+                t,
+                [("Erreur convergence", df["MLG right.Hyd.Erreur conv (-)"])],
+                [("Itérations", df["MLG right.Hyd.Iter conv (-)"])],
+                "MLG droite - Convergence hydraulique",
+                "Temps (s)", "Erreur convergence (-)", "Itérations (-)",
+            ), use_container_width=True)
 
     with mlg_r_tabs[4]:
         if _require_columns([
@@ -1170,14 +1172,15 @@ with tab_nlg:
 
     with nlg_tabs[3]:
         if _require_columns([
-            "NLG.Hyd.Erreur conv (-)", "NLG.Hyd.Iter conv (-)", "NLG.Hyd.Qc total (m³/s)", "NLG.Hyd.Part fuite (-)"
+            "NLG.Hyd.Erreur conv (-)", "NLG.Hyd.Iter conv (-)"
         ], "NLG - Convergence hydraulique"):
-            st.plotly_chart(_line(t, [
-                ("Erreur convergence", df["NLG.Hyd.Erreur conv (-)"]),
-                ("Itérations", df["NLG.Hyd.Iter conv (-)"]),
-                ("Qc total", df["NLG.Hyd.Qc total (m³/s)"]),
-                ("Part fuite", df["NLG.Hyd.Part fuite (-)"]),
-            ], "NLG - Convergence hydraulique", "Temps (s)", "- / m³.s⁻¹"), use_container_width=True)
+            st.plotly_chart(_line_dual(
+                t,
+                [("Erreur convergence", df["NLG.Hyd.Erreur conv (-)"])],
+                [("Itérations", df["NLG.Hyd.Iter conv (-)"])],
+                "NLG - Convergence hydraulique",
+                "Temps (s)", "Erreur convergence (-)", "Itérations (-)",
+            ), use_container_width=True)
 
     with nlg_tabs[4]:
         if _require_columns([
