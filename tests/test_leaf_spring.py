@@ -57,8 +57,11 @@ def test_leaf_vector_engine_matches_geom():
     inp = default_leaf_spring_inputs()
     g = _leaf_geom_si(inp)
     out = run_leaf_spring(inp.to_si(), k_leaf=g.k_leaf, c_leaf=g.c_leaf, B_pos=g.B, R_pos=g.R).data
-    # Moment de tangage non nul (bras de levier BR horizontal).
-    assert np.max(np.abs(out["torsB_mz"])) > 0.0
+    # Charge dans le plan X-Z (B, R à y=0) → moment d'encastrement autour de Y
+    # (flexion de tangage), Mx et Mz nuls.
+    assert np.max(np.abs(out["torsB_my"])) > 0.0
+    assert np.max(np.abs(out["torsB_mx"])) < 1e-6
+    assert np.max(np.abs(out["torsB_mz"])) < 1e-6
 
 
 def test_leaf_roundtrip():

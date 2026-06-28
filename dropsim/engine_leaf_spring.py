@@ -63,6 +63,7 @@ OUTPUT_COLUMNS_LS: dict[str, str] = {
     "torsB_fy": "Torseur@B (pivot).Effort Y (N)",
     "torsB_fz": "Torseur@B (pivot).Effort Z (N)",
     "torsB_mx": "Torseur@B (pivot).Moment X (N·m)",
+    "torsB_my": "Torseur@B (pivot).Moment Y (N·m)",
     "torsB_mz": "Torseur@B (pivot).Moment Z (N·m)",
     # Bilan énergétique (convention travail)
     "e_kin": "Énergie.Cinétique masse susp. (J)",
@@ -185,8 +186,12 @@ def run_leaf_spring(
         tb_res_y = 0.0
         tb_res_z = float(ftot)
         tb_norm = math.sqrt(tb_res_x ** 2 + tb_res_y ** 2 + tb_res_z ** 2)
-        br_z = br_z0 + d
-        mom_B_y = br_z * float(tr_sol[0]) - br_x * float(tr_sol[2])   # (z_R−z_B)·fx − (x_R−x_B)·fz
+        # Moment d'encastrement = BR × tr_sol (torseur 3D complet réduit en B).
+        # Charge dans le plan X-Z (fx, fz) + bras BR → moment principal autour de Y
+        # (flexion de tangage). Mx/Mz ne sont non nuls qu'avec un décalage latéral
+        # (B_y ≠ R_y).
+        br_vec = np.array([br_x, br_y, br_z0 + d])
+        mom_B = np.cross(br_vec, tr_sol)
 
         # --- Bilan énergétique (travail) ---------------------------------- #
         e_kin_new = 0.5 * masse * vz_ms ** 2
@@ -247,8 +252,9 @@ def run_leaf_spring(
         out["torsB_fx"][i] = tb_res_x
         out["torsB_fy"][i] = tb_res_y
         out["torsB_fz"][i] = tb_res_z
-        out["torsB_mx"][i] = 0.0
-        out["torsB_mz"][i] = mom_B_y   # moment de tangage (autour de Y) reporté en Mz/My selon convention
+        out["torsB_mx"][i] = float(mom_B[0])
+        out["torsB_my"][i] = float(mom_B[1])   # flexion de tangage (autour de Y)
+        out["torsB_mz"][i] = float(mom_B[2])
         out["e_kin"][i] = e_kin_new
         out["e_kin_mns"][i] = e_kin_mns_new
         out["e_kin_spin"][i] = e_kin_spin_new

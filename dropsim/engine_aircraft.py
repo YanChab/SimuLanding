@@ -1146,12 +1146,14 @@ class LeafSpringSlot:
         acc_tyre_x = (fx_spring_wheel + fspin) / p.wheelmass
         tr_sol = np.array([fx_spring_wheel, 0.0, tyre_ftyre])
 
-        # Torseur d'encastrement transmis à la cellule en B.
+        # Torseur d'encastrement transmis à la cellule en B (3D complet : BR × tr_sol).
         fx_cell = -float(fx_spring_wheel)
         fz_cell = float(ftot)
         br_x = rx_world - bx_step
         br_z = rz_world - bz_step
-        mom_B_y = br_z * float(tr_sol[0]) - br_x * float(tr_sol[2])
+        br_y = -float(self._b_off_world[1])   # = R_y − B_y (figé, hors plan X-Z)
+        mom_B = np.cross(np.array([br_x, br_y, br_z]), tr_sol)
+        mom_B_y = float(mom_B[1])             # flexion de tangage (autour de Y)
         fz_slot = fz_cell
 
         # --- Énergie (exclut la masse suspendue = fuselage) --------------- #
@@ -1185,7 +1187,8 @@ class LeafSpringSlot:
         self._omega_prev = self.tyre_omega
 
         contributions = [InterfaceContribution(
-            px=bx_step, pz=bz_step, fx=fx_cell, fz=fz_cell, my=mom_B_y,
+            px=bx_step, pz=bz_step, fx=fx_cell, fz=fz_cell,
+            mx=float(mom_B[0]), my=mom_B_y, mz=float(mom_B[2]),
         )]
         diag = {
             "stroke": self.d,
@@ -1209,9 +1212,9 @@ class LeafSpringSlot:
             "tors_res_norm": math.hypot(fx_cell, fz_cell),
             "torsb_fx": fx_cell,
             "torsb_fz": fz_cell,
-            "torsb_mx": 0.0,
+            "torsb_mx": float(mom_B[0]),
             "torsb_my": mom_B_y,
-            "torsb_mz": mom_B_y,
+            "torsb_mz": float(mom_B[2]),
             "e_kin": e_kin_train,
             "e_stock": e_stock_train,
             "e_diss": e_diss_train,
