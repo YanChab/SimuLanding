@@ -496,10 +496,10 @@ def run_strait_strut(
     tb_sol = R_lg_to_sol @ np.array([0.0, 0.0, tb_lg_z])
 
     # Énergies cumulées
-    e_kin_prev = 0.5 * p.masse * state.vz_ms ** 2
-    e_kin_mns_prev = 0.5 * mns * state.vz_mns_lg ** 2
-    e_kin_spin_prev = 0.5 * p.wheel_inertia * state.tyre_omega ** 2
-    e_kin_horiz_prev = 0.5 * p.wheelmass * state.tyre_vx ** 2
+    # Bilan énergétique en TRAVAIL — même démarche que engine.py/MLG
+    # (cf. docs/Bilan_energetique.md) : travaux signés F·dd (télescopage), apport
+    # d'avancement, ΔEc_rot exact. Réservoirs = ressorts + pièces en mouvement.
+    e_kin_init = 0.5 * p.masse * state.vz_ms ** 2 + 0.5 * mns * state.vz_mns_lg ** 2
     e_gas_acc = 0.0
     e_tyre_acc = 0.0
     e_spring_x_acc = 0.0
@@ -509,8 +509,14 @@ def run_strait_strut(
     e_damp_x_acc = 0.0
     e_slip_acc = 0.0
     e_endstop_acc = 0.0
-    # Apport initial (cinétique + Mns)
-    e_input_0 = e_kin_prev + e_kin_mns_prev
+    e_fwd_acc = 0.0
+    e_grav_acc = 0.0
+    # Trackers du pas précédent (pour les travaux signés)
+    d_prev = max(0.0, state.d)
+    defl_prev = state.tyre_defl_val
+    z_ms_prev = state.z_ms
+    z_mns_prev = state.z_mns_lg
+    omega_prev = state.tyre_omega
 
     # --- Tableaux de sortie ----------------------------------------------- #
     n_out = n_steps + 1
@@ -601,24 +607,44 @@ def run_strait_strut(
         r_b = ptR_sol_cur - ptB_sol
         mom_B = np.cross(r_b, tr_sol)
 
-        # Bilan énergétique (simplifié — diagnostic)
+        # Bilan énergétique en TRAVAIL (doc Bilan_energetique.md §3)
         e_kin_new = 0.5 * p.masse * state.vz_ms ** 2
         e_kin_mns_new = 0.5 * mns * state.vz_mns_lg ** 2
         e_kin_spin_new = 0.5 * p.wheel_inertia * state.tyre_omega ** 2
         e_kin_horiz_new = 0.5 * p.wheelmass * state.tyre_vx ** 2
-        e_gas_acc += fgas * state.v_damper * dt
-        e_tyre_acc += tyre_ftyre_i * max(0.0, state.vz_mns_lg) * dt
-        e_spring_x_acc = 0.5 * p.kx * state.tyre_depx ** 2
-        e_hyd_acc += abs(fhyd * state.v_damper * dt)
-        e_fric_acc += abs(ffrijoi * state.v_damper * dt)
-        e_fribag_acc += abs(ffribag * state.v_damper * dt)
+        e_spring_x_acc = 0.5 * p.kx * state.tyre_depx ** 2          # stocké (ressort horizontal)
+        d_cur = max(0.0, state.d)
+        dd = d_cur - d_prev                                         # variation de course
+        ddefl = state.tyre_defl_val - defl_prev
+        # Travaux signés : Ftot = Fgas + Fhyd + Ffrijoi + Ffribag + Fbutée → télescopage exact
+        e_gas_acc += fgas * dd
+        e_endstop_acc += fendstop * dd
+        e_tyre_acc += tyre_ftyre_i * ddefl
+        e_hyd_acc += fhyd * dd
+        e_fric_acc += ffrijoi * dd
+        e_fribag_acc += ffribag * dd
         e_damp_x_acc += p.cx * state.tyre_vx ** 2 * dt
-        e_slip_acc += abs(fspin * p.vx * dt) if abs(p.vx) > 1.0e-9 else 0.0
-        e_endstop_acc += abs(fendstop * state.v_damper * dt)
-        e_input_total = (e_kin_new + e_kin_mns_new + e_kin_spin_new + e_kin_horiz_new
-                         + e_gas_acc + e_tyre_acc + e_hyd_acc + e_fric_acc
-                         + e_fribag_acc + e_damp_x_acc + e_slip_acc + e_endstop_acc)
-        e_residual = e_input_0 + p.masse * G * abs(state.z_ms) + mns * G * abs(state.z_mns_lg) - e_input_total
+        # Spin-up : apport d'avancement + glissement avec ΔEc_rot EXACT
+        # (R sur la tige ne se déplace pas horizontalement → pas de couplage hub).
+        dke_spin = 0.5 * p.wheel_inertia * (state.tyre_omega ** 2 - omega_prev ** 2)
+        if abs(p.vx) > 1.0e-9:
+            e_fwd_acc += fspin * p.vx * dt
+            e_slip_acc += fspin * (p.vx - state.tyre_vx) * dt - dke_spin
+        # Travail de la pesanteur (Ms en repère sol, Mns en repère jambe)
+        e_grav_acc += (-poids_ms * (state.z_ms - z_ms_prev)
+                       - poids_mns_lg_z * (state.z_mns_lg - z_mns_prev))
+        d_prev = d_cur
+        defl_prev = state.tyre_defl_val
+        z_ms_prev = state.z_ms
+        z_mns_prev = state.z_mns_lg
+        omega_prev = state.tyre_omega
+
+        e_input_total = e_kin_init + e_grav_acc + e_fwd_acc
+        e_residual = e_input_total - (
+            e_kin_new + e_kin_mns_new + e_kin_spin_new + e_kin_horiz_new
+            + e_gas_acc + e_tyre_acc + e_spring_x_acc + e_endstop_acc
+            + e_hyd_acc + e_fric_acc + e_fribag_acc + e_damp_x_acc + e_slip_acc
+        )
 
         # Enregistrement
         out["temps"][i] = t

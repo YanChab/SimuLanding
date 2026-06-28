@@ -36,6 +36,15 @@ $$
 > (Euler/RK4), décroissante avec Δt. Un écart **constant ou croissant** trahit un
 > réservoir ou un flux **oublié**.
 
+**Bilan instantané — pas besoin d'attendre l'arrêt.** L'égalité ci‑dessus est une
+**identité à chaque instant** : l'énergie injectée se répartit *en permanence*
+entre cinétique (pièces en mouvement), stockée (ressorts) et dissipée. Pour un
+résidu nul **en continu**, il faut donc compter **tous** les réservoirs — ressorts
+**et** pièces en mouvement. (Sinon « à absorber » vs « dissipée » ne coïncideraient
+qu'à l'**arrêt total** ET **détente complète** des ressorts — ce qui n'arrive
+jamais, le gaz restant comprimé.) → confirme qu'il **faut** calculer l'énergie
+stockée.
+
 ---
 
 ## 2. Inventaire des réservoirs et des flux
@@ -174,11 +183,18 @@ comme le moteur TrailingArm isolé.
 
 ---
 
-## 7. À discuter (vos commentaires)
+## 7. Décisions actées
 
-- Confirmer la liste des réservoirs (notamment la **rotation balancier** depuis le
-  remodelage rigide §6.7 du PFD, et l'inertie propre du bras).
-- Choisir la convention de dissipation : **travail F·dd** (recommandé, se ferme)
-  vs **puissance F·v·dt**.
-- Décider si l'on garde une part « stockée » séparée (gaz+pneu) dans l'affichage
-  (utile pour distinguer absorbé **définitif** vs restituable).
+- **Réservoirs** = **tous les ressorts** (gaz, pneu vertical, spring‑back
+  horizontal, butée) **+ toutes les pièces encore en mouvement** (masse suspendue,
+  masse non suspendue, rotation roue, spring‑back, rotation balancier).
+- **Convention** : **travail** (∫F·dd), qui se ferme par télescopage.
+- **Trois calculs, une seule démarche** : le **MLG** (`engine.py`) est la
+  référence ; le **NLG seul** et l'**avion complet** doivent suivre **exactement**
+  la même méthode :
+  - NLG : réécrire le bilan en **travail** (comme `engine.py`), avec apport
+    d'avancement et ΔEc_rot exact ;
+  - avion : bilan = **somme des bilans par train** (NLG + MLG g + MLG d) **+
+    cinétique du fuselage** (translation + tangage) + gravité fuselage, tracké par
+    le moteur (plus de recalcul UI).
+- **Cible** : résidu = erreur d'intégration (→ 0 avec Δt), **à chaque instant**.
