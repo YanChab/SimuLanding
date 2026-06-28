@@ -203,3 +203,21 @@ def test_load_bundle_backward_compat_single(tmp_path):
     assert loaded["kind"] == "single"
     assert "aircraft" in loaded["items"]
     assert loaded["items"]["aircraft"][0] == ac
+
+
+def test_project_custom_directory(tmp_path):
+    """Un projet peut pointer vers un dossier de sauvegarde personnalisé."""
+    from dropsim.storage import set_project_dir, project_dir, save_bundle, list_projects, list_saved
+    base = tmp_path / "registry_base"
+    custom = tmp_path / "ailleurs" / "projet_x"
+    set_project_dir("Projet X", custom, base=base)
+    assert project_dir("Projet X", base) == custom
+    items = {"nlg": (default_strait_strut_inputs(), run_simulation(default_strait_strut_inputs()))}
+    path = save_bundle(items, name="s1", project="Projet X", directory=base)
+    assert path.parent == custom and path.exists()
+    assert path.with_suffix(".md").exists()
+    assert "Projet X" in list_projects(base)
+    metas = list_saved(base, project="Projet X")
+    assert len(metas) == 1 and metas[0]["project"] == "Projet X"
+    # Projet sans dossier perso → base/<slug> (comportement historique).
+    assert project_dir("Autre", base) == base / "Autre"

@@ -356,17 +356,26 @@ with st.expander("Sauvegarder / charger une simulation avion complet", expanded=
             save_options = projects + [new_project_label]
             save_index = projects.index(current_project) if current_project in projects else len(save_options) - 1
             project_choice = st.selectbox("Projet", save_options, index=save_index, key="ac_save_project_choice")
+            project_folder = ""  # dossier personnalisé (nouveau projet uniquement)
             if project_choice == new_project_label:
                 project_name = st.text_input(
                     "Nom du nouveau projet", value="" if current_project in projects else current_project,
                     key="ac_save_project_new", placeholder=ds_storage.DEFAULT_PROJECT,
                 ).strip() or ds_storage.DEFAULT_PROJECT
+                project_folder = st.text_input(
+                    "Dossier de sauvegarde du projet (optionnel)",
+                    key="ac_save_project_dir",
+                    placeholder=str(ds_storage.DEFAULT_SAVE_DIR / project_name),
+                    help="Chemin absolu où ranger tous les fichiers de ce projet. "
+                         "Laisser vide pour le dossier par défaut.",
+                ).strip()
             else:
                 project_name = project_choice
+                st.caption(f"📁 Dossier : `{ds_storage.project_dir(project_name)}`")
             save_name = st.text_input("Nom de la sauvegarde",
                                       value=st.session_state.get("aircraft_result_name", "Simulation"),
                                       key="ac_save_name")
-            st.caption("Que sauvegarder ? (un seul fichier + un CSV lisible des paramètres)")
+            st.caption("Que sauvegarder ? (JSON rechargeable + Markdown de config + CSV de résultats)")
             save_ac = st.checkbox("Avion complet", value=_has_ac, disabled=not _has_ac, key="ac_save_ac")
             save_nlg = st.checkbox("NLG seul", value=_has_nlg, disabled=not _has_nlg, key="ac_save_nlg")
             save_mlg = st.checkbox("MLG seul", value=_has_mlg, disabled=not _has_mlg, key="ac_save_mlg")
@@ -382,13 +391,15 @@ with st.expander("Sauvegarder / charger une simulation avion complet", expanded=
                 if not items:
                     st.warning("Coche au moins un élément à sauvegarder.", icon="⚠️")
                 else:
+                    if project_folder:  # nouveau projet avec dossier personnalisé
+                        ds_storage.set_project_dir(project_name, project_folder)
                     path = ds_storage.save_bundle(items, name=save_name, project=project_name)
                     st.session_state.aircraft_result_name = save_name
                     st.session_state.aircraft_current_project = project_name
                     st.success(
-                        f"Sauvegardé : {path.name} + {path.with_suffix('.md').name} "
-                        f"(config, lisible) + {len(items)} CSV de résultats "
-                        f"(dossier {path.parent.name}/).", icon="✅")
+                        f"Sauvegardé dans `{path.parent}` : {path.name} + "
+                        f"{path.with_suffix('.md').name} (config) + {len(items)} CSV de résultats.",
+                        icon="✅")
     with col_load:
         st.markdown("**Charger une simulation**")
         if not projects:

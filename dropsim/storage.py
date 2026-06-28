@@ -182,9 +182,44 @@ def _slugify(name: str) -> str:
     return slug or "simulation"
 
 
+def _registry_path(base: Path | str = DEFAULT_SAVE_DIR) -> Path:
+    """Fichier de registre projet → dossier de sauvegarde personnalisé."""
+    return Path(base) / "projects.json"
+
+
+def load_registry(base: Path | str = DEFAULT_SAVE_DIR) -> dict[str, str]:
+    """Registre {nom de projet : dossier absolu}. Vide si absent/illisible."""
+    p = _registry_path(base)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def set_project_dir(project: str, directory: Path | str, base: Path | str = DEFAULT_SAVE_DIR) -> None:
+    """Associe un **dossier de sauvegarde** à un projet (persisté dans le registre)."""
+    base = Path(base)
+    base.mkdir(parents=True, exist_ok=True)
+    reg = load_registry(base)
+    reg[project or DEFAULT_PROJECT] = str(Path(directory).expanduser())
+    _registry_path(base).write_text(json.dumps(reg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def project_dir(project: str | None, base: Path | str = DEFAULT_SAVE_DIR) -> Path:
+    """Dossier où sont rangées les sauvegardes d'un projet : dossier personnalisé du
+    registre s'il existe, sinon ``base/<slug>`` (comportement historique)."""
+    name = project or DEFAULT_PROJECT
+    custom = load_registry(base).get(name)
+    return Path(custom).expanduser() if custom else Path(base) / _slugify(name)
+
+
 def _project_dir(directory: Path | str, project: str | None) -> Path:
-    """Sous-dossier physique d'un projet (un slug par projet)."""
-    return Path(directory) / _slugify(project or DEFAULT_PROJECT)
+    """Sous-dossier physique d'un projet : dossier personnalisé du registre (à la
+    base ``directory``) s'il existe, sinon ``directory/<slug>``."""
+    return project_dir(project, directory)
 
 
 def bundle(
@@ -276,18 +311,18 @@ def _read_meta(path: Path) -> dict | None:
 
 
 def list_projects(directory: Path | str = DEFAULT_SAVE_DIR) -> list[str]:
-    """Liste les noms de projets contenant au moins une sauvegarde (triés)."""
+    """Liste les noms de projets (triés) : projets déclarés dans le registre (avec
+    dossier personnalisé) + projets ayant au moins une sauvegarde dans ``directory``."""
     directory = Path(directory)
-    if not directory.exists():
-        return []
-    names: set[str] = set()
-    for p in directory.rglob("*.json"):
-        try:
-            meta = _read_meta(p)
-        except (json.JSONDecodeError, OSError):
-            continue
-        if meta:
-            names.add(meta["project"])
+    names: set[str] = set(load_registry(directory).keys())
+    if directory.exists():
+        for p in directory.rglob("*.json"):
+            try:
+                meta = _read_meta(p)
+            except (json.JSONDecodeError, OSError):
+                continue
+            if meta:
+                names.add(meta["project"])
     return sorted(names, key=str.casefold)
 
 
@@ -302,19 +337,30 @@ def list_saved(
     Les fichiers illisibles sont ignorés silencieusement.
     """
     directory = Path(directory)
-    if not directory.exists():
-        return []
+    # Dossiers à scanner : le dossier d'un projet précis (registre inclus), sinon le
+    # dossier de base + tous les dossiers personnalisés déclarés.
+    if project is not None:
+        scan_dirs = [_project_dir(directory, project)]
+    else:
+        scan_dirs = [directory] + [Path(v).expanduser() for v in load_registry(directory).values()]
     entries: list[dict] = []
-    for p in directory.rglob("*.json"):
-        try:
-            meta = _read_meta(p)
-        except (json.JSONDecodeError, OSError):
+    seen: set[str] = set()
+    for d in scan_dirs:
+        if not Path(d).exists():
             continue
-        if not meta:
-            continue
-        if project is not None and meta["project"] != project:
-            continue
-        entries.append(meta)
+        for p in Path(d).rglob("*.json"):
+            if str(p) in seen:
+                continue
+            seen.add(str(p))
+            try:
+                meta = _read_meta(p)
+            except (json.JSONDecodeError, OSError):
+                continue
+            if not meta:
+                continue
+            if project is not None and meta["project"] != project:
+                continue
+            entries.append(meta)
     entries.sort(key=lambda e: e["saved_at"], reverse=True)
     return entries
 
@@ -498,6 +544,9 @@ __all__ = [
     "load_bundle",
     "config_markdown",
     "result_csv_text",
+    "load_registry",
+    "set_project_dir",
+    "project_dir",
     "list_projects",
     "list_saved",
     "delete_saved",
