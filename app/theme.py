@@ -185,3 +185,37 @@ hr {{ border-color: var(--sp-gris-clair); }}
 def apply_theme() -> None:
     """Injecte la charte graphique (couleurs + polices) dans la page courante."""
     st.markdown(_CSS, unsafe_allow_html=True)
+
+
+# --- Style « papier millimétré » pour les graphiques Plotly ----------------- #
+# Teinte chaude type papier + double grille (lignes principales « cm » et
+# lignes fines « mm »), dans un orange/sépia caractéristique du papier
+# millimétré, accordé à la charte (touche chaude proche du bordeaux).
+GRAPH_PAPER_BG = "#FFFDF7"                        # blanc chaud (fond papier)
+GRAPH_PAPER_MAJOR = "rgba(201,110,79,0.55)"      # lignes principales (cm)
+GRAPH_PAPER_MINOR = "rgba(201,110,79,0.22)"      # lignes fines (mm)
+
+
+def graph_paper(fig):
+    """Applique un style « papier millimétré » à une figure Plotly.
+
+    Grille double (principale + fine) sur les deux axes et fond papier.
+    À appeler juste avant ``st.plotly_chart``. Renvoie la figure pour permettre
+    un usage en chaîne.
+    """
+    grid = dict(
+        showgrid=True,
+        gridcolor=GRAPH_PAPER_MAJOR,
+        gridwidth=1.0,
+        zeroline=True,
+        zerolinecolor=GRAPH_PAPER_MAJOR,
+        zerolinewidth=1.4,
+        minor=dict(showgrid=True, gridcolor=GRAPH_PAPER_MINOR, gridwidth=0.5, ticks=""),
+    )
+    # update_layout fusionne : on ne touche que x/y primaires (titres conservés,
+    # axe secondaire y2 laissé sans grille).
+    fig.update_layout(
+        xaxis=grid, yaxis=grid,
+        plot_bgcolor=GRAPH_PAPER_BG, paper_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig

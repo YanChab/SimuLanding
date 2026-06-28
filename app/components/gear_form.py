@@ -26,6 +26,8 @@ from dropsim import (
     default_trailing_arm_drag_brace_inputs,
 )
 from dropsim.inputs import Point3, Rainure
+from dropsim.metering import build_section_table
+from theme import graph_paper
 
 GEAR_TYPE_LABELS = {
     "strait_strut": "StraitStrut (jambe droite)",
@@ -70,6 +72,17 @@ _DAMPER_FIELDS = [
     ("Friction sèche fc (N/mm)", "fc"),
     ("Coeff friction pression fh", "fh"),
 ]
+
+# Amortisseur découpé en sous-groupes (4 petites tables au lieu d'une de 19 lignes).
+_DF_BY_ATTR = {a: (lbl, a) for lbl, a in _DAMPER_FIELDS}
+_DAMPER_SUB = [
+    ("Vérin / sections", ["Dpis", "Dbh", "Dt", "Dp", "course"]),
+    ("Butée hydraulique (BH)", ["DInsideBh", "DInsidePalierBh", "Lbh", "LPalierBh",
+                                "excentricite_palier_bh", "HauteurPisBh"]),
+    ("Orifices (piston / clapet)", ["DTrouPis", "NbTrouPis", "DTrouDiap", "NbTrouDiap"]),
+    ("Friction / butée", ["fc", "fh", "tore", "endstop_smooth_mm"]),
+]
+_DAMPER_SUB = [(title, [_DF_BY_ATTR[a] for a in attrs]) for title, attrs in _DAMPER_SUB]
 _GAS_FIELDS = [
     ("Pression init. BP (bar)", "Pinitbp"),
     ("Volume gaz BP (cc)", "Vgbp"),
@@ -151,6 +164,46 @@ def _num_table(specs, prefix, base, *, key):
             st.session_state[f"{prefix}_{field}"] = float(getattr(base, field))
 
 
+def _render_bh_section_curve(prefix, base_inputs, rainures_df) -> None:
+    """Trace la **section cumulée de la butée hydraulique** en fonction de la
+    course, recalculée en direct (mêmes formules que le moteur,
+    :func:`build_section_table`) à partir des valeurs courantes des widgets et du
+    tableau des rainures. Se met donc à jour à chaque édition du tableau."""
+    import types
+
+    def _live(field):
+        return float(st.session_state.get(f"{prefix}_{field}", getattr(base_inputs, field)))
+
+    try:
+        cols = ["Début (mm)", "Fin (mm)", "Profondeur (mm)"]
+        rdf = rainures_df[cols].apply(pd.to_numeric, errors="coerce").dropna()
+        shim = types.SimpleNamespace(
+            Dbh=_live("Dbh") / 1000.0,            # m
+            diametre_rainure=_live("diametre_rainure"),   # mm (convention metering)
+            course=_live("course") / 1000.0,      # m
+            rainures_debut=rdf["Début (mm)"].to_numpy(dtype=float),
+            rainures_fin=rdf["Fin (mm)"].to_numpy(dtype=float),
+            rainures_profondeur=rdf["Profondeur (mm)"].to_numpy(dtype=float),
+        )
+        _, tab_sec = build_section_table(shim)
+        course_axis_mm = np.arange(len(tab_sec), dtype=float)
+        section_mm2 = tab_sec * 1.0e6
+    except Exception as exc:  # géométrie incohérente (Ø rainure nul, etc.)
+        st.info(f"Section BH non calculable avec ces valeurs ({exc}).", icon="ℹ️")
+        return
+
+    st.plotly_chart(
+        _gline(
+            course_axis_mm,
+            [("Section cumulée BH", section_mm2)],
+            "Section cumulée de la butée hydraulique en fonction de la course",
+            "Course (mm)", "Section (mm²)",
+        ),
+        use_container_width=True,
+        key=f"{prefix}_bh_section_chart",
+    )
+
+
 def gear_type_selectbox(position_label: str, prefix: str, current_kind: str) -> str:
     """Sélecteur de type de train. Réinitialise l'objet stocké au défaut du
     nouveau type lors d'un changement."""
@@ -183,15 +236,11 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
         st.session_state.pop(f"{prefix}_mu", None)
         base_inputs = _default_for(kind)
 
-    with st.expander(f"Conditions de chute (run isolé) — {position_label}", expanded=False):
-        st.caption(
-            "Utilisées pour le run train isolé. En run avion complet, masse/lift/"
-            "chute sont imposés par les blocs globaux."
-        )
-        _num_table(_DROP_FIELDS, prefix, base_inputs, key=f"{prefix}_drop_tbl")
+    st.caption(f"Type : **{GEAR_TYPE_LABELS.get(kind, kind)}**")
 
     geo_col, dmp_col = st.columns(2)
     with geo_col:
+        st.markdown("**Géométrie**")
         if kind in ("strait_strut", "strait_strut_drag_brace"):
             st.markdown("**Points jambe (mm, repère avion, pitch 0°)**")
             # Points de l'axe de coulisse + ancrage. Variante drag brace : l'attache
@@ -265,22 +314,22 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 )
     with dmp_col:
         st.markdown("**Amortisseur (géométrie)**")
-        _num_table(_DAMPER_FIELDS, prefix, base_inputs, key=f"{prefix}_dmp_tbl")
+        _d1, _d2 = st.columns(2)
+        _dcols = [_d1, _d2, _d1, _d2]
+        for _i, (_title, _sub) in enumerate(_DAMPER_SUB):
+            with _dcols[_i]:
+                st.caption(_title)
+                _num_table(_sub, prefix, base_inputs, key=f"{prefix}_dmp{_i}_tbl")
 
-    g1, g2, g3 = st.columns(3)
-    with g1:
-        st.markdown("**Ressort gazeux**")
+    # --- Sections secondaires (repliées par défaut pour alléger la page) ---
+    with st.expander("Ressort gazeux", expanded=False):
         _num_table(_GAS_FIELDS, prefix, base_inputs, key=f"{prefix}_gas_tbl")
-    with g2:
-        st.markdown("**Huile**")
+    with st.expander("Huile", expanded=False):
         _num_table(_OIL_FIELDS, prefix, base_inputs, key=f"{prefix}_oil_tbl")
-    with g3:
-        st.markdown("**Pneu / spring-back**")
+    with st.expander("Pneu / spring-back", expanded=False):
         _num_table(_TYRE_FIELDS, prefix, base_inputs, key=f"{prefix}_tyre_tbl")
 
-    rc1, rc2 = st.columns(2)
-    with rc1:
-        st.markdown("**Rainures butée hydraulique**")
+    with st.expander("Rainures butée hydraulique", expanded=False):
         _num_table([("Ø rainure (mm)", "diametre_rainure")], prefix, base_inputs, key=f"{prefix}_drain_tbl")
         rkey = f"{prefix}_rainures"
         if rkey not in st.session_state:
@@ -292,23 +341,35 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
             st.session_state[rkey], hide_index=True, width="stretch",
             num_rows="dynamic", key=f"{prefix}_rainures_ed",
         )
-    with rc2:
-        st.markdown("**Courbe pneu** (déflexion mm → charge kN)")
-        tkey = f"{prefix}_tyre"
-        if tkey not in st.session_state:
-            st.session_state[tkey] = pd.DataFrame(base_inputs.tyre_curve, columns=["Déflexion (mm)", "Charge (kN)"])
-        tyre_df = st.data_editor(
-            st.session_state[tkey], hide_index=True, width="stretch",
-            num_rows="dynamic", key=f"{prefix}_tyre_ed",
+        _render_bh_section_curve(prefix, base_inputs, rainures_df)
+
+    with st.expander("Courbes pneu & adhérence", expanded=False):
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            st.markdown("**Courbe pneu** (déflexion mm → charge kN)")
+            tkey = f"{prefix}_tyre"
+            if tkey not in st.session_state:
+                st.session_state[tkey] = pd.DataFrame(base_inputs.tyre_curve, columns=["Déflexion (mm)", "Charge (kN)"])
+            tyre_df = st.data_editor(
+                st.session_state[tkey], hide_index=True, width="stretch",
+                num_rows="dynamic", key=f"{prefix}_tyre_ed",
+            )
+        with _c2:
+            st.markdown("**Courbe adhérence** (slip → μ)")
+            mkey = f"{prefix}_mu"
+            if mkey not in st.session_state:
+                st.session_state[mkey] = pd.DataFrame(base_inputs.mu_curve, columns=["Slip", "μ"])
+            mu_df = st.data_editor(
+                st.session_state[mkey], hide_index=True, width="stretch",
+                num_rows="dynamic", key=f"{prefix}_mu_ed",
+            )
+
+    with st.expander(f"Conditions de chute (run isolé) — {position_label}", expanded=False):
+        st.caption(
+            "Utilisées pour le run train isolé. En run avion complet, masse/lift/"
+            "chute sont imposés par les blocs globaux."
         )
-        st.markdown("**Courbe adhérence** (slip → μ)")
-        mkey = f"{prefix}_mu"
-        if mkey not in st.session_state:
-            st.session_state[mkey] = pd.DataFrame(base_inputs.mu_curve, columns=["Slip", "μ"])
-        mu_df = st.data_editor(
-            st.session_state[mkey], hide_index=True, width="stretch",
-            num_rows="dynamic", key=f"{prefix}_mu_ed",
-        )
+        _num_table(_DROP_FIELDS, prefix, base_inputs, key=f"{prefix}_drop_tbl")
 
     return _build_gear_inputs(prefix, kind, base_inputs, points_df, rainures_df, tyre_df, mu_df)
 
@@ -387,7 +448,7 @@ def _energy_layout(fig, title, b=90):
         xaxis_title="Temps (s)", yaxis_title="Énergie (J)",
         legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
     )
-    return fig
+    return graph_paper(fig)
 
 
 def _render_energy_balance(df, label: str) -> None:
@@ -443,19 +504,22 @@ def _render_energy_balance(df, label: str) -> None:
                         use_container_width=True)
 
 
-def _gline(x, ys, title, xlab, ylab):
+def _gline(x, ys, title, xlab, ylab, dashes=None):
     import plotly.graph_objects as go
 
     fig = go.Figure()
-    for name, y in ys:
-        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name))
+    for i, (name, y) in enumerate(ys):
+        # ``dashes`` (optionnel) rend distinguables des courbes qui se superposent
+        # (ex. composantes proportionnelles selon la géométrie de la bielle).
+        line = dict(dash=dashes[i], width=2.4) if dashes else None
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name, line=line))
     fig.update_layout(
         title=dict(text=title, y=0.98, yanchor="top"),
         xaxis_title=xlab, yaxis_title=ylab, height=520,
         margin=dict(l=8, r=8, t=56, b=110),
         legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0),
     )
-    return fig
+    return graph_paper(fig)
 
 
 def _gline_dual(x, left, right, title, xlab, left_lab, right_lab):
@@ -473,7 +537,7 @@ def _gline_dual(x, left, right, title, xlab, left_lab, right_lab):
         height=520, margin=dict(l=8, r=8, t=56, b=110),
         legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0),
     )
-    return fig
+    return graph_paper(fig)
 
 
 def _req(df, needed, title) -> bool:
@@ -482,6 +546,110 @@ def _req(df, needed, title) -> bool:
         st.info(f"{title} : colonnes indisponibles ({', '.join(missing)}).", icon="ℹ️")
         return False
     return True
+
+
+# Les 4 configurations de train et leurs interfaces avec la structure :
+#  - strait_strut            : encastrement B (3 efforts + moments)
+#  - trailing_arm            : pivot B (efforts + moments) + rotule C (efforts)
+#  - strait_strut_drag_brace : rotule B1 + linéaire annulaire B2 + bielle C–D
+#  - trailing_arm_drag_brace : rotule F1 + linéaire annulaire F2 + bielle D–E
+INTERFACE_KINDS = (
+    "strait_strut", "trailing_arm",
+    "strait_strut_drag_brace", "trailing_arm_drag_brace",
+)
+
+
+def _interface_cols(naming: str, base: str, a1: str, a2: str) -> dict:
+    """Renvoie le dico logique→colonne selon le schéma de nommage.
+
+    ``naming`` vaut ``"isolated"`` (train isolé, colonnes sans préfixe) ou
+    ``"aircraft"`` (avion complet, colonnes préfixées ``base`` = "NLG",
+    "MLG left", "MLG right"). ``a1``/``a2`` = noms des ancrages du drag brace
+    (B1/B2 ou F1/F2)."""
+    if naming == "isolated":
+        return {
+            "B.Fx": "Torseur@B (pivot).Effort X (N)", "B.Fz": "Torseur@B (pivot).Effort Z (N)",
+            "B.Mx": "Torseur@B (pivot).Moment X (N·m)", "B.Mz": "Torseur@B (pivot).Moment Z (N·m)",
+            "B.My": "Torseur@B (pivot).Moment Y (N·m)",
+            "C.Fx": "Torseur@C (rotule).Effort X (N)", "C.Fz": "Torseur@C (rotule).Effort Z (N)",
+            "bielle": "DragBrace.Effort bielle (N)",
+            "a1.Fx": f"DragBrace.{a1} Fx (N)", "a1.Fy": f"DragBrace.{a1} Fy (N)", "a1.Fz": f"DragBrace.{a1} Fz (N)",
+            "a2.Fx": f"DragBrace.{a2} Fx (N)", "a2.Fy": f"DragBrace.{a2} Fy (N)", "a2.Fz": f"DragBrace.{a2} Fz (N)",
+        }
+    return {
+        "B.Fx": f"{base}.Torseur@B.Fx (N)", "B.Fz": f"{base}.Torseur@B.Fz (N)",
+        "B.Mx": f"{base}.Torseur@B.Mx (N.m)", "B.Mz": f"{base}.Torseur@B.Mz (N.m)",
+        "B.My": f"{base}.Torseur@B.My tangage (N.m)",
+        "C.Fx": f"{base}.Torseur@C.Fx (N)", "C.Fz": f"{base}.Torseur@C.Fz (N)",
+        "bielle": f"{base}.DragBrace.Effort bielle (N)",
+        "a1.Fx": f"{base}.DragBrace.{a1} Fx (N)", "a1.Fy": f"{base}.DragBrace.{a1} Fy (N)", "a1.Fz": f"{base}.DragBrace.{a1} Fz (N)",
+        "a2.Fx": f"{base}.DragBrace.{a2} Fx (N)", "a2.Fy": f"{base}.DragBrace.{a2} Fy (N)", "a2.Fz": f"{base}.DragBrace.{a2} Fz (N)",
+    }
+
+
+def render_interface_efforts(df, t, label, model_kind, *, naming="isolated", base="", key_prefix="") -> None:
+    """Affiche, dans un seul bloc, les **efforts aux interfaces** train↔structure
+    en **adaptant les points** à la configuration ``model_kind`` (cf.
+    :data:`INTERFACE_KINDS`). Partagé par les trains isolés et l'avion complet."""
+    is_ta = model_kind.startswith("trailing_arm")
+    is_db = model_kind.endswith("drag_brace")
+    a1, a2 = ("B1", "B2") if model_kind == "strait_strut_drag_brace" else ("F1", "F2")
+    c = _interface_cols(naming, base, a1, a2)
+    kp = key_prefix or label
+
+    if not is_db:
+        # Liaison(s) classiques : encastrement B (StraitStrut) ou pivot B (+ rotule C, TrailingArm).
+        b_kind = "pivot" if is_ta else "encastrement"
+        if _req(df, [c["B.Fx"], c["B.Fz"], c["B.Mx"], c["B.Mz"]], f"{label} - Liaison B"):
+            moments = [("Moment Mx", df[c["B.Mx"]]), ("Moment Mz", df[c["B.Mz"]])]
+            if c["B.My"] in df.columns:
+                moments.insert(1, ("Moment My (tangage)", df[c["B.My"]]))
+            st.plotly_chart(_gline_dual(
+                t, [("Effort Fx", df[c["B.Fx"]]), ("Effort Fz", df[c["B.Fz"]])], moments,
+                f"{label} — Liaison {b_kind} B : efforts (gauche) + moments (axe secondaire)",
+                "Temps (s)", "Effort (N)", "Moment (N.m)",
+            ), use_container_width=True, key=f"{kp}_iface_b")
+        if is_ta and _req(df, [c["C.Fx"], c["C.Fz"]], f"{label} - Liaison C"):
+            st.plotly_chart(_gline(
+                t, [("Effort Fx", df[c["C.Fx"]]), ("Effort Fz", df[c["C.Fz"]])],
+                f"{label} — Liaison rotule C : efforts (pas de moment transmis)",
+                "Temps (s)", "Effort (N)",
+            ), use_container_width=True, key=f"{kp}_iface_c")
+        return
+
+    # Configurations drag brace : ancrage isostatique (rotule + linéaire annulaire + bielle).
+    need = [c["bielle"], c["a1.Fx"], c["a1.Fy"], c["a1.Fz"], c["a2.Fx"], c["a2.Fy"], c["a2.Fz"]]
+    if not _req(df, need, f"{label} - Efforts aux interfaces"):
+        return
+    r1 = np.sqrt(df[c["a1.Fx"]] ** 2 + df[c["a1.Fy"]] ** 2 + df[c["a1.Fz"]] ** 2)
+    r2 = np.sqrt(df[c["a2.Fx"]] ** 2 + df[c["a2.Fy"]] ** 2 + df[c["a2.Fz"]] ** 2)
+    st.plotly_chart(_gline(t, [
+        ("Effort bielle", df[c["bielle"]]),
+        (f"|R| rotule {a1}", r1),
+        (f"|R| linéaire annulaire {a2}", r2),
+    ], f"{label} — Efforts aux interfaces (structure↔corps)", "Temps (s)", "Effort (N)"),
+        use_container_width=True, key=f"{kp}_iface_anchor")
+
+    # Composantes de l'effort de la bielle à son point de fixation sur la structure
+    # (D pour un StraitStrut+DB, E pour un TrailingArm+DB).
+    struct_pt = "D" if model_kind == "strait_strut_drag_brace" else "E"
+    if naming == "isolated":
+        bcx, bcy, bcz = (f"DragBrace.Bielle@{struct_pt} F{a} (N)" for a in "xyz")
+    else:
+        bcx, bcy, bcz = (f"{base}.DragBrace.Bielle F{a} (N)" for a in "xyz")
+    if all(col in df.columns for col in (bcx, bcy, bcz)):
+        st.plotly_chart(_gline(t, [
+            ("Fx", df[bcx]), ("Fy", df[bcy]), ("Fz", df[bcz]),
+        ], f"{label} — Bielle : composantes au point de fixation structure {struct_pt}",
+           "Temps (s)", "Effort (N)", dashes=["solid", "dash", "dot"]),
+           use_container_width=True, key=f"{kp}_iface_brace")
+
+    with st.expander(f"Composantes {a1} / {a2} (repère corps) — {label}"):
+        st.plotly_chart(_gline(t, [
+            (f"{a1} Fx", df[c["a1.Fx"]]), (f"{a1} Fy", df[c["a1.Fy"]]), (f"{a1} Fz", df[c["a1.Fz"]]),
+            (f"{a2} Fx", df[c["a2.Fx"]]), (f"{a2} Fy", df[c["a2.Fy"]]), (f"{a2} Fz", df[c["a2.Fz"]]),
+        ], f"{label} — Composantes d'ancrage", "Temps (s)", "Effort (N)"),
+            use_container_width=True, key=f"{kp}_iface_anchor_comp")
 
 
 def render_full_gear_result(result, label: str) -> None:
@@ -504,13 +672,18 @@ def render_full_gear_result(result, label: str) -> None:
     if "Tyre.FTyre (N)" in cols:
         m3.metric("Fz pneu max", f"{float(np.max(np.abs(df['Tyre.FTyre (N)']))):.0f} N")
 
-    _has_db = "DragBrace.Effort bielle (N)" in cols
+    # Les colonnes DragBrace existent toujours ; le drag brace est *actif* seulement
+    # si l'effort de bielle est non nul (sinon config de base, ancrage simple en B).
+    _bielle = "DragBrace.Effort bielle (N)"
+    _has_db = _bielle in cols and float(np.abs(df[_bielle].to_numpy()).sum()) > 0.0
+    if is_ta:
+        _model_kind = "trailing_arm_drag_brace" if _has_db else "trailing_arm"
+    else:
+        _model_kind = "strait_strut_drag_brace" if _has_db else "strait_strut"
     _labels = [
         "Efforts (temps)", "Effort / course", "Pressions", "Conv. hydraulique",
-        "Course & déflexion", "Accél. & vitesse", "Liaisons", "Bilan énergétique",
+        "Course & déflexion", "Accél. & vitesse", "Efforts aux interfaces", "Bilan énergétique",
     ]
-    if _has_db:
-        _labels.append("Drag brace")
     tabs = st.tabs(_labels)
 
     with tabs[0]:
@@ -568,50 +741,10 @@ def render_full_gear_result(result, label: str) -> None:
             st.info(f"{label} - Accél./vitesse : colonnes indisponibles.", icon="ℹ️")
 
     with tabs[6]:
-        bx, bz = "Torseur@B (pivot).Effort X (N)", "Torseur@B (pivot).Effort Z (N)"
-        mx, mz = "Torseur@B (pivot).Moment X (N·m)", "Torseur@B (pivot).Moment Z (N·m)"
-        b_kind = "pivot" if is_ta else "encastrement"
-        if _req(df, [bx, bz, mx, mz], f"{label} - Liaison B"):
-            st.plotly_chart(_gline_dual(
-                t,
-                [("Effort Fx", df[bx]), ("Effort Fz", df[bz])],
-                [("Moment Mx", df[mx]), ("Moment Mz", df[mz])],
-                f"{label} — Liaison {b_kind} B : efforts (gauche) + moments (axe secondaire)",
-                "Temps (s)", "Effort (N)", "Moment (N.m)",
-            ), use_container_width=True)
-        if is_ta:
-            cfx, cfz = "Torseur@C (rotule).Effort X (N)", "Torseur@C (rotule).Effort Z (N)"
-            if _req(df, [cfx, cfz], f"{label} - Liaison C"):
-                st.plotly_chart(_gline(
-                    t, [("Effort Fx", df[cfx]), ("Effort Fz", df[cfz])],
-                    f"{label} — Liaison rotule C : efforts (pas de moment transmis)",
-                    "Temps (s)", "Effort (N)",
-                ), use_container_width=True)
+        render_interface_efforts(df, t, label, _model_kind, naming="isolated", key_prefix=label)
 
     with tabs[7]:
         _render_energy_balance(df, label)
-
-    if _has_db:
-        with tabs[8]:
-            # Deux schémas d'ancrage : StraitStrut → B1/B2 ; TrailingArm → F1/F2.
-            a1, a2 = ("B1", "B2") if f"DragBrace.B1 Fx (N)" in cols else ("F1", "F2")
-            r1 = np.sqrt(df[f"DragBrace.{a1} Fx (N)"] ** 2 + df[f"DragBrace.{a1} Fy (N)"] ** 2
-                         + df[f"DragBrace.{a1} Fz (N)"] ** 2)
-            r2 = np.sqrt(df[f"DragBrace.{a2} Fx (N)"] ** 2 + df[f"DragBrace.{a2} Fy (N)"] ** 2
-                         + df[f"DragBrace.{a2} Fz (N)"] ** 2)
-            st.plotly_chart(_gline(t, [
-                ("Effort bielle", df["DragBrace.Effort bielle (N)"]),
-                (f"|R| rotule {a1}", r1),
-                (f"|R| linéaire annulaire {a2}", r2),
-            ], f"{label} — Ancrage (efforts structure↔corps)",
-               "Temps (s)", "Effort (N)"), use_container_width=True)
-            with st.expander(f"Composantes {a1} / {a2} (repère corps) — {label}"):
-                st.plotly_chart(_gline(t, [
-                    (f"{a1} Fx", df[f"DragBrace.{a1} Fx (N)"]), (f"{a1} Fy", df[f"DragBrace.{a1} Fy (N)"]),
-                    (f"{a1} Fz", df[f"DragBrace.{a1} Fz (N)"]), (f"{a2} Fx", df[f"DragBrace.{a2} Fx (N)"]),
-                    (f"{a2} Fy", df[f"DragBrace.{a2} Fy (N)"]), (f"{a2} Fz", df[f"DragBrace.{a2} Fz (N)"]),
-                ], f"{label} — Composantes d'ancrage", "Temps (s)", "Effort (N)"),
-                   use_container_width=True)
 
     if getattr(result, "warnings", None):
         with st.expander(f"⚠️ {len(result.warnings)} avertissement(s) — {label}"):

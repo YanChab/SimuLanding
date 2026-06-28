@@ -95,6 +95,9 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "nlg_db_f2_fx": "NLG.DragBrace.F2 Fx (N)",
     "nlg_db_f2_fy": "NLG.DragBrace.F2 Fy (N)",
     "nlg_db_f2_fz": "NLG.DragBrace.F2 Fz (N)",
+    "nlg_db_brace_fx": "NLG.DragBrace.Bielle Fx (N)",
+    "nlg_db_brace_fy": "NLG.DragBrace.Bielle Fy (N)",
+    "nlg_db_brace_fz": "NLG.DragBrace.Bielle Fz (N)",
     "nlg_accms": "NLG.AccMs (m/s²)",
     "nlg_accmns": "NLG.AccMns (m/s²)",
     "nlg_vitmns": "NLG.VitMns (m/s)",
@@ -149,6 +152,9 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "mlg_left_db_f2_fx": "MLG left.DragBrace.F2 Fx (N)",
     "mlg_left_db_f2_fy": "MLG left.DragBrace.F2 Fy (N)",
     "mlg_left_db_f2_fz": "MLG left.DragBrace.F2 Fz (N)",
+    "mlg_left_db_brace_fx": "MLG left.DragBrace.Bielle Fx (N)",
+    "mlg_left_db_brace_fy": "MLG left.DragBrace.Bielle Fy (N)",
+    "mlg_left_db_brace_fz": "MLG left.DragBrace.Bielle Fz (N)",
     "mlg_left_tors_res_x": "MLG left.Torseur.Resultante X (N)",
     "mlg_left_tors_res_z": "MLG left.Torseur.Resultante Z (N)",
     "mlg_left_tors_res_norm": "MLG left.Torseur.Resultante norme (N)",
@@ -201,6 +207,9 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "mlg_right_db_f2_fx": "MLG right.DragBrace.F2 Fx (N)",
     "mlg_right_db_f2_fy": "MLG right.DragBrace.F2 Fy (N)",
     "mlg_right_db_f2_fz": "MLG right.DragBrace.F2 Fz (N)",
+    "mlg_right_db_brace_fx": "MLG right.DragBrace.Bielle Fx (N)",
+    "mlg_right_db_brace_fy": "MLG right.DragBrace.Bielle Fy (N)",
+    "mlg_right_db_brace_fz": "MLG right.DragBrace.Bielle Fz (N)",
     "mlg_right_tors_res_x": "MLG right.Torseur.Resultante X (N)",
     "mlg_right_tors_res_z": "MLG right.Torseur.Resultante Z (N)",
     "mlg_right_tors_res_norm": "MLG right.Torseur.Resultante norme (N)",
@@ -587,11 +596,11 @@ class StraitStrutSlot:
         ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + ffribag + fendstop
         st.ftot = ftot
         # Ancrage drag brace (§5b) : efforts B1/B2/bielle (repère jambe), si configuré.
-        db_T = db_b1 = db_b2 = None
+        db_T = db_b1 = db_b2 = db_brace = None
         if self.drag_brace is not None:
             _db = _drag_brace_step(p.course, st, ftot, tr_lg, self.drag_brace)
             if _db is not None:
-                db_T, db_b1, db_b2 = _db
+                db_T, db_b1, db_b2, db_brace = _db
         tb_lg = np.array([tr_lg[0], 0.0, ftot])
         tb_sol_raw = R_lg_to_sol_step @ tb_lg
         in_contact = tyre_ftyre > 1.0e-9
@@ -729,6 +738,7 @@ class StraitStrutSlot:
                 "db_brace_T": db_T,
                 "db_b1_fx": float(db_b1[0]), "db_b1_fy": float(db_b1[1]), "db_b1_fz": float(db_b1[2]),
                 "db_b2_fx": float(db_b2[0]), "db_b2_fy": float(db_b2[1]), "db_b2_fz": float(db_b2[2]),
+                "db_brace_fx": float(db_brace[0]), "db_brace_fy": float(db_brace[1]), "db_brace_fz": float(db_brace[2]),
             })
 
         b_sol = R_lg_to_sol_step @ adv.ptB_lg
@@ -889,7 +899,7 @@ class TrailingArmSlot:
         fc_z = float(step["fc_z"])
 
         # Ancrage « jambe + bielle » (§6b) : efforts F1/F2/bielle, si configuré.
-        jb_T = jb_f1 = jb_f2 = None
+        jb_T = jb_f1 = jb_f2 = jb_brace = None
         if getattr(rt.p, "jambe", None) is not None:
             _jb = _jambe_brace_step(
                 [fb_x, float(step["fb_y"]), fb_z],
@@ -898,7 +908,7 @@ class TrailingArmSlot:
                 rt.p.jambe, rt.p.pitch, rt.p.roll,
             )
             if _jb is not None:
-                jb_T, jb_f1, jb_f2 = _jb
+                jb_T, jb_f1, jb_f2, jb_brace = _jb
 
         contributions = [
             InterfaceContribution(
@@ -1022,6 +1032,7 @@ class TrailingArmSlot:
                 "db_brace_T": jb_T,
                 "db_f1_fx": float(jb_f1[0]), "db_f1_fy": float(jb_f1[1]), "db_f1_fz": float(jb_f1[2]),
                 "db_f2_fx": float(jb_f2[0]), "db_f2_fy": float(jb_f2[1]), "db_f2_fz": float(jb_f2[2]),
+                "db_brace_fx": float(jb_brace[0]), "db_brace_fy": float(jb_brace[1]), "db_brace_fz": float(jb_brace[2]),
             })
 
         a_dx = float(state.A[0] - state.B[0])

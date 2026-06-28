@@ -453,36 +453,37 @@ with _tab_sim:
                      index=0 if inp.simulation.damper_core_solver == "auto_fast" else 1)
         _num_precise("Tol. hydraulique", "ac_sim_hyd_tol", inp.simulation.hydraulic_error_tol, step=1e-6, min_value=1e-8)
         _num("Iter max hydraulique", "ac_sim_hyd_iter", float(inp.simulation.hydraulic_max_iter), step=1.0, min_value=4.0)
+    st.caption("Solveur noyau : **auto_fast** = rapide · **auto_precise** = RK4 précis.")
 
-# --- Onglet 2 : données avion (corps, chute, implantation) ---------------- #
+# --- Onglet 2 : données avion (corps, conditions d'atterrissage) ---------- #
 with _tab_av:
-    st.subheader("Corps")
-    a, b, c = st.columns(3)
-    with a:
-        _num("Masse avion (kg)", "ac_body_masse", inp.body.masse, step=10.0, min_value=0.0)
-        _num("Inertie Jyy (kg.m²)", "ac_body_jyy", inp.body.jyy, step=100.0, min_value=0.0)
-        _num("Lift (0..1)", "ac_body_lift", inp.body.lift, step=0.01, min_value=0.0)
-    with b:
-        _num("CG X (mm)", "ac_cg_x", inp.body.cg.x, step=10.0)
-        _num("CG Y (mm)", "ac_cg_y", inp.body.cg.y, step=10.0)
-        _num("CG Z (mm)", "ac_cg_z", inp.body.cg.z, step=10.0)
-    with c:
+    col_body, col_land = st.columns(2)
+    with col_body:
+        st.subheader("Corps")
+        a, b = st.columns(2)
+        with a:
+            _num("Masse avion (kg)", "ac_body_masse", inp.body.masse, step=10.0, min_value=0.0)
+            _num("Inertie Jyy (kg.m²)", "ac_body_jyy", inp.body.jyy, step=100.0, min_value=0.0)
+            _num("Lift (0..1)", "ac_body_lift", inp.body.lift, step=0.01, min_value=0.0)
+        with b:
+            _num("CG X (mm)", "ac_cg_x", inp.body.cg.x, step=10.0)
+            _num("CG Y (mm)", "ac_cg_y", inp.body.cg.y, step=10.0)
+            _num("CG Z (mm)", "ac_cg_z", inp.body.cg.z, step=10.0)
         st.caption("Repère avion : X longitudinal, Y latéral, Z vertical.")
-
-    st.subheader("Conditions d'atterrissage")
-    a, b = st.columns(2)
-    with a:
-        _num("Vz initiale (m/s)", "ac_drop_vz", inp.drop.vz, step=0.1)
-        _num("Vx initiale (m/s)", "ac_drop_vx", inp.drop.vx, step=0.5)
-    with b:
-        _num("Pitch avion initial (°)", "ac_drop_pitch", inp.drop.pitch, step=0.1)
-        _num("Pitch rate initial (°/s)", "ac_drop_pitch_rate", inp.drop.pitch_rate_deg_s, step=0.1)
-
-    st.caption(
-        "ℹ️ L'implantation de chaque train dans l'avion est désormais définie par "
-        "son **point roue R** (onglets NLG / MLG). Le MLG droit est le miroir en Y "
-        "du MLG. Plus besoin de saisir des stations séparées."
-    )
+    with col_land:
+        st.subheader("Conditions d'atterrissage")
+        a, b = st.columns(2)
+        with a:
+            _num("Vz initiale (m/s)", "ac_drop_vz", inp.drop.vz, step=0.1)
+            _num("Vx initiale (m/s)", "ac_drop_vx", inp.drop.vx, step=0.5)
+        with b:
+            _num("Pitch avion initial (°)", "ac_drop_pitch", inp.drop.pitch, step=0.1)
+            _num("Pitch rate initial (°/s)", "ac_drop_pitch_rate", inp.drop.pitch_rate_deg_s, step=0.1)
+        st.caption(
+            "ℹ️ L'implantation de chaque train est définie par son **point roue R** "
+            "(onglets NLG / MLG). Le MLG droit est le miroir en Y du MLG. "
+            "Plus besoin de stations séparées."
+        )
 
 # --- Onglets 3 & 4 : trains (type + jeu complet de paramètres) ------------ #
 with _tab_nlg:

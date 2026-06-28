@@ -89,6 +89,9 @@ OUTPUT_COLUMNS: dict[str, str] = {
     "db_f2_fx": "DragBrace.F2 Fx (N)",
     "db_f2_fy": "DragBrace.F2 Fy (N)",
     "db_f2_fz": "DragBrace.F2 Fz (N)",
+    "db_brace_fx": "DragBrace.Bielle@E Fx (N)",
+    "db_brace_fy": "DragBrace.Bielle@E Fy (N)",
+    "db_brace_fz": "DragBrace.Bielle@E Fz (N)",
     # Bilan énergétique (diagnostic, purement passif) : bilan COMPLET du
     # système (masse suspendue + balancier + roue + amortisseur). On suit les
     # réservoirs cinétiques (translation verticale de la masse suspendue,
@@ -877,7 +880,15 @@ def _jambe_brace_step(F_B, M_B, F_C, jambe, pitch, roll):
     F1 = jambe["F1"]
     R_int = Fb + Fc
     M_int = Mb + np.cross(jambe["B"] - F1, Fb) + np.cross(jambe["C"] - F1, Fc)
-    return _drag_brace_reactions(R_int, M_int, F1, jambe["F2"], jambe["Dbr"], jambe["Ebr"])
+    res = _drag_brace_reactions(R_int, M_int, F1, jambe["F2"], jambe["Dbr"], jambe["Ebr"])
+    if res is None:
+        return None
+    T, R_F1, R_F2 = res
+    # Effort de la bielle au point de fixation structure E : −T·û_DE (repère corps).
+    u_DE = np.asarray(jambe["Ebr"], float) - np.asarray(jambe["Dbr"], float)
+    n = float(np.linalg.norm(u_DE))
+    F_brace = (-T / n) * u_DE if n > 1.0e-9 else np.zeros(3)
+    return T, R_F1, R_F2, F_brace
 
 
 def run_trailing_arm(
@@ -1351,10 +1362,11 @@ def run_trailing_arm(
             _jb = _jambe_brace_step([fb_x, fb_y, fb_z], [mb_x, 0.0, mb_z],
                                     [fc_x, fc_y, fc_z], p.jambe, p.pitch, p.roll)
             if _jb is not None:
-                _T, _RF1, _RF2 = _jb
+                _T, _RF1, _RF2, _FB = _jb
                 out["db_brace_T"][i] = _T
                 out["db_f1_fx"][i] = _RF1[0]; out["db_f1_fy"][i] = _RF1[1]; out["db_f1_fz"][i] = _RF1[2]
                 out["db_f2_fx"][i] = _RF2[0]; out["db_f2_fy"][i] = _RF2[1]; out["db_f2_fz"][i] = _RF2[2]
+                out["db_brace_fx"][i] = _FB[0]; out["db_brace_fy"][i] = _FB[1]; out["db_brace_fz"][i] = _FB[2]
 
         # Bilan énergétique (diagnostic)
         out["e_kin"][i] = e_kin

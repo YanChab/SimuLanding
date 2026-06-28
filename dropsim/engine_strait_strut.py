@@ -101,6 +101,9 @@ OUTPUT_COLUMNS_SS: dict[str, str] = {
     "db_b2_fx": "DragBrace.B2 Fx (N)",
     "db_b2_fy": "DragBrace.B2 Fy (N)",
     "db_b2_fz": "DragBrace.B2 Fz (N)",
+    "db_brace_fx": "DragBrace.Bielle@D Fx (N)",
+    "db_brace_fy": "DragBrace.Bielle@D Fy (N)",
+    "db_brace_fz": "DragBrace.Bielle@D Fz (N)",
     # Torseur à l'attache fuselage B (torseur transmis au fuselage)
     "tors_res_x": "Torseur.Resultante X (N)",
     "tors_res_y": "Torseur.Resultante Y (N)",
@@ -247,7 +250,16 @@ def _drag_brace_step(course_m, state, F_tot, tr_lg, db):
     M_int = (np.cross(A_rel - B1, F_tot * z_lg)
              + np.cross(Gt_rel - B1, -gt_vec)
              + np.cross(-B1, -gb_vec))
-    return _drag_brace_reactions(R_int, M_int, B1, db["B2"], db["C"], db["D"])
+    res = _drag_brace_reactions(R_int, M_int, B1, db["B2"], db["C"], db["D"])
+    if res is None:
+        return None
+    T, R_B1, R_B2 = res
+    # Effort de la bielle au point de fixation structure D : −T·û_CD (réaction sur
+    # la structure ; même repère que R_B1/R_B2).
+    u_CD = np.asarray(db["D"], float) - np.asarray(db["C"], float)
+    n = float(np.linalg.norm(u_CD))
+    F_brace = (-T / n) * u_CD if n > 1.0e-9 else np.zeros(3)
+    return T, R_B1, R_B2, F_brace
 
 
 def _init_strait_strut_local_state(
@@ -824,7 +836,7 @@ def run_strait_strut(
         if drag_brace is not None:
             _db = _drag_brace_step(p.course, state, ftot, tr_lg, drag_brace)
             if _db is not None:
-                _T, _RB1, _RB2 = _db
+                _T, _RB1, _RB2, _FB = _db
                 out["db_brace_T"][i] = _T
                 out["db_b1_fx"][i] = _RB1[0]
                 out["db_b1_fy"][i] = _RB1[1]
@@ -832,6 +844,9 @@ def run_strait_strut(
                 out["db_b2_fx"][i] = _RB2[0]
                 out["db_b2_fy"][i] = _RB2[1]
                 out["db_b2_fz"][i] = _RB2[2]
+                out["db_brace_fx"][i] = _FB[0]
+                out["db_brace_fy"][i] = _FB[1]
+                out["db_brace_fz"][i] = _FB[2]
         out["tors_res_x"][i] = tb_res_x
         out["tors_res_y"][i] = tb_res_y
         out["tors_res_z"][i] = tb_res_z

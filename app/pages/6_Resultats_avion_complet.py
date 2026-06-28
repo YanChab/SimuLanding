@@ -24,8 +24,12 @@ _APP = Path(__file__).resolve().parent.parent
 if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
-from theme import apply_theme  # noqa: E402
-from components.gear_form import render_full_gear_result, _render_energy_balance  # noqa: E402
+from theme import apply_theme, graph_paper  # noqa: E402
+from components.gear_form import (  # noqa: E402
+    render_full_gear_result,
+    render_interface_efforts,
+    _render_energy_balance,
+)
 
 apply_theme()
 
@@ -159,7 +163,7 @@ def _line(x, ys: list[tuple[str, object]], title: str, xlab: str, ylab: str) -> 
         margin=dict(l=8, r=8, t=56, b=110),
         legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0),
     )
-    return fig
+    return graph_paper(fig)
 
 
 def _line_dual(
@@ -187,7 +191,7 @@ def _line_dual(
         margin=dict(l=8, r=8, t=56, b=110),
         legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="left", x=0),
     )
-    return fig
+    return graph_paper(fig)
 
 
 def _cumtrapz(time_s: np.ndarray, signal: np.ndarray) -> np.ndarray:
@@ -782,40 +786,33 @@ s5.metric(contact_label, contact_metric)
 t = df["Temps (s)"]
 
 
-def _liaison_charts(label: str, base: str, *, has_c: bool, b_kind: str) -> None:
-    """Trace, pour chaque liaison du train avec la structure, les efforts (axe
-    gauche) et les moments (axe vertical secondaire). ``base`` est le préfixe de
-    colonne ("NLG", "MLG left", "MLG right"). ``b_kind`` qualifie la liaison B
-    ("encastrement" pour un StraitStrut, "pivot" pour un TrailingArm)."""
-    fx, fz = f"{base}.Torseur@B.Fx (N)", f"{base}.Torseur@B.Fz (N)"
-    mx, mz = f"{base}.Torseur@B.Mx (N.m)", f"{base}.Torseur@B.Mz (N.m)"
-    my = f"{base}.Torseur@B.My tangage (N.m)"
-    if _require_columns([fx, fz, mx, mz], f"{label} - Liaison B"):
-        moments = [("Moment Mx", df[mx]), ("Moment Mz", df[mz])]
-        if my in df.columns:
-            moments.insert(1, ("Moment My (tangage)", df[my]))
-        st.plotly_chart(
-            _line_dual(
-                t,
-                [("Effort Fx", df[fx]), ("Effort Fz", df[fz])],
-                moments,
-                f"{label} — Liaison {b_kind} B : efforts (gauche) + moments (axe secondaire)",
-                "Temps (s)", "Effort (N)", "Moment (N.m)",
-            ),
-            use_container_width=True,
-        )
-    if has_c:
-        cfx, cfz = f"{base}.Torseur@C.Fx (N)", f"{base}.Torseur@C.Fz (N)"
-        if _require_columns([cfx, cfz], f"{label} - Liaison C"):
-            st.plotly_chart(
-                _line(
-                    t,
-                    [("Effort Fx", df[cfx]), ("Effort Fz", df[cfz])],
-                    f"{label} — Liaison rotule C : efforts (pas de moment transmis)",
-                    "Temps (s)", "Effort (N)",
-                ),
-                use_container_width=True,
-            )
+def _train_kind(train_inputs, base: str) -> str:
+    """Configuration du train (parmi les 4 types). On lit ``model_kind`` des
+    entrées si disponibles, sinon on retombe sur une détection par colonnes
+    (StraitStrut pour le NLG, TrailingArm pour le MLG ; drag brace si l'effort
+    de bielle est non nul)."""
+    mk = getattr(train_inputs, "model_kind", None)
+    if mk in (
+        "strait_strut", "strait_strut_drag_brace",
+        "trailing_arm", "trailing_arm_drag_brace",
+    ):
+        return mk
+    is_ta = base.startswith("MLG")
+    bielle = f"{base}.DragBrace.Effort bielle (N)"
+    has_db = bielle in df_energy.columns and float(df_energy[bielle].abs().to_numpy().sum()) > 0.0
+    if is_ta:
+        return "trailing_arm_drag_brace" if has_db else "trailing_arm"
+    return "strait_strut_drag_brace" if has_db else "strait_strut"
+
+
+def _liaison_charts(label: str, base: str, train_inputs) -> None:
+    """Affiche, dans un seul bloc, les efforts aux interfaces du train avec la
+    structure, en adaptant les points selon sa configuration. Les colonnes
+    Torseur/DragBrace ne sont présentes que dans ``full_df`` (``df_energy``)."""
+    render_interface_efforts(
+        df_energy, t, label, _train_kind(train_inputs, base),
+        naming="aircraft", base=base, key_prefix=base,
+    )
 
 
 _tab_labels = ["Avion complet", "Section MLG", "Section NLG"]
@@ -833,91 +830,102 @@ if nlg_seul is not None:
     tab_nlg_seul = _tabs[_seul_idx]
 
 with tab_aircraft:
-    st.markdown("### Animation")
-    _render_aircraft_animation()
+    ac_tabs = st.tabs([
+        "Animation",
+        "Dynamique CG",
+        "Tangage",
+        "Charges globales",
+        "Bilan énergétique",
+    ])
 
-    if _require_columns([
-        "Aircraft.CG.z (m)",
-        "Aircraft.CG.vz (m/s)",
-        "Aircraft.CG.az (m/s²)",
-    ], "Section avion - dynamique CG"):
-        st.plotly_chart(
-            _line(
-                t,
-                [
-                    ("CG z", df["Aircraft.CG.z (m)"]),
-                    ("CG vz", df["Aircraft.CG.vz (m/s)"]),
-                    ("CG az", df["Aircraft.CG.az (m/s²)"]),
-                ],
-                "Dynamique verticale du centre de gravite",
-                "Temps (s)",
-                "m / m/s / m/s2",
-            ),
-            use_container_width=True,
-        )
+    with ac_tabs[0]:
+        _render_aircraft_animation()
 
-    if _require_columns([
-        "Aircraft.Pitch (rad)",
-        "Aircraft.PitchRate (rad/s)",
-        "Aircraft.PitchAcc (rad/s²)",
-    ], "Section avion - tangage"):
-        st.plotly_chart(
-            _line(
-                t,
-                [
-                    ("Pitch", df["Aircraft.Pitch (rad)"]),
-                    ("Pitch rate", df["Aircraft.PitchRate (rad/s)"]),
-                    ("Pitch acc", df["Aircraft.PitchAcc (rad/s²)"]),
-                ],
-                "Dynamique de tangage",
-                "Temps (s)",
-                "rad / rad/s / rad/s2",
-            ),
-            use_container_width=True,
-        )
+    with ac_tabs[1]:
+        if _require_columns([
+            "Aircraft.CG.z (m)",
+            "Aircraft.CG.vz (m/s)",
+            "Aircraft.CG.az (m/s²)",
+        ], "Section avion - dynamique CG"):
+            st.plotly_chart(
+                _line(
+                    t,
+                    [
+                        ("CG z", df["Aircraft.CG.z (m)"]),
+                        ("CG vz", df["Aircraft.CG.vz (m/s)"]),
+                        ("CG az", df["Aircraft.CG.az (m/s²)"]),
+                    ],
+                    "Dynamique verticale du centre de gravite",
+                    "Temps (s)",
+                    "m / m/s / m/s2",
+                ),
+                use_container_width=True,
+            )
 
-    if _require_columns([
-        "Aircraft.Fz total (N)",
-        "Aircraft.Fz NLG (N)",
-        "Aircraft.Fz MLG left (N)",
-        "Aircraft.Fz MLG right (N)",
-        "Aircraft.Mpitch total (N.m)",
-    ], "Section avion - charges"):
-        st.plotly_chart(
-            _line(
-                t,
-                [
-                    ("Fz total", df["Aircraft.Fz total (N)"]),
-                    ("Fz NLG", df["Aircraft.Fz NLG (N)"]),
-                    ("Fz MLG left", df["Aircraft.Fz MLG left (N)"]),
-                    ("Fz MLG right", df["Aircraft.Fz MLG right (N)"]),
-                    ("Mpitch", df["Aircraft.Mpitch total (N.m)"]),
-                ],
-                "Charges globales avion",
-                "Temps (s)",
-                "N / N.m",
-            ),
-            use_container_width=True,
-        )
+    with ac_tabs[2]:
+        if _require_columns([
+            "Aircraft.Pitch (rad)",
+            "Aircraft.PitchRate (rad/s)",
+            "Aircraft.PitchAcc (rad/s²)",
+        ], "Section avion - tangage"):
+            st.plotly_chart(
+                _line(
+                    t,
+                    [
+                        ("Pitch", df["Aircraft.Pitch (rad)"]),
+                        ("Pitch rate", df["Aircraft.PitchRate (rad/s)"]),
+                        ("Pitch acc", df["Aircraft.PitchAcc (rad/s²)"]),
+                    ],
+                    "Dynamique de tangage",
+                    "Temps (s)",
+                    "rad / rad/s / rad/s2",
+                ),
+                use_container_width=True,
+            )
 
-    st.markdown("### Bilan énergétique")
-    e_cols_ac = [c for c in df_energy.columns if c.startswith("Énergie.")]
-    if not e_cols_ac:
-        st.info(
-            "Bilan énergétique indisponible : ce résultat ne contient pas les "
-            "colonnes d'énergie. Relancez une simulation avion complet.",
-            icon="ℹ️",
-        )
-    else:
-        st.caption(
-            "Bilan **rigoureux** calculé par le moteur (convention travail, **même "
-            "démarche que les trains isolés**) : somme des bilans par train (gaz, "
-            "hydraulique, frottements, glissement pneu, butée, cinétique des pièces "
-            "mobiles) + cinétique du fuselage (translation + tangage) + gravité. "
-            "Le résidu doit rester au niveau de l'erreur d'intégration "
-            "(cf. docs/Bilan_energetique.md §6)."
-        )
-        _render_energy_balance(df_energy, "Avion complet")
+    with ac_tabs[3]:
+        if _require_columns([
+            "Aircraft.Fz total (N)",
+            "Aircraft.Fz NLG (N)",
+            "Aircraft.Fz MLG left (N)",
+            "Aircraft.Fz MLG right (N)",
+            "Aircraft.Mpitch total (N.m)",
+        ], "Section avion - charges"):
+            st.plotly_chart(
+                _line(
+                    t,
+                    [
+                        ("Fz total", df["Aircraft.Fz total (N)"]),
+                        ("Fz NLG", df["Aircraft.Fz NLG (N)"]),
+                        ("Fz MLG left", df["Aircraft.Fz MLG left (N)"]),
+                        ("Fz MLG right", df["Aircraft.Fz MLG right (N)"]),
+                        ("Mpitch", df["Aircraft.Mpitch total (N.m)"]),
+                    ],
+                    "Charges globales avion",
+                    "Temps (s)",
+                    "N / N.m",
+                ),
+                use_container_width=True,
+            )
+
+    with ac_tabs[4]:
+        e_cols_ac = [c for c in df_energy.columns if c.startswith("Énergie.")]
+        if not e_cols_ac:
+            st.info(
+                "Bilan énergétique indisponible : ce résultat ne contient pas les "
+                "colonnes d'énergie. Relancez une simulation avion complet.",
+                icon="ℹ️",
+            )
+        else:
+            st.caption(
+                "Bilan **rigoureux** calculé par le moteur (convention travail, **même "
+                "démarche que les trains isolés**) : somme des bilans par train (gaz, "
+                "hydraulique, frottements, glissement pneu, butée, cinétique des pièces "
+                "mobiles) + cinétique du fuselage (translation + tangage) + gravité. "
+                "Le résidu doit rester au niveau de l'erreur d'intégration "
+                "(cf. docs/Bilan_energetique.md §6)."
+            )
+            _render_energy_balance(df_energy, "Avion complet")
 
 with tab_mlg:
     e_mlg_l = None
@@ -947,7 +955,7 @@ with tab_mlg:
         "Conv. hydraulique",
         "Course & déflexion",
         "Accél. & vitesse",
-        "Torseur B & C",
+        "Efforts aux interfaces",
     ])
 
     with mlg_l_tabs[0]:
@@ -1012,7 +1020,7 @@ with tab_mlg:
             ], "MLG gauche - Accélération et vitesse", "Temps (s)", "g / m.s⁻¹"), use_container_width=True)
 
     with mlg_l_tabs[6]:
-        _liaison_charts("MLG gauche", "MLG left", has_c=True, b_kind="pivot")
+        _liaison_charts("MLG gauche", "MLG left", aircraft_inputs.mlg if aircraft_inputs else None)
 
     st.markdown("### MLG droite")
     if e_mlg_r is not None:
@@ -1024,7 +1032,7 @@ with tab_mlg:
         "Conv. hydraulique",
         "Course & déflexion",
         "Accél. & vitesse",
-        "Torseur B & C",
+        "Efforts aux interfaces",
     ])
 
     with mlg_r_tabs[0]:
@@ -1089,7 +1097,7 @@ with tab_mlg:
             ], "MLG droite - Accélération et vitesse", "Temps (s)", "g / m.s⁻¹"), use_container_width=True)
 
     with mlg_r_tabs[6]:
-        _liaison_charts("MLG droite", "MLG right", has_c=True, b_kind="pivot")
+        _liaison_charts("MLG droite", "MLG right", aircraft_inputs.mlg if aircraft_inputs else None)
 
 with tab_nlg:
     e_nlg = None
@@ -1109,7 +1117,7 @@ with tab_nlg:
         "Conv. hydraulique",
         "Course & déflexion",
         "Accél. & vitesse",
-        "Torseur B",
+        "Efforts aux interfaces",
     ])
 
     with nlg_tabs[0]:
@@ -1174,7 +1182,7 @@ with tab_nlg:
             ], "NLG - Accélération et vitesse", "Temps (s)", "g / m.s⁻¹"), use_container_width=True)
 
     with nlg_tabs[6]:
-        _liaison_charts("NLG", "NLG", has_c=False, b_kind="encastrement")
+        _liaison_charts("NLG", "NLG", aircraft_inputs.nlg if aircraft_inputs else None)
 
 # --- Onglets train isolé (NLG seul / MLG seul) : mêmes courbes + bilan énerg. ---
 if mlg_seul is not None:
