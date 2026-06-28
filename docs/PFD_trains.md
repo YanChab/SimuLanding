@@ -459,6 +459,11 @@ amortisseur oblique (A‑C en Y) — produisent des composantes **Fy** et surtou
 | Amortisseur / balancier en A | **rotule** | effort seul | tout moment |
 | roue / sol en R | **contact** | (Fx, Fz) | moment → rotation roue |
 
+> **Variante d'ancrage.** Une seconde configuration interpose une **jambe** entre
+> le train et la structure : le balancier (B) et l'amortisseur (C) se fixent sur la
+> jambe, montée isostatiquement par **rotule F1 + linéaire annulaire F2 + bielle
+> D–E**. La dynamique (§6) est identique. Dérivation complète au **§6b**.
+
 > L'amortisseur est **rotulé aux deux bouts** (A et C) et de masse négligée → c'est
 > une **bielle à deux forces** : son effort est **porté par l'axe A‑C**, de norme
 > F_tot (même modèle interne oléo/hydraulique qu'au §2, mais ici **sans bagues ni
@@ -618,6 +623,115 @@ façon couplée.
 **Différences clés avec §6.5** (modèle interface) : ici la rotation est pilotée
 par I_{G′} (et non jyy), le poids m′g crée un moment, et l'inertie m′·a_{G′}
 entre **dans la trajectoire** (pas seulement dans l'effort reporté).
+
+---
+
+## 6b. Variante d'ancrage — TrailingArm sur jambe + bielle
+
+> **Principe** (analogue au §5b). Le **balancier**, l'**amortisseur** et la roue
+> (toute la dynamique du §6) sont **inchangés** : les efforts d'interface du train
+> restent **F_B** (pivot, avec ses moments Mx, Mz) et **F_C** (rotule), donnés par
+> le §6.5. Ce qui change : ces efforts ne vont plus **directement** à la structure
+> mais à une pièce intermédiaire, **la jambe**, elle-même montée **isostatiquement**
+> sur la structure :
+>
+> - le **balancier** est fixé à la jambe par son **pivot B**, l'**amortisseur** par
+>   sa **rotule C** (mêmes points qu'au §6) ;
+> - la jambe est liée à la structure par **F1 — rotule** (3 efforts) et **F2 —
+>   linéaire annulaire** d'axe (F1 F2) (2 efforts ⊥ à l'axe) ;
+> - plus une **bielle D–E** à **2 rotules** (D lié à la **jambe**, E à la
+>   **structure**) → un **unique effort selon (D E)**.
+>
+> F1 + F2 = axe de trunnion (la jambe ne pourrait que pivoter autour de F1 F2) ; la
+> bielle bloque ce dernier DDL → la jambe est **isostatiquement** maintenue
+> (3 + 2 + 1 = 6 inconnues = 6 équations d'équilibre).
+
+### 6b.1 Coordonnées par défaut (repère avion, mm, à pitch 0°)
+
+| Point | X | Y | Z | Rôle |
+|---|---|---|---|---|
+| B | (cf. §6) | | | pivot balancier ↔ **jambe** |
+| C | (cf. §6) | | | rotule amortisseur ↔ **jambe** |
+| F1 | 5350 | −1200 | 1000 | rotule jambe ↔ structure |
+| F2 | 5750 | −1100 | 1030 | linéaire annulaire (axe F1 F2) |
+| D | 5650 | −1050 | 600 | rotule **jambe** ↔ bielle |
+| E | 5550 | −600 | 1050 | rotule bielle ↔ **structure** |
+
+Vecteurs : axe trunnion **û_F = (F2 − F1)/‖·‖ ≈ (0,968 ; 0,242 ; 0,073)** ; axe de
+bielle **û_DE = (E − D)/‖·‖ ≈ (−0,155 ; 0,698 ; 0,698)**.
+
+### 6b.2 Liaisons, inconnues et isostatisme
+
+| Liaison | Nature | Inconnues d'effort |
+|---|---|---|
+| F1 (jambe↔structure) | rotule | **R_F1 = (X₁, Y₁, Z₁)** → 3 |
+| F2 (jambe↔structure) | linéaire annulaire d'axe û_F | **R_F2 ⊥ û_F** → 2 |
+| bielle (en D) | bielle à 2 rotules | **T** selon û_DE → 1 |
+
+Total = **6 inconnues** = **6 équations** d'équilibre de la jambe (corps **sans
+masse** → membre de droite nul). Système **isostatique**.
+
+### 6b.3 Isolement de la bielle D–E (pièce à deux forces)
+
+Bielle sans masse, deux rotules → effort selon (D E). Sur la **jambe** en D :
+**+T·û_DE** ; sur la **structure** en E : **−T·û_DE**. Aucun moment.
+
+### 6b.4 Isolement de la jambe (masse négligée → équilibre)
+
+La jambe reçoit du train (3ᵉ loi, efforts **du balancier/amortisseur sur la jambe**
+= ceux transmis « à la cellule » du §6.5) : **F_B** et le moment de pivot
+**M_B = (M_{B,x}, 0, M_{B,z})** en **B**, et **F_C** en **C**. Torseur interne
+réduit en F1 :
+
+$$
+\vec R_{int} = \vec F_B + \vec F_C,\qquad
+\vec M_{int/F_1} = \vec M_B + \vec{F_1B}\times\vec F_B + \vec{F_1C}\times\vec F_C
+$$
+
+**Équilibre de la résultante (3 éq.) :**
+
+$$
+\boxed{\;\vec R_{int} + \vec R_{F1} + \vec R_{F2} + T\,\hat u_{DE} = \vec 0\;}\tag{4''}
+$$
+
+**Équilibre du moment en F1 (3 éq., R_F1 sans moment en F1) :**
+
+$$
+\boxed{\;\vec M_{int/F_1} + \vec{F_1F_2}\times \vec R_{F2} + \vec{F_1D}\times (T\,\hat u_{DE}) = \vec 0\;}\tag{6''}
+$$
+
+### 6b.5 Résolution (structure du calcul)
+
+Découplage identique au §5b.5 grâce au trunnion :
+
+1. **Bielle T — projection de (6'') sur û_F** : F1F2 ∥ û_F annule le terme F2, R_F1
+   ne donne aucun moment en F1 →
+   $$
+   \boxed{\;T = -\,\frac{\vec M_{int/F_1}\cdot \hat u_F}{\big(\vec{F_1D}\times \hat u_{DE}\big)\cdot \hat u_F}\;}
+   $$
+   → la bielle reprend la composante du moment interne autour de l'axe trunnion.
+2. **R_F2** (2 composantes ⊥ û_F de (6'')), puis **R_F1** (résultante 4'').
+
+### 6b.6 Efforts transmis à la structure et cohérence
+
+Efforts **de la jambe sur la structure** (entrant dans le PFD avion §7) : −R_F1 en
+**F1**, −R_F2 en **F2**, −T·û_DE en **E**. Leur **somme** vaut −R_int =
+−(F_B + F_C) ; le **torseur global transmis est identique** à celui du TrailingArm
+standard (§6.5, F_B en B + F_C en C) — **seule la répartition** sur trois points
+(F1, F2, E) **change**. La dynamique avion (§7) est donc **inchangée** ; on obtient
+en plus les efforts de dimensionnement de la jambe et de la bielle.
+
+> **Implémentation (étape suivante).** (i) Cœur TrailingArm (§6) réutilisé tel
+> quel → F_B, M_B, F_C ; (ii) résolution 3D de la jambe (4'')(6'') → R_F1, R_F2, T ;
+> (iii) ces efforts remplacent, pour le report, l'interface B/C dans le PFD avion.
+
+### 6b.7 Hypothèses propres à la variante
+
+- **H‑ja1** : **jambe sans masse** → équilibre statique.
+- **H‑ja2** : liaisons **parfaites** (rotules F1, D, E ; linéaire annulaire F2)
+  → sans frottement, aucun moment parasite.
+- **H‑ja3** : **bielle sans masse** ni flambage → pièce à deux forces exacte.
+- **H‑ja4** : montage **isostatique** (6 / 6) → efforts déterminés sans raideur.
 
 ---
 
