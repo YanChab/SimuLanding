@@ -86,6 +86,11 @@ de translation.
 | S₂ / cellule en B | **encastrement** | effort **et** moment | — |
 | roue/sol en S | **contact** | effort de contact (Fx, Fz) | moment → rotation roue |
 
+> **Variante d'ancrage du corps.** Une seconde configuration remplace
+> l'encastrement B par un montage isostatique **rotule B1 + linéaire annulaire B2 +
+> drag brace (bielle C–D)** ; la tige S₁ et l'axe de coulisse (R, Gt, Gb) y sont
+> identiques. Dérivation complète au **§5b**.
+
 > L'effort axial de la glissière idéale est nul : c'est l'**oléo** qui fournit
 > l'effort axial F_tot = Sc·Pc − Sd·Pd + Sbh·Pg + **F_fric(joint) +
 > F_fric(bagues)** + F_butée. ⚠️ **Les frottements (joint et bagues) sont déjà
@@ -302,6 +307,131 @@ $$
 > appliquée à S₁ en R** qui doit apparaître — il faudra donc identifier sans
 > ambiguïté quelle force physique agit sur le moyeu, et la confronter à
 > `fx_spring_wheel` (code) et à la convention Vx/X.
+
+---
+
+## 5b. Variante d'ancrage — StraitStrut + drag brace
+
+> **Principe.** La **tige + roue (S₁)** et l'**axe de coulisse** (points R, Gt, Gb)
+> sont **strictement identiques** au StraitStrut standard : tout le §3 (enfoncement,
+> guidage Xt/Xb, friction, spin‑up) reste **inchangé**. Seul l'**ancrage du corps
+> S₂ à la structure** change : l'**encastrement unique B** (qui transmettait effort
+> **et** moment) est remplacé par un **montage isostatique à trois liaisons** :
+>
+> - **B1 — rotule** (sphérique) : transmet 3 efforts, **aucun moment** ;
+> - **B2 — linéaire annulaire** d'axe (B1 B2) : transmet 2 efforts **⊥ à l'axe**,
+>   **aucun moment**, **aucun effort axial** (glissement libre le long de B1 B2) ;
+> - **drag brace** — **bielle à 2 rotules** entre **C** (lié au **corps**) et **D**
+>   (lié à la **structure**) : c'est une **pièce à deux forces** → un **unique
+>   effort selon l'axe (C D)**.
+>
+> B1 + B2 forment un **axe de trunnion** (B1 fixe un point ; B2 bloque les 2
+> translations transverses) : il ne resterait qu'**un seul DDL**, la **rotation du
+> corps autour de l'axe B1 B2**. La **drag brace** bloque ce dernier DDL. Le corps
+> est donc **isostatiquement** maintenu.
+
+### 5b.1 Coordonnées par défaut (repère avion, mm, à pitch 0°)
+
+| Point | X | Y | Z | Rôle |
+|---|---|---|---|---|
+| B1 | 1650 | 70 | 1078 | rotule corps ↔ structure |
+| B2 | 1650 | −70 | 1078 | linéaire annulaire (axe B1 B2) |
+| C | 1620 | 0 | 700 | rotule **corps** ↔ drag brace |
+| D | 1950 | 0 | 1120 | rotule drag brace ↔ **structure** |
+
+Vecteurs unitaires : axe trunnion **û_B = (B1 − B2)/‖B1 − B2‖ = (0, 1, 0)** (selon
+**Y**, latéral) ; axe de bielle **û_CD = (D − C)/‖D − C‖ = (330, 0, 420)/534,1 ≈
+(0,618 ; 0 ; 0,786)** (dans le plan X‑Z, vers l'**arrière** et le **haut**). La
+drag brace est donc une **contre‑fiche de traînée** : elle reprend les charges
+**fore/aft** autour de l'axe latéral.
+
+### 5b.2 Liaisons, inconnues et isostatisme
+
+| Liaison | Nature | Inconnues d'effort |
+|---|---|---|
+| B1 (corps↔structure) | rotule | **R_B1 = (X₁, Y₁, Z₁)** → 3 |
+| B2 (corps↔structure) | linéaire annulaire d'axe û_B | **R_B2 ⊥ û_B** (R_B2·û_B = 0) → 2 |
+| drag brace (en C) | bielle à 2 rotules | **T** selon û_CD → 1 |
+
+Total = **6 inconnues** = **6 équations** d'équilibre du corps (3 résultante + 3
+moment, corps **sans masse** → membre de droite nul). Système **isostatique**.
+
+### 5b.3 Isolement de la drag brace (pièce à deux forces)
+
+Bielle sans masse, chargée **uniquement** par deux rotules (C, D) → effort porté
+par la droite (C D). Sur le **corps** en C : **+T·û_CD** ; sur la **structure** en
+D : **−T·û_CD** (T > 0 = traction de la bielle). Aucun moment transmis.
+
+### 5b.4 Isolement du corps S₂ (masse négligée → équilibre)
+
+L'action **interne** de la tige sur le corps (oléo **+F_tot·ẑ₁** en A ; réactions
+de guidage **−Xt** en Gt, **−Xb** en Gb — identiques au §4.1, Xt/Xb issus du §3)
+se réduit en un **torseur connu** (R_int, M_int) :
+
+$$
+\vec R_{int} = F_{tot}\,\hat z_1 - (X_t + X_b)\,\hat x_1,\qquad
+\vec M_{int/B1} = \vec{B_1A}\times(F_{tot}\hat z_1) + \vec{B_1G_t}\times(-X_t\hat x_1) + \vec{B_1G_b}\times(-X_b\hat x_1)
+$$
+
+**Équilibre de la résultante (3 éq.) :**
+
+$$
+\boxed{\;\vec R_{int} + \vec R_{B1} + \vec R_{B2} + T\,\hat u_{CD} = \vec 0\;}\tag{4'}
+$$
+
+**Équilibre du moment en B1 (3 éq., R_B1 sans moment en B1) :**
+
+$$
+\boxed{\;\vec M_{int/B1} + \vec{B_1B_2}\times \vec R_{B2} + \vec{B_1C}\times (T\,\hat u_{CD}) = \vec 0\;}\tag{6'}
+$$
+
+### 5b.5 Résolution (structure du calcul)
+
+La résolution se découple proprement grâce à la géométrie du trunnion :
+
+1. **Drag brace T — projection du moment (6′) sur l'axe trunnion û_B.** Comme
+   B₁B₂ ∥ û_B, le terme B₁B₂ × R_B2 est **⊥ û_B** (projection nulle), et R_B1 ne
+   donne aucun moment en B1 :
+
+   $$
+   \boxed{\;T = -\,\frac{\vec M_{int/B1}\cdot \hat u_B}{\big(\vec{B_1C}\times \hat u_{CD}\big)\cdot \hat u_B}\;}
+   $$
+
+   → **la drag brace reprend exactement la composante du moment interne autour de
+   l'axe trunnion** (moment de traînée/charge axiale). C'est sa fonction.
+
+2. **Linéaire annulaire R_B2 — 2 composantes restantes de (6′)** (⊥ û_B), une fois
+   T connu.
+3. **Rotule R_B1 — résultante (4′)**, une fois R_B2 et T connus.
+
+### 5b.6 Efforts transmis à la structure et cohérence
+
+Les efforts **du train sur la structure** (entrant dans le PFD avion §7) sont les
+**réactions** aux trois points :
+
+- en **B1** : −R_B1 ; en **B2** : −R_B2 ; en **D** (drag brace) : −T·û_CD.
+
+Leur **somme** vaut, par (4′), **−R_int = −F_tot·ẑ₁ + (Xt+Xb)·x̂₁**. La **résultante
+globale transmise est donc identique** à celle du modèle encastré (§5.2 :
+F_B,w = F_tot vertical, F_B,u = fu transverse) — **seule la répartition** sur trois
+points (B1, B2, D) **et la suppression du moment d'encastrement** changent : le
+moment M_B du §4.3 est désormais **repris par le couple {B1, B2, drag brace}**.
+
+> **Conséquences pour l'implémentation (étape suivante).** (i) Le cœur S₁
+> (enfoncement, Xt/Xb, friction, spin‑up, énergie) est **réutilisé tel quel** ;
+> (ii) on ajoute la résolution **3D** du corps (4′)(6′) pour produire les efforts
+> en B1, B2, D ; (iii) ces trois efforts remplacent l'unique torseur d'interface B
+> dans le PFD avion. La cinématique d'enfoncement (axe de coulisse R/Gt/Gb) est
+> **inchangée**.
+
+### 5b.7 Hypothèses propres à la variante
+
+- **H‑db1** : corps fixe **sans masse** (déjà au §4) → équilibre statique du corps.
+- **H‑db2** : liaisons **parfaites** (rotule B1, linéaire annulaire B2, rotules de
+  la bielle) → **sans frottement**, aucun moment parasite.
+- **H‑db3** : **drag brace sans masse** ni flambage → pièce à deux forces exacte.
+- **H‑db4** : montage **isostatique** (6 inconnues / 6 équations) → efforts
+  déterminés sans hypothèse de raideur.
 
 ---
 

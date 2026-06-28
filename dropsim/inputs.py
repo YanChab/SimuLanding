@@ -11,7 +11,7 @@ nominal (m = 1250 kg, Vz = 3.05 m/s, Vx = 39 m/s).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 
 from . import units as U
 from .errors import ErrorCollector, ErrorLevel
@@ -378,11 +378,11 @@ class TrailingArmInputs:
             hint="Saisir une valeur entière >= 4.",
         )
         c.check(
-            self.model_kind not in {"trailing_arm", "strait_strut"},
+            self.model_kind not in {"trailing_arm", "strait_strut", "strait_strut_drag_brace"},
             code="MODEL_KIND_INVALIDE",
             message=(
-                "Le type de modèle doit être 'trailing_arm' ou 'strait_strut' "
-                f"(reçu : {self.model_kind})."
+                "Le type de modèle doit être 'trailing_arm', 'strait_strut' ou "
+                f"'strait_strut_drag_brace' (reçu : {self.model_kind})."
             ),
             field="model_kind",
             hint="Choisir un type de modèle supporté.",
@@ -784,6 +784,41 @@ class StraitStrutInputs(TrailingArmInputs):
     seal_precomp_pa: float = 110_649.0  # Pa pression de pré-compression du joint
 
 
+@dataclass
+class StraitStrutDragBraceInputs(StraitStrutInputs):
+    """StraitStrut dont le corps est ancré par **rotule B1 + linéaire annulaire B2
+    + drag brace (bielle C–D)** au lieu de l'encastrement B (cf. PFD §5b).
+
+    La tige et l'axe de coulisse (R, Gt, Gb) sont **identiques** au StraitStrut :
+    la **dynamique est la même**. S'ajoutent les points d'ancrage du corps :
+      - B1, B2 : rotule + linéaire annulaire d'axe (B1 B2) (corps ↔ structure) ;
+      - C : rotule corps ↔ bielle ; D : rotule bielle ↔ structure.
+    """
+
+    model_kind: str = "strait_strut_drag_brace"
+
+    # Points d'ancrage (repère avion, mm, à pitch 0°).
+    B1: Point3 = field(default_factory=lambda: Point3(1650.0, 70.0, 1078.0))
+    B2: Point3 = field(default_factory=lambda: Point3(1650.0, -70.0, 1078.0))
+    Cdb: Point3 = field(default_factory=lambda: Point3(1620.0, 0.0, 700.0))
+    Ddb: Point3 = field(default_factory=lambda: Point3(1950.0, 0.0, 1120.0))
+
+
+def default_strait_strut_drag_brace_inputs() -> StraitStrutDragBraceInputs:
+    """Entrées par défaut du StraitStrut + drag brace : géométrie StraitStrut
+    nominale (mêmes R/Gt/Gb), plus les points d'ancrage B1/B2/C/D par défaut."""
+    base = default_strait_strut_inputs()
+    data = {f.name: getattr(base, f.name) for f in fields(base)}
+    data["model_kind"] = "strait_strut_drag_brace"
+    return StraitStrutDragBraceInputs(
+        **data,
+        B1=Point3(1650.0, 70.0, 1078.0),
+        B2=Point3(1650.0, -70.0, 1078.0),
+        Cdb=Point3(1620.0, 0.0, 700.0),
+        Ddb=Point3(1950.0, 0.0, 1120.0),
+    )
+
+
 def default_trailing_arm_inputs() -> TrailingArmInputs:
     """Retourne les entrées par défaut (cas nominal trailing arm)."""
     return TrailingArmInputs()
@@ -1022,6 +1057,9 @@ class StraitStrutGeomSI:
     seal_precomp_pa: float  # Pa
     r_offset: tuple = (0.0, 0.0)  # m, décalage perpendiculaire (jambe-x,y) du centre roue R
     b_offset: tuple = (0.0, 0.0)  # m, décalage perpendiculaire (jambe-x,y) du pivot B
+    # Ancrage drag brace (cf. PFD §5b) : positions repère JAMBE (m), relatives à Gb,
+    # des points B1, B2, C, D. None pour un StraitStrut encastré classique.
+    drag_brace: dict | None = None
 
 
 def _strut_geom_from_points(inputs: "TrailingArmInputs") -> dict:
@@ -1068,6 +1106,28 @@ def _strut_geom_from_points(inputs: "TrailingArmInputs") -> dict:
     )
 
 
+def _drag_brace_geom_si(inputs: "TrailingArmInputs", pitch_deg: float, roll_deg: float) -> dict | None:
+    """Positions repère JAMBE (m), relatives à Gb, des points d'ancrage drag brace
+    B1, B2, C, D. ``None`` si l'entrée n'est pas un StraitStrut + drag brace."""
+    if getattr(inputs, "model_kind", "") != "strait_strut_drag_brace":
+        return None
+    import math
+    import numpy as np
+    from .engine_strait_strut import _rot_sol_to_lg
+
+    Gb = np.array([inputs.Gb.x, inputs.Gb.y, inputs.Gb.z], dtype=float)
+    rs2l = _rot_sol_to_lg(math.radians(pitch_deg), math.radians(roll_deg))
+
+    def to_lg(pt):
+        v = np.array([pt.x, pt.y, pt.z], dtype=float)
+        return (rs2l @ (v - Gb)) * U.MM_TO_M
+
+    return dict(
+        B1=to_lg(inputs.B1), B2=to_lg(inputs.B2),
+        C=to_lg(inputs.Cdb), D=to_lg(inputs.Ddb),
+    )
+
+
 def _strut_geom_si(inputs: "TrailingArmInputs") -> StraitStrutGeomSI:
     """Extrait la géométrie strut (SI) d'un jeu d'entrées StraitStrut (depuis les points)."""
     g = _strut_geom_from_points(inputs)
@@ -1082,6 +1142,7 @@ def _strut_geom_si(inputs: "TrailingArmInputs") -> StraitStrutGeomSI:
         seal_precomp_pa=inputs.seal_precomp_pa,
         r_offset=(g["r_offset_mm"][0] * U.MM_TO_M, g["r_offset_mm"][1] * U.MM_TO_M),
         b_offset=(g["b_offset_mm"][0] * U.MM_TO_M, g["b_offset_mm"][1] * U.MM_TO_M),
+        drag_brace=_drag_brace_geom_si(inputs, g["strut_pitch"], g["strut_roll"]),
     )
 
 
@@ -1353,12 +1414,12 @@ class AircraftInputs:
             mlg_model_kind=mlg_inputs.model_kind,
             nlg_strut=(
                 _strut_geom_si(nlg_inputs)
-                if nlg_inputs.model_kind == "strait_strut"
+                if nlg_inputs.model_kind in ("strait_strut", "strait_strut_drag_brace")
                 else None
             ),
             mlg_strut=(
                 _strut_geom_si(mlg_inputs)
-                if mlg_inputs.model_kind == "strait_strut"
+                if mlg_inputs.model_kind in ("strait_strut", "strait_strut_drag_brace")
                 else None
             ),
         )

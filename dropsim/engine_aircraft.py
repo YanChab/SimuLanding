@@ -20,6 +20,7 @@ from .engine_strait_strut import (
     _ffrijoi_nlg,
     _ffribag_nlg,
     _bushing_loads,
+    _drag_brace_step,
     StraitStrutLocalState,
 )
 from .errors import OVERSTROKE_CODES, SimError, make_overstroke_warning
@@ -80,6 +81,13 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "nlg_reaction_v": "NLG.Reaction V (N)",
     "nlg_xgt": "NLG.XGt (N)",
     "nlg_xgb": "NLG.XGb (N)",
+    "nlg_db_brace_T": "NLG.DragBrace.Effort bielle (N)",
+    "nlg_db_b1_fx": "NLG.DragBrace.B1 Fx (N)",
+    "nlg_db_b1_fy": "NLG.DragBrace.B1 Fy (N)",
+    "nlg_db_b1_fz": "NLG.DragBrace.B1 Fz (N)",
+    "nlg_db_b2_fx": "NLG.DragBrace.B2 Fx (N)",
+    "nlg_db_b2_fy": "NLG.DragBrace.B2 Fy (N)",
+    "nlg_db_b2_fz": "NLG.DragBrace.B2 Fz (N)",
     "nlg_accms": "NLG.AccMs (m/s²)",
     "nlg_accmns": "NLG.AccMns (m/s²)",
     "nlg_vitmns": "NLG.VitMns (m/s)",
@@ -121,6 +129,13 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "mlg_left_reaction_h": "MLG left.Reaction H (N)",
     "mlg_left_reaction_v": "MLG left.Reaction V (N)",
     "mlg_left_accms": "MLG left.AccMs (m/s²)",
+    "mlg_left_db_brace_T": "MLG left.DragBrace.Effort bielle (N)",
+    "mlg_left_db_b1_fx": "MLG left.DragBrace.B1 Fx (N)",
+    "mlg_left_db_b1_fy": "MLG left.DragBrace.B1 Fy (N)",
+    "mlg_left_db_b1_fz": "MLG left.DragBrace.B1 Fz (N)",
+    "mlg_left_db_b2_fx": "MLG left.DragBrace.B2 Fx (N)",
+    "mlg_left_db_b2_fy": "MLG left.DragBrace.B2 Fy (N)",
+    "mlg_left_db_b2_fz": "MLG left.DragBrace.B2 Fz (N)",
     "mlg_left_tors_res_x": "MLG left.Torseur.Resultante X (N)",
     "mlg_left_tors_res_z": "MLG left.Torseur.Resultante Z (N)",
     "mlg_left_tors_res_norm": "MLG left.Torseur.Resultante norme (N)",
@@ -160,6 +175,13 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "mlg_right_reaction_h": "MLG right.Reaction H (N)",
     "mlg_right_reaction_v": "MLG right.Reaction V (N)",
     "mlg_right_accms": "MLG right.AccMs (m/s²)",
+    "mlg_right_db_brace_T": "MLG right.DragBrace.Effort bielle (N)",
+    "mlg_right_db_b1_fx": "MLG right.DragBrace.B1 Fx (N)",
+    "mlg_right_db_b1_fy": "MLG right.DragBrace.B1 Fy (N)",
+    "mlg_right_db_b1_fz": "MLG right.DragBrace.B1 Fz (N)",
+    "mlg_right_db_b2_fx": "MLG right.DragBrace.B2 Fx (N)",
+    "mlg_right_db_b2_fy": "MLG right.DragBrace.B2 Fy (N)",
+    "mlg_right_db_b2_fz": "MLG right.DragBrace.B2 Fz (N)",
     "mlg_right_tors_res_x": "MLG right.Torseur.Resultante X (N)",
     "mlg_right_tors_res_z": "MLG right.Torseur.Resultante Z (N)",
     "mlg_right_tors_res_norm": "MLG right.Torseur.Resultante norme (N)",
@@ -420,6 +442,7 @@ class StraitStrutSlot:
         self.station = station
         self.unload_radius = float(params.unload_radius)
         self.x_offset = float(station[0] - cg[0])
+        self.drag_brace = getattr(strut_geom, "drag_brace", None)  # ancrage §5b (None = encastré)
         self.strut_pitch = strut_geom.strut_pitch
         self.strut_roll = strut_geom.strut_roll
         self.seal_precomp_pa = strut_geom.seal_precomp_pa
@@ -529,6 +552,12 @@ class StraitStrutSlot:
         fendstop = _endstop(st.d, p.course, smooth_len=p.endstop_smooth)
         ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + ffribag + fendstop
         st.ftot = ftot
+        # Ancrage drag brace (§5b) : efforts B1/B2/bielle (repère jambe), si configuré.
+        db_T = db_b1 = db_b2 = None
+        if self.drag_brace is not None:
+            _db = _drag_brace_step(p.course, st, ftot, tr_lg, self.drag_brace)
+            if _db is not None:
+                db_T, db_b1, db_b2 = _db
         tb_lg = np.array([tr_lg[0], 0.0, ftot])
         tb_sol_raw = R_lg_to_sol_step @ tb_lg
         in_contact = tyre_ftyre > 1.0e-9
@@ -661,6 +690,12 @@ class StraitStrutSlot:
             "e_grav": e["grav"],
             "e_kin_init": self._e_kin_init,
         }
+        if db_T is not None:
+            diag.update({
+                "db_brace_T": db_T,
+                "db_b1_fx": float(db_b1[0]), "db_b1_fy": float(db_b1[1]), "db_b1_fz": float(db_b1[2]),
+                "db_b2_fx": float(db_b2[0]), "db_b2_fy": float(db_b2[1]), "db_b2_fz": float(db_b2[2]),
+            })
 
         b_sol = R_lg_to_sol_step @ adv.ptB_lg
         gt_sol = R_lg_to_sol_step @ adv.ptGt_lg
@@ -949,7 +984,7 @@ class TrailingArmSlot:
 
 def _build_slot(prefix, model_kind, params, strut_geom, station, cg, vx, pitch_init, arm_mass=0.0):
     """Construit le slot adapté au type de train choisi pour la position."""
-    if model_kind == "strait_strut":
+    if model_kind in ("strait_strut", "strait_strut_drag_brace"):
         if strut_geom is None:
             strut_geom = _strut_geom_si(params)
         return StraitStrutSlot(

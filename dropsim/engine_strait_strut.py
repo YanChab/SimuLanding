@@ -93,6 +93,14 @@ OUTPUT_COLUMNS_SS: dict[str, str] = {
     # Guidage NLG (spécifique StraitStrut)
     "xgt": "StraitStrut.XGt (N)",
     "xgb": "StraitStrut.XGb (N)",
+    # Ancrage drag brace (cf. PFD §5b) : efforts STRUCTURE→CORPS, repère jambe.
+    "db_brace_T": "DragBrace.Effort bielle (N)",
+    "db_b1_fx": "DragBrace.B1 Fx (N)",
+    "db_b1_fy": "DragBrace.B1 Fy (N)",
+    "db_b1_fz": "DragBrace.B1 Fz (N)",
+    "db_b2_fx": "DragBrace.B2 Fx (N)",
+    "db_b2_fy": "DragBrace.B2 Fy (N)",
+    "db_b2_fz": "DragBrace.B2 Fz (N)",
     # Torseur à l'attache fuselage B (torseur transmis au fuselage)
     "tors_res_x": "Torseur.Resultante X (N)",
     "tors_res_y": "Torseur.Resultante Y (N)",
@@ -146,6 +154,26 @@ class StraitStrutLocalState:
     tyre_defl_val: float
 
 
+def _bushing_reaction_vectors(tr_lg, ptR_lg, ptGt_lg, ptGb_lg):
+    """Réactions de bague SIGNÉES sur la TIGE (repère jambe, ⊥ à l'axe ; composante
+    axiale nulle). Voir :func:`_bushing_loads` pour le modèle (équilibre 2D de la
+    tige avec décalage de R relatif à l'axe Gt-Gb)."""
+    Rx = float(ptR_lg[0]) - float(ptGb_lg[0])
+    Ry = float(ptR_lg[1]) - float(ptGb_lg[1])
+    z_r, z_gt, z_gb = float(ptR_lg[2]), float(ptGt_lg[2]), float(ptGb_lg[2])
+    fx, fy, fz = float(tr_lg[0]), float(tr_lg[1]), float(tr_lg[2])
+    h = z_gt - z_gb
+    if abs(h) < 1.0e-9:
+        return np.zeros(3), np.zeros(3)
+    m_x = Ry * fz - (z_r - z_gb) * fy
+    m_y = (z_r - z_gb) * fx - Rx * fz
+    gty = m_x / h
+    gtx = -m_y / h
+    gbx = -fx - gtx
+    gby = -fy - gty
+    return np.array([gtx, gty, 0.0]), np.array([gbx, gby, 0.0])
+
+
 def _bushing_loads(tr_lg, ptR_lg, ptGt_lg, ptGb_lg) -> tuple[float, float]:
     """Charges normales (magnitudes) aux bagues Gt (sur tige) et Gb (sur fût) qui
     équilibrent la tige sous l'effort de contact ``tr_lg`` (repère jambe).
@@ -160,23 +188,66 @@ def _bushing_loads(tr_lg, ptR_lg, ptGt_lg, ptGb_lg) -> tuple[float, float]:
     R sur l'axe et effort purement jambe-x on retrouve exactement la formule
     historique.
     """
-    # Offset perpendiculaire de R relatif à l'axe (porté par les bagues).
-    Rx = float(ptR_lg[0]) - float(ptGb_lg[0])
-    Ry = float(ptR_lg[1]) - float(ptGb_lg[1])
-    z_r, z_gt, z_gb = float(ptR_lg[2]), float(ptGt_lg[2]), float(ptGb_lg[2])
-    fx, fy, fz = float(tr_lg[0]), float(tr_lg[1]), float(tr_lg[2])
-    h = z_gt - z_gb
-    if abs(h) < 1.0e-9:
-        return 0.0, 0.0
-    # Moment de l'effort de contact pris sur l'axe en Gb :
-    #   M = (offset_R + (z_r - z_gb)·ẑ) × tr ; composantes perpendiculaires (flexion).
-    m_x = Ry * fz - (z_r - z_gb) * fy
-    m_y = (z_r - z_gb) * fx - Rx * fz
-    gty = m_x / h
-    gtx = -m_y / h
-    gbx = -fx - gtx
-    gby = -fy - gty
-    return math.hypot(gtx, gty), math.hypot(gbx, gby)
+    gt, gb = _bushing_reaction_vectors(tr_lg, ptR_lg, ptGt_lg, ptGb_lg)
+    return math.hypot(gt[0], gt[1]), math.hypot(gb[0], gb[1])
+
+
+def _drag_brace_reactions(R_int, M_int_B1, B1, B2, C, D):
+    """Équilibre 3D du corps (sans masse) ancré par **rotule B1** + **linéaire
+    annulaire B2** (axe B1-B2) + **drag brace** (bielle C-D). Variante §5b du PFD.
+
+    ``R_int`` / ``M_int_B1`` : torseur des actions INTERNES (oléo + bagues) de la
+    tige sur le corps, réduit en B1. ``B1, B2, C, D`` : positions. Tous les vecteurs
+    et points sont exprimés dans le **même repère**.
+
+    Résout (4')(6') : R_B1 + R_B2 + T·û_CD = −R_int ; et le moment en B1.
+    Retourne (T, R_B1, R_B2) = efforts **structure→corps** (T = traction de la
+    bielle si > 0). ``None`` si géométrie dégénérée.
+    """
+    u_B = np.asarray(B1, float) - np.asarray(B2, float)
+    u_CD = np.asarray(D, float) - np.asarray(C, float)
+    nB, nCD = float(np.linalg.norm(u_B)), float(np.linalg.norm(u_CD))
+    if nB < 1.0e-9 or nCD < 1.0e-9:
+        return None
+    u_B /= nB
+    u_CD /= nCD
+    # Base orthonormale ⊥ û_B (pour R_B2, sans composante axiale annulaire).
+    tmp = np.array([1.0, 0.0, 0.0]) if abs(u_B[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    e1 = np.cross(u_B, tmp)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(u_B, e1)
+    # Inconnues x = [X1, Y1, Z1, a2, b2, T] ; R_B2 = a2·e1 + b2·e2.
+    A = np.zeros((6, 6))
+    rhs = np.zeros(6)
+    A[0:3, 0:3] = np.eye(3)
+    A[0:3, 3] = e1
+    A[0:3, 4] = e2
+    A[0:3, 5] = u_CD
+    rhs[0:3] = -np.asarray(R_int, float)
+    rBB2 = np.asarray(B2, float) - np.asarray(B1, float)
+    rBC = np.asarray(C, float) - np.asarray(B1, float)
+    A[3:6, 3] = np.cross(rBB2, e1)
+    A[3:6, 4] = np.cross(rBB2, e2)
+    A[3:6, 5] = np.cross(rBC, u_CD)
+    rhs[3:6] = -np.asarray(M_int_B1, float)
+    x = np.linalg.solve(A, rhs)
+    return float(x[5]), x[0:3], x[3] * e1 + x[4] * e2
+
+
+def _drag_brace_step(course_m, state, F_tot, tr_lg, db):
+    """Efforts d'ancrage drag brace au pas courant (repère jambe). ``db`` = dict des
+    positions jambe (m) relatives à Gb : B1, B2, C, D. Réutilise le torseur interne
+    (oléo + bagues) sur le corps. Retourne (T, R_B1, R_B2) ou None."""
+    gt_vec, gb_vec = _bushing_reaction_vectors(tr_lg, state.ptR_lg, state.ptGt_lg, state.ptGb_lg)
+    z_lg = np.array([0.0, 0.0, 1.0])
+    Gt_rel = state.ptGt_lg - state.ptGb_lg          # Gb_rel = 0 (origine en Gb)
+    A_rel = Gt_rel + course_m * z_lg                # oléo : A = Gt + course·ẑ
+    R_int = F_tot * z_lg - gt_vec - gb_vec          # action interne (rod→corps)
+    B1 = db["B1"]
+    M_int = (np.cross(A_rel - B1, F_tot * z_lg)
+             + np.cross(Gt_rel - B1, -gt_vec)
+             + np.cross(-B1, -gb_vec))
+    return _drag_brace_reactions(R_int, M_int, B1, db["B2"], db["C"], db["D"])
 
 
 def _init_strait_strut_local_state(
@@ -497,6 +568,7 @@ def run_strait_strut(
     h_guide_bot_z_m: float = 0.20,
     r_offset_m: tuple[float, float] = (0.0, 0.0),
     b_offset_m: tuple[float, float] = (0.0, 0.0),
+    drag_brace: dict | None = None,
 ) -> EngineOutput:
     """Exécute la simulation de drop test NLG (StraitStrut / jambe de force directe).
 
@@ -749,6 +821,17 @@ def run_strait_strut(
         out["reaction_h"][i] = tr_x
         out["xgt"][i] = xgt
         out["xgb"][i] = xgb
+        if drag_brace is not None:
+            _db = _drag_brace_step(p.course, state, ftot, tr_lg, drag_brace)
+            if _db is not None:
+                _T, _RB1, _RB2 = _db
+                out["db_brace_T"][i] = _T
+                out["db_b1_fx"][i] = _RB1[0]
+                out["db_b1_fy"][i] = _RB1[1]
+                out["db_b1_fz"][i] = _RB1[2]
+                out["db_b2_fx"][i] = _RB2[0]
+                out["db_b2_fy"][i] = _RB2[1]
+                out["db_b2_fz"][i] = _RB2[2]
         out["tors_res_x"][i] = tb_res_x
         out["tors_res_y"][i] = tb_res_y
         out["tors_res_z"][i] = tb_res_z

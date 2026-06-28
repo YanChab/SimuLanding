@@ -259,7 +259,10 @@ def run_simulation(
             pre.raise_if_any()
 
     # Niveau EXÉCUTION.
-    is_strait_strut = getattr(inputs, "model_kind", "") == "strait_strut" and not is_aircraft
+    is_strait_strut = (
+        getattr(inputs, "model_kind", "") in ("strait_strut", "strait_strut_drag_brace")
+        and not is_aircraft
+    )
     if is_aircraft:
         engine_out = run_aircraft(params, progress_callback=progress_callback)
         col_map = OUTPUT_COLUMNS_AC
@@ -283,6 +286,7 @@ def run_simulation(
             h_guide_bot_z_m=geom.h_guide_bot_z,
             r_offset_m=geom.r_offset,
             b_offset_m=geom.b_offset,
+            drag_brace=geom.drag_brace,
         )
         col_map = OUTPUT_COLUMNS_SS
     else:

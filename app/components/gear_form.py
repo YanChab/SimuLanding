@@ -17,17 +17,20 @@ import streamlit as st
 
 from dropsim import (
     StraitStrutInputs,
+    StraitStrutDragBraceInputs,
     TrailingArmInputs,
     default_strait_strut_inputs,
+    default_strait_strut_drag_brace_inputs,
     default_trailing_arm_inputs,
 )
 from dropsim.inputs import Point3, Rainure
 
 GEAR_TYPE_LABELS = {
     "strait_strut": "StraitStrut (jambe droite)",
+    "strait_strut_drag_brace": "StraitStrut + drag brace",
     "trailing_arm": "TrailingArm (balancier)",
 }
-_GEAR_TYPE_OPTIONS = ["strait_strut", "trailing_arm"]
+_GEAR_TYPE_OPTIONS = ["strait_strut", "strait_strut_drag_brace", "trailing_arm"]
 
 # Groupes de paramètres scalaires (label, attribut). Les réglages numériques
 # globaux (intégrateur, solveur, tolérance, température) sont gérés au niveau
@@ -109,7 +112,11 @@ _STRUT_SCALAR_FIELDS = [
 
 
 def _default_for(kind: str):
-    return default_strait_strut_inputs() if kind == "strait_strut" else default_trailing_arm_inputs()
+    if kind == "strait_strut_drag_brace":
+        return default_strait_strut_drag_brace_inputs()
+    if kind == "strait_strut":
+        return default_strait_strut_inputs()
+    return default_trailing_arm_inputs()
 
 
 def _num_table(specs, prefix, base, *, key):
@@ -179,26 +186,43 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
 
     geo_col, dmp_col = st.columns(2)
     with geo_col:
-        if kind == "strait_strut":
+        if kind in ("strait_strut", "strait_strut_drag_brace"):
             st.markdown("**Points jambe (mm, repère avion, pitch 0°)**")
+            # Points de l'axe de coulisse + ancrage. Variante drag brace : l'attache
+            # B (encastrement) est remplacée par B1/B2 (rotule + linéaire annulaire)
+            # et la bielle C–D. Libellés UI → attributs : C→Cdb, D→Ddb.
+            if kind == "strait_strut_drag_brace":
+                _pt_spec = [
+                    ("B1", "B1"), ("B2", "B2"), ("Gt", "Gt"), ("Gb", "Gb"),
+                    ("R", "R"), ("C", "Cdb"), ("D", "Ddb"),
+                ]
+            else:
+                _pt_spec = [("B", "B"), ("Gt", "Gt"), ("Gb", "Gb"), ("R", "R")]
             pkey = f"{prefix}_points"
             if pkey not in st.session_state:
                 st.session_state[pkey] = pd.DataFrame({
-                    "Point": ["B", "Gt", "Gb", "R"],
-                    "X": [base_inputs.B.x, base_inputs.Gt.x, base_inputs.Gb.x, base_inputs.R.x],
-                    "Y": [base_inputs.B.y, base_inputs.Gt.y, base_inputs.Gb.y, base_inputs.R.y],
-                    "Z": [base_inputs.B.z, base_inputs.Gt.z, base_inputs.Gb.z, base_inputs.R.z],
+                    "Point": [lbl for lbl, _ in _pt_spec],
+                    "X": [getattr(base_inputs, a).x for _, a in _pt_spec],
+                    "Y": [getattr(base_inputs, a).y for _, a in _pt_spec],
+                    "Z": [getattr(base_inputs, a).z for _, a in _pt_spec],
                 })
             points_df = st.data_editor(
                 st.session_state[pkey], hide_index=True, disabled=["Point"],
                 width="stretch", key=f"{prefix}_points_ed",
             )
             st.session_state[pkey] = points_df  # persiste les éditions au rerun (lancement)
-            st.caption(
-                "B = attache fuselage, Gt/Gb = bagues haute/basse (axe de coulisse), "
-                "R = centre roue. B et R peuvent être décalés de l'axe Gt-Gb ; le rake, "
-                "le roll et les hauteurs sont dérivés de ces points."
-            )
+            if kind == "strait_strut_drag_brace":
+                st.caption(
+                    "Gt/Gb = bagues (axe de coulisse), R = centre roue. Ancrage du corps : "
+                    "B1 (rotule) + B2 (linéaire annulaire d'axe B1-B2) + drag brace C–D "
+                    "(C sur le corps, D sur la structure). Cf. PFD §5b."
+                )
+            else:
+                st.caption(
+                    "B = attache fuselage, Gt/Gb = bagues haute/basse (axe de coulisse), "
+                    "R = centre roue. B et R peuvent être décalés de l'axe Gt-Gb ; le rake, "
+                    "le roll et les hauteurs sont dérivés de ces points."
+                )
             st.markdown("**Bagues / joint**")
             _num_table(_STRUT_SCALAR_FIELDS, prefix, base_inputs, key=f"{prefix}_strut_tbl")
         else:
@@ -300,10 +324,19 @@ def _build_gear_inputs(prefix, kind, base, points_df, rainures_df, tyre_df, mu_d
 
     pts = {r["Point"]: Point3(float(r["X"]), float(r["Y"]), float(r["Z"])) for _, r in points_df.iterrows()}
 
+    if kind == "strait_strut_drag_brace":
+        strut_scalars = {f: g(f) for _, f in _STRUT_SCALAR_FIELDS}
+        base_db = base if isinstance(base, StraitStrutDragBraceInputs) else default_strait_strut_drag_brace_inputs()
+        return replace(base_db, **common, **strut_scalars,
+                       Gt=pts["Gt"], Gb=pts["Gb"], R=pts["R"],
+                       B1=pts["B1"], B2=pts["B2"], Cdb=pts["C"], Ddb=pts["D"])
+
     if kind == "strait_strut":
         strut_scalars = {f: g(f) for _, f in _STRUT_SCALAR_FIELDS}
-        return replace(base if isinstance(base, StraitStrutInputs) else default_strait_strut_inputs(),
-                       **common, **strut_scalars,
+        # base StraitStrut "pur" (pas la sous-classe drag brace, gérée ci-dessus)
+        base_ss = base if (isinstance(base, StraitStrutInputs)
+                           and not isinstance(base, StraitStrutDragBraceInputs)) else default_strait_strut_inputs()
+        return replace(base_ss, **common, **strut_scalars,
                        B=pts["B"], Gt=pts["Gt"], Gb=pts["Gb"], R=pts["R"])
 
     return replace(base if isinstance(base, TrailingArmInputs) and base.model_kind == "trailing_arm"
@@ -442,10 +475,14 @@ def render_full_gear_result(result, label: str) -> None:
     if "Tyre.FTyre (N)" in cols:
         m3.metric("Fz pneu max", f"{float(np.max(np.abs(df['Tyre.FTyre (N)']))):.0f} N")
 
-    tabs = st.tabs([
+    _has_db = "DragBrace.Effort bielle (N)" in cols
+    _labels = [
         "Efforts (temps)", "Effort / course", "Pressions", "Conv. hydraulique",
         "Course & déflexion", "Accél. & vitesse", "Liaisons", "Bilan énergétique",
-    ])
+    ]
+    if _has_db:
+        _labels.append("Drag brace")
+    tabs = st.tabs(_labels)
 
     with tabs[0]:
         if _req(df, ["Tyre.FTyre (N)", "Reaction sol horizontale (N)", f"{p}.Ftot (N)"], f"{label} - Efforts"):
@@ -524,6 +561,26 @@ def render_full_gear_result(result, label: str) -> None:
 
     with tabs[7]:
         _render_energy_balance(df, label)
+
+    if _has_db:
+        with tabs[8]:
+            b1 = np.sqrt(df["DragBrace.B1 Fx (N)"] ** 2 + df["DragBrace.B1 Fy (N)"] ** 2
+                         + df["DragBrace.B1 Fz (N)"] ** 2)
+            b2 = np.sqrt(df["DragBrace.B2 Fx (N)"] ** 2 + df["DragBrace.B2 Fy (N)"] ** 2
+                         + df["DragBrace.B2 Fz (N)"] ** 2)
+            st.plotly_chart(_gline(t, [
+                ("Effort bielle (drag brace)", df["DragBrace.Effort bielle (N)"]),
+                ("|R| rotule B1", b1),
+                ("|R| linéaire annulaire B2", b2),
+            ], f"{label} — Ancrage drag brace (efforts structure↔corps)",
+               "Temps (s)", "Effort (N)"), use_container_width=True)
+            with st.expander(f"Composantes B1 / B2 (repère jambe) — {label}"):
+                st.plotly_chart(_gline(t, [
+                    ("B1 Fx", df["DragBrace.B1 Fx (N)"]), ("B1 Fy", df["DragBrace.B1 Fy (N)"]),
+                    ("B1 Fz", df["DragBrace.B1 Fz (N)"]), ("B2 Fx", df["DragBrace.B2 Fx (N)"]),
+                    ("B2 Fy", df["DragBrace.B2 Fy (N)"]), ("B2 Fz", df["DragBrace.B2 Fz (N)"]),
+                ], f"{label} — Composantes d'ancrage", "Temps (s)", "Effort (N)"),
+                   use_container_width=True)
 
     if getattr(result, "warnings", None):
         with st.expander(f"⚠️ {len(result.warnings)} avertissement(s) — {label}"):
