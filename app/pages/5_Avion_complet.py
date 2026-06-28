@@ -390,8 +390,6 @@ with a:
     _num_precise("Tol. hydraulique", "ac_sim_hyd_tol", inp.simulation.hydraulic_error_tol, step=1e-6, min_value=1e-8)
     _num("Iter max hydraulique", "ac_sim_hyd_iter", float(inp.simulation.hydraulic_max_iter), step=1.0, min_value=4.0)
 with b:
-    st.selectbox("Intégrateur", ["rk4", "euler"], key="ac_sim_integrator",
-                 index=0 if inp.simulation.integrator == "rk4" else 1)
     st.selectbox("Solveur noyau", ["auto_fast", "auto_precise"], key="ac_sim_solver",
                  index=0 if inp.simulation.damper_core_solver == "auto_fast" else 1)
     _num("Température (°C)", "ac_sim_temp", inp.simulation.temperature, step=1.0)
@@ -442,7 +440,7 @@ def _build_aircraft_inputs():
         simulation=_INPUTS.AircraftSimulationInputs(
             temps_simu=float(st.session_state.ac_sim_t),
             it=float(st.session_state.ac_sim_dt),
-            integrator=str(st.session_state.ac_sim_integrator),
+            integrator=str(inp.simulation.integrator),
             damper_core_solver=str(st.session_state.ac_sim_solver),
             hydraulic_error_tol=float(st.session_state.ac_sim_hyd_tol),
             hydraulic_max_iter=int(st.session_state.ac_sim_hyd_iter),
