@@ -545,11 +545,12 @@ if res is not None:
                       res.summary.get('Couple max en B MLG droite (N.m)', 0.0))
     n3.metric("Couple max en B — MLG", f"{_mlg_couple:.0f} N·m",
               help="Non nul seulement si un MLG est de type StraitStrut (encastrement). 0 pour un TrailingArm (pivot).")
+    # Avertissements du résultat affichés dans la zone des boutons (barre sticky).
     for w in getattr(res, "warnings", []) or []:
         if getattr(w, "code", "") == "SUR_ENFONCEMENT":
-            st.warning(f"⚠️ {w.message}\n\n💡 {w.hint}")
+            _launch_msg.warning(f"⚠️ {w.message}\n\n💡 {w.hint}")
         else:
-            st.warning(str(w))
+            _launch_msg.warning(str(w))
 
 if st.session_state.get("aircraft_nlg_result") is not None or \
         st.session_state.get("aircraft_mlg_result") is not None:
