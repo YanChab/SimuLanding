@@ -25,7 +25,7 @@ if str(_APP) not in sys.path:
     sys.path.insert(0, str(_APP))
 
 from theme import apply_theme  # noqa: E402
-from components.gear_form import render_full_gear_result  # noqa: E402
+from components.gear_form import render_full_gear_result, _render_energy_balance  # noqa: E402
 
 apply_theme()
 
@@ -796,182 +796,24 @@ with tab_aircraft:
             use_container_width=True,
         )
 
-    st.markdown("### Bilan energetique")
-    energy_required = [
-        "Aircraft.CG.z (m)",
-        "Aircraft.CG.vz (m/s)",
-        "Aircraft.PitchRate (rad/s)",
-        "NLG.v (m/s)",
-        "MLG left.v (m/s)",
-        "MLG right.v (m/s)",
-        "NLG.Fhyd (N)",
-        "MLG left.Fhyd (N)",
-        "MLG right.Fhyd (N)",
-        "NLG.FFriJoi (N)",
-        "NLG.FFriBag (N)",
-        "MLG left.FFriJoi (N)",
-        "MLG right.FFriJoi (N)",
-        "NLG.FGas (N)",
-        "MLG left.FGas (N)",
-        "MLG right.FGas (N)",
-        "NLG.Tyre.FTyre (N)",
-        "MLG left.Tyre.FTyre (N)",
-        "MLG right.Tyre.FTyre (N)",
-        "NLG.Tyre.Mu (-)",
-        "MLG left.Tyre.Mu (-)",
-        "MLG right.Tyre.Mu (-)",
-        "NLG.Tyre.Omega (rad/s)",
-        "MLG left.Tyre.Omega (rad/s)",
-        "MLG right.Tyre.Omega (rad/s)",
-        "NLG.TyreDefl (m)",
-        "MLG left.TyreDefl (m)",
-        "MLG right.TyreDefl (m)",
-    ]
-    if aircraft_inputs is None:
+    st.markdown("### Bilan énergétique")
+    e_cols_ac = [c for c in df_energy.columns if c.startswith("Énergie.")]
+    if not e_cols_ac:
         st.info(
-            "Bilan energetique indisponible: entrées avion absentes de la session.",
+            "Bilan énergétique indisponible : ce résultat ne contient pas les "
+            "colonnes d'énergie. Relancez une simulation avion complet.",
             icon="ℹ️",
-        )
-    elif not [c for c in energy_required if c not in df_energy.columns]:
-        t_s = t.to_numpy(dtype=float)
-        z = df_energy["Aircraft.CG.z (m)"].to_numpy(dtype=float)
-        vz = df_energy["Aircraft.CG.vz (m/s)"].to_numpy(dtype=float)
-        q = df_energy["Aircraft.PitchRate (rad/s)"].to_numpy(dtype=float)
-
-        mass = float(aircraft_inputs.body.masse)
-        jyy = float(aircraft_inputs.body.jyy)
-        lift = float(aircraft_inputs.body.lift)
-        vx = float(aircraft_inputs.drop.vx)
-        g_eff = 9.81 * (1.0 - lift)
-
-        e_kin_trans = 0.5 * mass * vz * vz
-        e_kin_rot = 0.5 * jyy * q * q
-        e_kin_total = e_kin_trans + e_kin_rot
-        e_gravity = mass * g_eff * (z[0] - z)
-        e_input = float(e_kin_total[0]) + e_gravity
-
-        v_nlg = df_energy["NLG.v (m/s)"].to_numpy(dtype=float)
-        v_mlg_l = df_energy["MLG left.v (m/s)"].to_numpy(dtype=float)
-        v_mlg_r = df_energy["MLG right.v (m/s)"].to_numpy(dtype=float)
-
-        fhyd_nlg = df_energy["NLG.Fhyd (N)"].to_numpy(dtype=float)
-        fhyd_mlg_l = df_energy["MLG left.Fhyd (N)"].to_numpy(dtype=float)
-        fhyd_mlg_r = df_energy["MLG right.Fhyd (N)"].to_numpy(dtype=float)
-
-        ffr_nlg = df_energy["NLG.FFriJoi (N)"].to_numpy(dtype=float)
-        ffrbag_nlg = df_energy["NLG.FFriBag (N)"].to_numpy(dtype=float)
-        ffr_mlg_l = df_energy["MLG left.FFriJoi (N)"].to_numpy(dtype=float)
-        ffr_mlg_r = df_energy["MLG right.FFriJoi (N)"].to_numpy(dtype=float)
-
-        p_hyd = np.maximum(0.0, -(fhyd_nlg * v_nlg + fhyd_mlg_l * v_mlg_l + fhyd_mlg_r * v_mlg_r))
-        p_fric = np.maximum(0.0, -(ffr_nlg * v_nlg + ffrbag_nlg * v_nlg + ffr_mlg_l * v_mlg_l + ffr_mlg_r * v_mlg_r))
-
-        fgas_nlg = df_energy["NLG.FGas (N)"].to_numpy(dtype=float)
-        fgas_mlg_l = df_energy["MLG left.FGas (N)"].to_numpy(dtype=float)
-        fgas_mlg_r = df_energy["MLG right.FGas (N)"].to_numpy(dtype=float)
-        p_store_gas_signed = -(fgas_nlg * v_nlg + fgas_mlg_l * v_mlg_l + fgas_mlg_r * v_mlg_r)
-        p_store_gas = p_store_gas_signed
-
-        nlg_mu = np.abs(df_energy["NLG.Tyre.Mu (-)"].to_numpy(dtype=float))
-        nlg_fz = np.abs(df_energy["NLG.Tyre.FTyre (N)"].to_numpy(dtype=float))
-        nlg_omega = df_energy["NLG.Tyre.Omega (rad/s)"].to_numpy(dtype=float)
-        nlg_defl = df_energy["NLG.TyreDefl (m)"].to_numpy(dtype=float)
-        mlg_l_mu = np.abs(df_energy["MLG left.Tyre.Mu (-)"].to_numpy(dtype=float))
-        mlg_l_fz = np.abs(df_energy["MLG left.Tyre.FTyre (N)"].to_numpy(dtype=float))
-        mlg_l_omega = df_energy["MLG left.Tyre.Omega (rad/s)"].to_numpy(dtype=float)
-        mlg_l_defl = df_energy["MLG left.TyreDefl (m)"].to_numpy(dtype=float)
-        mlg_r_mu = np.abs(df_energy["MLG right.Tyre.Mu (-)"].to_numpy(dtype=float))
-        mlg_r_fz = np.abs(df_energy["MLG right.Tyre.FTyre (N)"].to_numpy(dtype=float))
-        mlg_r_omega = df_energy["MLG right.Tyre.Omega (rad/s)"].to_numpy(dtype=float)
-        mlg_r_defl = df_energy["MLG right.TyreDefl (m)"].to_numpy(dtype=float)
-
-        rnlg = r_eff(float(aircraft_inputs.nlg.unload_radius) / 1000.0, nlg_defl)
-        rmlg_l = r_eff(float(aircraft_inputs.mlg.unload_radius) / 1000.0, mlg_l_defl)
-        rmlg_r = r_eff(float(aircraft_inputs.mlg.unload_radius) / 1000.0, mlg_r_defl)
-        vslip_nlg = np.abs(vx - nlg_omega * rnlg)
-        vslip_mlg_l = np.abs(vx - mlg_l_omega * rmlg_l)
-        vslip_mlg_r = np.abs(vx - mlg_r_omega * rmlg_r)
-        p_slip = nlg_mu * nlg_fz * vslip_nlg + mlg_l_mu * mlg_l_fz * vslip_mlg_l + mlg_r_mu * mlg_r_fz * vslip_mlg_r
-
-        dnlg = np.gradient(nlg_defl, t_s)
-        dmlg_l = np.gradient(mlg_l_defl, t_s)
-        dmlg_r = np.gradient(mlg_r_defl, t_s)
-        # Stockage pneu net (signé): charge en compression, restitution en détente.
-        p_store_tyre_signed = nlg_fz * dnlg + mlg_l_fz * dmlg_l + mlg_r_fz * dmlg_r
-        p_store_tyre = p_store_tyre_signed
-
-        e_hyd = _cumtrapz(t_s, p_hyd)
-        e_fric = _cumtrapz(t_s, p_fric)
-        e_slip = _cumtrapz(t_s, p_slip)
-        e_diss_total = e_hyd + e_fric + e_slip
-        e_store_gas = _cumtrapz(t_s, p_store_gas)
-        e_store_tyre = _cumtrapz(t_s, p_store_tyre)
-        e_store_total = e_store_gas + e_store_tyre
-
-        e_residual = e_input - (e_kin_total + e_diss_total)
-        e_gap_quasi = e_input - (e_kin_total + e_diss_total + e_store_total)
-        ref = abs(float(e_input[0])) if abs(float(e_input[0])) > 1.0e-9 else 1.0
-        e_res_max = float(np.max(np.abs(e_residual)))
-        e_gap_max = float(np.max(np.abs(e_gap_quasi)))
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Apport initial", f"{float(e_input[0]):.0f} J")
-        c2.metric("Dissipation hydraulique", f"{float(e_hyd[-1]):.0f} J")
-        c3.metric("Stockage gaz+pneu", f"{float(e_store_total[-1]):.0f} J")
-        c4.metric(
-            "|Écart quasi fermé| max",
-            f"{e_gap_max:.0f} J",
-            f"{100.0 * e_gap_max / ref:.2f} % de l'apport",
-            delta_color="off",
-        )
-        st.caption(
-            "Le bilan quasi fermé ajoute un stockage explicite gaz+pneu."
-            " L'écart restant correspond aux termes internes encore non modélisés"
-            " (couplages locaux, approximations de puissance, discrétisation)."
-        )
-
-        st.plotly_chart(
-            _line(
-                t,
-                [
-                    ("Apport cumulé (cinétique init + gravité)", e_input),
-                    ("Cinétique translation + tangage", e_kin_total),
-                    ("Dissipation hydraulique", e_hyd),
-                    ("Dissipation friction", e_fric),
-                    ("Dissipation glissement", e_slip),
-                    ("Dissipation totale", e_diss_total),
-                    ("Stockage gaz", e_store_gas),
-                    ("Stockage pneu net", e_store_tyre),
-                    ("Stockage total", e_store_total),
-                    ("Écart quasi fermé", e_gap_quasi),
-                    ("Énergie non comptée (ancien)", e_residual),
-                ],
-                "Bilan énergétique avion complet",
-                "Temps (s)",
-                "Énergie (J)",
-            ),
-            use_container_width=True,
-        )
-        st.plotly_chart(
-            _line(
-                t,
-                [
-                    ("Écart quasi fermé", e_gap_quasi),
-                    ("Énergie non comptée (ancien)", e_residual),
-                ],
-                "Comparaison des écarts de bilan",
-                "Temps (s)",
-                "Énergie (J)",
-            ),
-            use_container_width=True,
         )
     else:
-        missing = [c for c in energy_required if c not in df_energy.columns]
-        st.info(
-            "Bilan énergétique indisponible: colonnes manquantes dans ce résultat "
-            f"({', '.join(missing[:8])}{'…' if len(missing) > 8 else ''}).",
-            icon="ℹ️",
+        st.caption(
+            "Bilan **rigoureux** calculé par le moteur (convention travail, **même "
+            "démarche que les trains isolés**) : somme des bilans par train (gaz, "
+            "hydraulique, frottements, glissement pneu, butée, cinétique des pièces "
+            "mobiles) + cinétique du fuselage (translation + tangage) + gravité. "
+            "Le résidu doit rester au niveau de l'erreur d'intégration "
+            "(cf. docs/Bilan_energetique.md §6)."
         )
+        _render_energy_balance(df_energy, "Avion complet")
 
 with tab_mlg:
     e_mlg_l = None

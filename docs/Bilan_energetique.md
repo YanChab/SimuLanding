@@ -205,20 +205,28 @@ Golden NLG + avion régénérés.
 
 ---
 
-## 6. Recommandation (à valider)
+## 6. Recommandation — ✅ IMPLÉMENTÉE
 
 **Propager le bilan rigoureux du moteur jusqu'à l'avion**, au lieu de le recalculer
 dans l'UI :
 
-1. Faire **tracker l'énergie par `engine_aircraft`** (somme des bilans par train,
-   façon `engine.py` : travail signé F·dd, ΔEc_rot exact, apport d'avancement),
-   **plus** la cinétique fuselage (translation + tangage).
-2. Inclure **tous** les réservoirs (§2.1‑2.2) et l'apport d'avancement (§2.4).
-3. Exposer `e_input`, `e_diss`, `e_stock`, `e_residual` comme **colonnes moteur**,
-   et la page 6 ne fait plus que les **tracer** (plus de recalcul).
+1. ✅ L'énergie est **trackée par `engine_aircraft`** : chaque slot de train
+   accumule son bilan en **travail** (mêmes formules que `engine.py`/
+   `engine_strait_strut.py` : F·dd, ΔEc_rot exact, apport d'avancement, couplage
+   moyeu, trapézoïdal en RK4), **masse suspendue exclue** (portée par le fuselage).
+2. ✅ `run_aircraft` somme les bilans par train + **cinétique fuselage**
+   (½M·ż² + ½Jyy·θ̇²) + **gravité fuselage** (poids effectif (1−lift)). Tous les
+   réservoirs (§2.1‑2.2) et l'apport d'avancement (§2.4) sont inclus.
+3. ✅ Colonnes moteur exposées (`Énergie.Apport total`, `Cinétique fuselage`,
+   `Cinétique trains`, `Stockée totale`, `Dissipée totale`, `Résidu de bilan`) ;
+   la page Résultats avion (onglet **Avion complet**) ne fait plus que **tracer**
+   (plus de recalcul UI approximatif).
 
-Cible : ε réduit à l'**erreur d'intégration** (décroissante avec Δt),
-comme le moteur TrailingArm isolé.
+**Résultat validé** : résidu **≈ erreur d'intégration**, **décroissant avec Δt** :
+RK4 (`auto_precise`) 0,21 % → 0,15 % (Δt 1e‑4 → 5e‑5) ; `auto_fast` (Euler) 0,43 %
+→ 0,28 %. La dynamique est inchangée (golden avion + PFD intacts : l'énergie est
+purement additive). Les couplages inter‑corps (efforts d'interface train↔fuselage)
+se télescopent par construction (3ᵉ loi de Newton, cinématique d'attache cohérente).
 
 ---
 

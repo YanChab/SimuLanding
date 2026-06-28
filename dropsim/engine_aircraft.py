@@ -42,6 +42,12 @@ OUTPUT_COLUMNS_AC: dict[str, str] = {
     "aircraft_fz_mlg_left": "Aircraft.Fz MLG left (N)",
     "aircraft_fz_mlg_right": "Aircraft.Fz MLG right (N)",
     "aircraft_mx_total": "Aircraft.Mpitch total (N.m)",
+    "aircraft_e_kin_fuse": "Énergie.Cinétique fuselage (J)",
+    "aircraft_e_kin_trains": "Énergie.Cinétique trains (J)",
+    "aircraft_e_stock": "Énergie.Stockée totale (J)",
+    "aircraft_e_diss": "Énergie.Dissipée totale (J)",
+    "aircraft_e_input": "Énergie.Apport total (J)",
+    "aircraft_e_residual": "Énergie.Résidu de bilan (J)",
     "nlg_stroke": "NLG.d (m)",
     "nlg_velocity": "NLG.v (m/s)",
     "nlg_ftot": "NLG.Ftot (N)",
@@ -440,6 +446,14 @@ class StraitStrutSlot:
         self.gt_body = (0.0, 0.0)
         self.gb_body = (0.0, 0.0)
 
+        # --- Bilan énergétique par train (convention travail, cf. engine_strait_strut)
+        # On EXCLUT la masse suspendue (= fuselage, comptée au niveau avion) :
+        # réservoirs = tige (Mns) + roue (spin + spring-back), ressorts, dissipations.
+        self._e = dict(gas=0.0, tyre=0.0, hyd=0.0, fric=0.0, fribag=0.0,
+                       damp_x=0.0, slip=0.0, endstop=0.0, fwd=0.0, grav=0.0)
+        self._e_started = False
+        self._e_kin_init = 0.0
+
     def reference_bottom_z(self, pitch_init: float) -> float:
         _, station_z0 = _rigid_station(self.cg, 0.0, pitch_init, self.station)
         r_sol_0 = self.R_lg_to_sol_init @ self.state.ptR_lg
@@ -542,6 +556,47 @@ class StraitStrutSlot:
         )
         adv = self.state
 
+        # --- Accumulation énergétique du train (mêmes formules que le moteur NLG
+        # standalone, convention travail ; masse suspendue exclue → fuselage). ---
+        mns = p.unsprung_mass
+        cosb = float(R_lg_to_sol_step[2, 2])
+        if not self._e_started:
+            self._e_kin_init = 0.5 * mns * st.vz_mns_lg ** 2
+            self._d_prev = max(0.0, st.d)
+            self._defl_prev = st.tyre_defl_val
+            self._zms_prev = st.z_ms
+            self._omega_prev = st.tyre_omega
+            self._e_started = True
+        dd = max(0.0, st.d) - self._d_prev
+        ddefl = st.tyre_defl_val - self._defl_prev
+        e = self._e
+        e["gas"] += float(damp["fgas"]) * dd
+        e["endstop"] += fendstop * dd
+        e["tyre"] += tyre_ftyre * ddefl
+        e["hyd"] += float(damp["fhyd"]) * dd
+        e["fric"] += ffrijoi * dd
+        e["fribag"] += ffribag * dd
+        e["damp_x"] += p.cx * st.tyre_vx ** 2 * dt
+        dke_spin = 0.5 * p.wheel_inertia * (st.tyre_omega ** 2 - self._omega_prev ** 2)
+        if abs(self.vx) > 1.0e-9:
+            e["fwd"] += fspin * self.vx * dt
+            e["slip"] += fspin * (self.vx - st.tyre_vx) * dt - dke_spin
+        # Couplage moyeu (R se déplace horizontalement avec le glissement axial).
+        e["slip"] += (-fx_spring_wheel) * st.v_damper * float(R_lg_to_sol_step[0, 2]) * dt
+        # Gravité de la tige (Mns) seule — déplacement vertical absolu.
+        rod_vert_disp = (st.z_ms - self._zms_prev) + cosb * dd
+        e["grav"] += -mns * G * rod_vert_disp
+        self._d_prev = max(0.0, st.d)
+        self._defl_prev = st.tyre_defl_val
+        self._zms_prev = st.z_ms
+        self._omega_prev = st.tyre_omega
+        e_kin_train = (0.5 * mns * (st.vz_ms ** 2 + st.v_damper ** 2
+                                   + 2.0 * st.vz_ms * st.v_damper * cosb)
+                       + 0.5 * p.wheel_inertia * st.tyre_omega ** 2
+                       + 0.5 * p.wheelmass * st.tyre_vx ** 2)
+        e_stock_train = e["gas"] + e["tyre"] + 0.5 * p.kx * st.tyre_depx ** 2 + e["endstop"]
+        e_diss_train = e["hyd"] + e["fric"] + e["fribag"] + e["damp_x"] + e["slip"]
+
         fz_slot = float(tb_sol[2])
         # Signe horizontal corrigé : effort transmis à la cellule dans la même
         # convention que ``reaction_h`` et que le TrailingArm (MLG), cf. PFD
@@ -604,6 +659,12 @@ class StraitStrutSlot:
             "torsb_mx": float(mom_B[0]),
             "torsb_my": float(mom_B[1]),
             "torsb_mz": float(mom_B[2]),
+            "e_kin": e_kin_train,
+            "e_stock": e_stock_train,
+            "e_diss": e_diss_train,
+            "e_fwd": e["fwd"],
+            "e_grav": e["grav"],
+            "e_kin_init": self._e_kin_init,
         }
 
         b_sol = R_lg_to_sol_step @ adv.ptB_lg
@@ -647,6 +708,15 @@ class TrailingArmSlot:
         self.station_z_ref = 0.0
         self.b_body = (0.0, 0.0)
         self.c_body = (0.0, 0.0)
+        self.vx = float(vx)
+
+        # --- Bilan énergétique par train (convention travail, cf. engine.py) ---
+        # Masse suspendue exclue (= fuselage). Réservoirs = balancier (rotation),
+        # roue (spin + spring-back). Trapézoïdal si intégrateur rk4, comme engine.py.
+        self._e = dict(gas=0.0, tyre=0.0, hyd=0.0, fric=0.0, damp_x=0.0,
+                       slip=0.0, endstop=0.0, fwd=0.0)
+        self._e_started = False
+        self._e_kin_init = 0.0
 
     def reference_bottom_z(self, pitch_init: float) -> float:
         _, station_z0 = _rigid_station(self.cg, 0.0, pitch_init, self.station)
@@ -753,6 +823,68 @@ class TrailingArmSlot:
         ]
         fz_slot = fb_z + fc_z
 
+        # --- Accumulation énergétique du train (mêmes formules que le moteur MLG
+        # engine.py, convention travail ; masse suspendue exclue → fuselage). ---
+        pe = rt.p
+        It = dt * rt.fast_time_scale
+        rk4 = (getattr(pe, "integrator", "rk4") == "rk4")
+        fgas_e = float(step["fgas"]); fhyd_e = float(step["fhyd"])
+        ffrijoi_e = float(step["ffrijoi"]); ftyre_e = float(step["ftyre"])
+        fspin_e = float(step["fspin"])
+        d_e = max(0.0, state.d); defl_e = max(0.0, state.defl)
+        endstop_cur = _endstop(state.d, pe.course, smooth_len=pe.endstop_smooth)
+        omega_e = state.omega; vitx_e = state.vitx; depx_e = state.depx
+        tr_x_e = state.tr_x; rx_e = float(state.R[0]); om_y_e = state.om_y
+        e = self._e
+        if not self._e_started:
+            self._e_kin_init = 0.0  # balancier + roue au repos au départ
+            self._d_prev = d_e; self._defl_prev = defl_e
+            self._endstop_prev = endstop_cur; self._fgas_prev = fgas_e
+            self._fhyd_prev = fhyd_e; self._ffrijoi_prev = ffrijoi_e
+            self._ftyre_prev = ftyre_e; self._fspin_prev = fspin_e
+            self._tr_x_prev = tr_x_e; self._vitx_prev = vitx_e
+            self._omega_prev = omega_e; self._rx_prev = rx_e
+            self._e_started = True
+        dd = d_e - self._d_prev
+        ddefl = defl_e - self._defl_prev
+        if rk4:
+            e["gas"] += 0.5 * (self._fgas_prev + fgas_e) * dd
+            e["endstop"] += 0.5 * (self._endstop_prev + endstop_cur) * dd
+            e["tyre"] += 0.5 * (self._ftyre_prev + ftyre_e) * ddefl
+            e["hyd"] += 0.5 * (self._fhyd_prev + fhyd_e) * dd
+            e["fric"] += 0.5 * (self._ffrijoi_prev + ffrijoi_e) * dd
+            e["damp_x"] += 0.5 * pe.cx * (self._vitx_prev ** 2 + vitx_e ** 2) * It
+        else:
+            e["gas"] += fgas_e * dd
+            e["endstop"] += endstop_cur * dd
+            e["tyre"] += ftyre_e * ddefl
+            e["hyd"] += fhyd_e * dd
+            e["fric"] += ffrijoi_e * dd
+            e["damp_x"] += pe.cx * vitx_e ** 2 * It
+        vr_x = (rx_e - self._rx_prev) / It
+        dke_spin = 0.5 * pe.wheel_inertia * (omega_e ** 2 - self._omega_prev ** 2)
+        if abs(self.vx) > 1.0e-9:
+            if rk4:
+                fspin_avg = 0.5 * (self._fspin_prev + fspin_e)
+                tr_x_avg = 0.5 * (self._tr_x_prev + tr_x_e)
+                vitx_avg = 0.5 * (self._vitx_prev + vitx_e)
+                e["fwd"] += fspin_avg * self.vx * It
+                e["slip"] += fspin_avg * (self.vx - vitx_avg) * It - dke_spin - tr_x_avg * vr_x * It
+            else:
+                e["fwd"] += fspin_e * self.vx * It
+                e["slip"] += fspin_e * (self.vx - vitx_e) * It - dke_spin - tr_x_e * vr_x * It
+        self._d_prev = d_e; self._defl_prev = defl_e
+        self._endstop_prev = endstop_cur; self._fgas_prev = fgas_e
+        self._fhyd_prev = fhyd_e; self._ffrijoi_prev = ffrijoi_e
+        self._ftyre_prev = ftyre_e; self._fspin_prev = fspin_e
+        self._tr_x_prev = tr_x_e; self._vitx_prev = vitx_e
+        self._omega_prev = omega_e; self._rx_prev = rx_e
+        e_kin_train = (0.5 * pe.jyy * om_y_e ** 2
+                       + 0.5 * pe.wheel_inertia * omega_e ** 2
+                       + 0.5 * pe.wheelmass * vitx_e ** 2)
+        e_stock_train = e["gas"] + e["tyre"] + 0.5 * pe.kx * depx_e ** 2 + e["endstop"]
+        e_diss_train = e["hyd"] + e["fric"] + e["damp_x"] + e["slip"]
+
         diag = {
             "stroke": max(0.0, state.d),
             "velocity": state.v,
@@ -793,6 +925,12 @@ class TrailingArmSlot:
             "torsb_mx": float(step["mb_x"]),
             "torsb_my": 0.0,  # B = pivot autour de Y -> aucun couple de tangage
             "torsb_mz": float(step["mb_z"]),
+            "e_kin": e_kin_train,
+            "e_stock": e_stock_train,
+            "e_diss": e_diss_train,
+            "e_fwd": e["fwd"],
+            "e_grav": 0.0,  # masse suspendue exclue (fuselage) ; tige massless
+            "e_kin_init": self._e_kin_init,
         }
 
         a_dx = float(state.A[0] - state.B[0])
@@ -898,6 +1036,15 @@ def run_aircraft(
     _GEAR_LABELS = {"nlg": "NLG", "mlg_left": "MLG gauche", "mlg_right": "MLG droite"}
     bottomed = None  # (i_fail, slot, exc) si un train atteint sa butée de compression
 
+    # --- Bilan énergétique avion (3e calcul) : somme des bilans par train (convention
+    # travail) + cinétique fuselage (heave + tangage) + gravité fuselage. Cf.
+    # docs/Bilan_energetique.md §6. Réservoirs internes des trains = ressorts +
+    # pièces en mouvement (hors masse suspendue, portée par le fuselage).
+    weight_eff = p.masse * G * (1.0 - p.lift)
+    e_grav_fuse = 0.0
+    z_cg_prev = z_cg
+    e_kin_init_total = None  # capturé au pas 0
+
     for i in range(n_out):
         t = i * dt
 
@@ -941,8 +1088,30 @@ def run_aircraft(
             for c in res.contributions:
                 mpitch += (c.px - cg_x) * c.fz - (c.pz - cg_z) * c.fx - c.my
 
-        az_cg = (fz_total - p.masse * G * (1.0 - p.lift)) / p.masse
+        az_cg = (fz_total - weight_eff) / p.masse
         theta_ddot = mpitch / p.jyy
+
+        # --- Bilan énergétique avion (état courant, avant intégration) ----------
+        e_kin_fuse = 0.5 * p.masse * vz_cg ** 2 + 0.5 * p.jyy * theta_dot ** 2
+        e_grav_fuse += -weight_eff * (z_cg - z_cg_prev)
+        z_cg_prev = z_cg
+        e_kin_tr = sum(res.diag.get("e_kin", 0.0) for _, res in results)
+        e_stock_tr = sum(res.diag.get("e_stock", 0.0) for _, res in results)
+        e_diss_tr = sum(res.diag.get("e_diss", 0.0) for _, res in results)
+        e_fwd_tr = sum(res.diag.get("e_fwd", 0.0) for _, res in results)
+        e_grav_tr = sum(res.diag.get("e_grav", 0.0) for _, res in results)
+        e_kin_init_tr = sum(res.diag.get("e_kin_init", 0.0) for _, res in results)
+        if e_kin_init_total is None:
+            e_kin_init_total = e_kin_fuse + e_kin_init_tr
+        e_input = e_kin_init_total + e_grav_fuse + e_grav_tr + e_fwd_tr
+        e_cin = e_kin_fuse + e_kin_tr
+        e_residual = e_input - (e_cin + e_stock_tr + e_diss_tr)
+        out["aircraft_e_kin_fuse"][i] = e_kin_fuse
+        out["aircraft_e_kin_trains"][i] = e_kin_tr
+        out["aircraft_e_stock"][i] = e_stock_tr
+        out["aircraft_e_diss"][i] = e_diss_tr
+        out["aircraft_e_input"][i] = e_input
+        out["aircraft_e_residual"][i] = e_residual
 
         z_cg, vz_cg = _integrate_const_acc(z_cg, vz_cg, az_cg, dt, p.integrator)
         theta, theta_dot = _integrate_const_acc(theta, theta_dot, theta_ddot, dt, p.integrator)
