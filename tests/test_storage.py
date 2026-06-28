@@ -150,8 +150,8 @@ def test_projects(tmp_path):
     assert meta["project"] == "Avion B"
 
 
-def test_bundle_save_load_and_csv(tmp_path):
-    """Sauvegarde groupée (avion + NLG seul + MLG seul) : round-trip + CSV lisible."""
+def test_bundle_save_load_md_and_csv(tmp_path):
+    """Sauvegarde groupée : round-trip JSON + MD de config + CSV de résultats."""
     ac = default_aircraft_inputs()
     items = {
         "aircraft": (ac, run_simulation(ac)),
@@ -159,11 +159,17 @@ def test_bundle_save_load_and_csv(tmp_path):
         "mlg": (default_trailing_arm_inputs(), run_simulation(default_trailing_arm_inputs())),
     }
     path = save_bundle(items, name="Bundle test", project="T", directory=tmp_path)
-    # CSV compagnon présent et lisible (paramètres amortisseur).
-    csv = path.with_suffix(".csv")
-    assert csv.exists()
-    text = csv.read_text(encoding="utf-8-sig")
-    assert "sep=;" in text and "Dpis" in text and "NLG seul" in text
+    # Markdown de configuration (paramètres + amortisseur), lisible.
+    md = path.with_suffix(".md")
+    assert md.exists()
+    md_text = md.read_text(encoding="utf-8")
+    assert "Dpis" in md_text and "NLG seul" in md_text and "| Paramètre | Valeur |" in md_text
+    # Un CSV de résultats par élément.
+    stem = path.with_suffix("")
+    for key in ("aircraft", "nlg", "mlg"):
+        csv = stem.with_name(f"{stem.name}__{key}.csv")
+        assert csv.exists()
+        assert "sep=;" in csv.read_text(encoding="utf-8-sig")[:10]
     # Round-trip JSON.
     loaded = load_bundle(path)
     assert loaded["kind"] == "bundle"
@@ -174,6 +180,11 @@ def test_bundle_save_load_and_csv(tmp_path):
     metas = list_saved(project="T", directory=tmp_path)
     assert metas and metas[0]["model_kind"] == "bundle"
     assert set(metas[0]["contents"]) == {"aircraft", "nlg", "mlg"}
+    # Suppression : retire le JSON + compagnons.
+    from dropsim.storage import delete_saved
+    delete_saved(path)
+    assert not path.exists() and not md.exists()
+    assert not stem.with_name(f"{stem.name}__nlg.csv").exists()
 
 
 def test_bundle_subset(tmp_path):

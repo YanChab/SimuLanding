@@ -320,10 +320,14 @@ def list_saved(
 
 
 def delete_saved(path: Path | str) -> None:
-    """Supprime un fichier de sauvegarde (ignore l'absence du fichier) + le CSV associé."""
+    """Supprime un fichier de sauvegarde + ses compagnons lisibles (.md, CSV résultats)."""
     p = Path(path)
     p.unlink(missing_ok=True)
-    p.with_suffix(".csv").unlink(missing_ok=True)
+    p.with_suffix(".md").unlink(missing_ok=True)
+    p.with_suffix(".csv").unlink(missing_ok=True)  # ancien format (CSV unique)
+    stem = p.with_suffix("")
+    for csv in p.parent.glob(f"{stem.name}__*.csv"):
+        csv.unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -356,23 +360,61 @@ def _flatten_params(obj, prefix: str = "") -> list[tuple[str, object]]:
     return rows
 
 
-def params_csv_text(items: dict) -> str:
-    """Construit un CSV **lisible** (Excel / bloc-notes) des paramètres de simulation
-    et de configuration des amortisseurs, pour chaque élément sauvegardé.
+def _fmt_val(value) -> str:
+    if isinstance(value, bool):
+        return "oui" if value else "non"
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
 
-    ``items`` : dict ``{clé: inputs}`` avec clé ∈ {aircraft, nlg, mlg}. Format long
-    (Portée ; Paramètre ; Valeur), séparateur ``;`` (directive ``sep`` pour qu'Excel
-    ouvre directement en colonnes)."""
-    lines = ["sep=;", "Portée;Paramètre;Valeur"]
+
+def _md_table(rows: list[tuple[str, object]]) -> str:
+    """Table Markdown (Paramètre | Valeur)."""
+    out = ["| Paramètre | Valeur |", "|---|---|"]
+    for param, value in rows:
+        out.append(f"| {param} | {_fmt_val(value)} |")
+    return "\n".join(out) + "\n"
+
+
+def config_markdown(items: dict, *, name: str = "") -> str:
+    """Document **Markdown** lisible : paramètres de simulation + configuration
+    complète de l'avion et des trains. ``items`` : dict ``{clé: inputs}``."""
+    md: list[str] = [f"# Configuration de simulation — {name}".rstrip(" —"), ""]
     for key in ("aircraft", "nlg", "mlg"):
-        if key not in items or items[key] is None:
+        inp = items.get(key)
+        if inp is None:
             continue
-        scope = _BUNDLE_LABELS[key]
-        for param, value in _flatten_params(items[key]):
-            sval = value if isinstance(value, str) else (
-                f"{value:.6g}" if isinstance(value, (int, float)) else str(value))
-            lines.append(f"{scope};{param};{sval}")
-    return "\n".join(lines) + "\n"
+        md.append(f"## {_BUNDLE_LABELS[key]}")
+        md.append("")
+        if getattr(inp, "model_kind", "") == "aircraft":
+            # Sous-sections par bloc (corps, simulation, chute, implantation, trains).
+            _sub = {"body": "Corps", "simulation": "Simulation", "drop": "Chute",
+                    "layout": "Implantation des trains", "nlg": "Train avant (NLG)",
+                    "mlg": "Train principal (MLG)", "nlg_drop": "Surcharge chute NLG",
+                    "mlg_drop": "Surcharge chute MLG"}
+            for f in fields(inp):
+                v = getattr(inp, f.name)
+                if not is_dataclass(v):
+                    continue
+                title = _sub.get(f.name, f.name)
+                if f.name in ("nlg", "mlg"):
+                    title += f" — type : {getattr(v, 'model_kind', '')}"
+                md.append(f"### {title}")
+                md.append("")
+                md.append(_md_table(_flatten_params(v)))
+        else:
+            md.append(f"*Type de train : {getattr(inp, 'model_kind', '')}*")
+            md.append("")
+            md.append(_md_table(_flatten_params(inp)))
+    return "\n".join(md) + "\n"
+
+
+def result_csv_text(result: SimulationResult) -> str:
+    """CSV des **résultats** (séries temporelles) d'une simulation. Utilise les
+    colonnes complètes si disponibles (mode avion). Directive ``sep=;`` pour qu'Excel
+    ouvre directement en colonnes."""
+    df = result.full_df if getattr(result, "full_df", None) is not None else result.df
+    return "sep=;\n" + df.to_csv(index=False, sep=";")
 
 
 def save_bundle(
@@ -403,9 +445,13 @@ def save_bundle(
         },
     }
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    # CSV compagnon (paramètres lisibles).
-    csv_text = params_csv_text({k: inp for k, (inp, res) in present.items()})
-    path.with_suffix(".csv").write_text(csv_text, encoding="utf-8-sig")
+    # Compagnons lisibles : Markdown (config/paramètres) + CSV (résultats par élément).
+    md_text = config_markdown({k: inp for k, (inp, res) in present.items()}, name=name)
+    path.with_suffix(".md").write_text(md_text, encoding="utf-8")
+    stem = path.with_suffix("")
+    for k, (inp, res) in present.items():
+        stem.with_name(f"{stem.name}__{k}.csv").write_text(
+            result_csv_text(res), encoding="utf-8-sig")
     return path
 
 
@@ -450,7 +496,8 @@ __all__ = [
     "load_simulation",
     "save_bundle",
     "load_bundle",
-    "params_csv_text",
+    "config_markdown",
+    "result_csv_text",
     "list_projects",
     "list_saved",
     "delete_saved",

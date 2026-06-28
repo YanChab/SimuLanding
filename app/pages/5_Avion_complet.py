@@ -386,8 +386,9 @@ with st.expander("Sauvegarder / charger une simulation avion complet", expanded=
                     st.session_state.aircraft_result_name = save_name
                     st.session_state.aircraft_current_project = project_name
                     st.success(
-                        f"Sauvegardé : {path.name} (+ {path.with_suffix('.csv').name} — "
-                        f"paramètres lisibles dans Excel/bloc-notes).", icon="✅")
+                        f"Sauvegardé : {path.name} + {path.with_suffix('.md').name} "
+                        f"(config, lisible) + {len(items)} CSV de résultats "
+                        f"(dossier {path.parent.name}/).", icon="✅")
     with col_load:
         st.markdown("**Charger une simulation**")
         if not projects:
