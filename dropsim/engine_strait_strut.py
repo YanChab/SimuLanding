@@ -146,6 +146,39 @@ class StraitStrutLocalState:
     tyre_defl_val: float
 
 
+def _bushing_loads(tr_lg, ptR_lg, ptGt_lg, ptGb_lg) -> tuple[float, float]:
+    """Charges normales (magnitudes) aux bagues Gt (sur tige) et Gb (sur fût) qui
+    équilibrent la tige sous l'effort de contact ``tr_lg`` (repère jambe).
+
+    Généralisation 2D du cas colinéaire : l'axe de coulisse est porté par Gt-Gb.
+    Le centre roue R peut être DÉCALÉ de cet axe : son offset perpendiculaire est
+    pris RELATIVEMENT à l'axe (``ptR - ptGb``), car la cinématique translate tous
+    les points ensemble (l'axe se déplace, l'offset relatif reste constant).
+    L'effort de contact crée alors un moment sur la tige via (i) ses composantes
+    latérales et (ii) l'effort AXIAL agissant au bras de levier du décalage. On
+    résout la flexion dans les deux plans (jambe-x, jambe-y) indépendamment ; pour
+    R sur l'axe et effort purement jambe-x on retrouve exactement la formule
+    historique.
+    """
+    # Offset perpendiculaire de R relatif à l'axe (porté par les bagues).
+    Rx = float(ptR_lg[0]) - float(ptGb_lg[0])
+    Ry = float(ptR_lg[1]) - float(ptGb_lg[1])
+    z_r, z_gt, z_gb = float(ptR_lg[2]), float(ptGt_lg[2]), float(ptGb_lg[2])
+    fx, fy, fz = float(tr_lg[0]), float(tr_lg[1]), float(tr_lg[2])
+    h = z_gt - z_gb
+    if abs(h) < 1.0e-9:
+        return 0.0, 0.0
+    # Moment de l'effort de contact pris sur l'axe en Gb :
+    #   M = (offset_R + (z_r - z_gb)·ẑ) × tr ; composantes perpendiculaires (flexion).
+    m_x = Ry * fz - (z_r - z_gb) * fy
+    m_y = (z_r - z_gb) * fx - Rx * fz
+    gty = m_x / h
+    gtx = -m_y / h
+    gbx = -fx - gtx
+    gby = -fy - gty
+    return math.hypot(gtx, gty), math.hypot(gbx, gby)
+
+
 def _init_strait_strut_local_state(
     p: TrailingArmParamsSI,
     gas: GasSpring,
@@ -155,13 +188,20 @@ def _init_strait_strut_local_state(
     h_pivot_z_m: float,
     h_guide_top_z_m: float,
     h_guide_bot_z_m: float,
+    r_offset_m: tuple[float, float] = (0.0, 0.0),
+    b_offset_m: tuple[float, float] = (0.0, 0.0),
 ) -> StraitStrutLocalState:
-    """Construit l'état local initial réutilisable du modèle StraitStrut."""
+    """Construit l'état local initial réutilisable du modèle StraitStrut.
+
+    ``r_offset_m`` / ``b_offset_m`` : décalages perpendiculaires (jambe-x, jambe-y)
+    du centre roue R et du pivot B par rapport à l'axe de coulisse (Gt-Gb). Nuls
+    par défaut (modèle colinéaire historique).
+    """
     unload_r = p.unload_radius
-    ptR_lg = np.array([0.0, 0.0, unload_r])
+    ptR_lg = np.array([r_offset_m[0], r_offset_m[1], unload_r])
     ptGt_lg = np.array([0.0, 0.0, unload_r + h_guide_top_z_m])
     ptGb_lg = np.array([0.0, 0.0, unload_r + h_guide_bot_z_m])
-    ptB_lg = np.array([0.0, 0.0, unload_r + h_pivot_z_m])
+    ptB_lg = np.array([b_offset_m[0], b_offset_m[1], unload_r + h_pivot_z_m])
 
     k_endstop = 1.0e8
     pg_init = gas.pressure(0.0, p.Pinitbp)
@@ -455,6 +495,8 @@ def run_strait_strut(
     h_pivot_z_m: float = 0.60,
     h_guide_top_z_m: float = 0.50,
     h_guide_bot_z_m: float = 0.20,
+    r_offset_m: tuple[float, float] = (0.0, 0.0),
+    b_offset_m: tuple[float, float] = (0.0, 0.0),
 ) -> EngineOutput:
     """Exécute la simulation de drop test NLG (StraitStrut / jambe de force directe).
 
@@ -463,6 +505,8 @@ def run_strait_strut(
       h_pivot_z_m     : hauteur pivot B au-dessus du centre roue (m, repère jambe).
       h_guide_top_z_m : hauteur bague haute Gt au-dessus du centre roue (m).
       h_guide_bot_z_m : hauteur bague basse Gb au-dessus du centre roue (m).
+      r_offset_m      : décalage perpendiculaire (jambe-x, jambe-y) du centre roue R.
+      b_offset_m      : décalage perpendiculaire (jambe-x, jambe-y) du pivot B.
       bague_guide_m   : longueur bague de guidage (m).
       bague_piston_m  : longueur bague piston (m).
       seal_precomp_pa : pression de pré-compression du joint (Pa).
@@ -487,6 +531,8 @@ def run_strait_strut(
         h_pivot_z_m=h_pivot_z_m,
         h_guide_top_z_m=h_guide_top_z_m,
         h_guide_bot_z_m=h_guide_bot_z_m,
+        r_offset_m=r_offset_m,
+        b_offset_m=b_offset_m,
     )
 
     # --- État initial ------------------------------------------------------ #
@@ -572,18 +618,9 @@ def run_strait_strut(
         tr_sol = np.array([fx_spring_wheel, 0.0, tyre_ftyre_i])
         # Conversion en repère jambe pour les efforts de guidage
         tr_lg = R_sol_to_lg @ tr_sol
-        tr_lg_x = float(tr_lg[0])  # composante latérale (pour guide force)
-        xr = abs(tr_lg_x)  # effort latéral résultant sur la roue dans le repère jambe
 
-        # Réactions aux bagues de guidage (équilibre statique du bras de guidage)
-        z_r_lg = float(state.ptR_lg[2])
-        z_gt_lg = float(state.ptGt_lg[2])
-        z_gb_lg = float(state.ptGb_lg[2])
-        if abs(z_gb_lg - z_gt_lg) > 1.0e-9:
-            xgb = -(z_r_lg - z_gt_lg) * xr / (z_gb_lg - z_gt_lg)
-        else:
-            xgb = 0.0
-        xgt = -xgb - xr
+        # Réactions aux bagues de guidage (équilibre 2D de la tige, décalage R inclus)
+        xgt, xgb = _bushing_loads(tr_lg, state.ptR_lg, state.ptGt_lg, state.ptGb_lg)
 
         ffribag = _ffribag_nlg(state.v_damper, xgt, xgb, p.Dt, bague_guide_m, bague_piston_m)
 

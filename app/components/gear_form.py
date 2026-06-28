@@ -88,12 +88,20 @@ _TYRE_FIELDS = [
     ("Amortissement Cx (N·s/m)", "cx"),
     ("Masse roue spring-back (kg)", "wheelmass"),
 ]
+# Géométrie de jambe scalaire conservée à la SAISIE (le rake, le roll et les
+# hauteurs sont désormais DÉRIVÉS des points B/Gt/Gb/R). _STRUT_FIELDS reste
+# référencé pour la purge d'état au changement de type.
 _STRUT_FIELDS = [
     ("Rake / strut pitch (°)", "strut_pitch"),
     ("Roll jambe (°)", "strut_roll"),
     ("Hauteur pivot B (mm)", "h_pivot_z"),
     ("Hauteur bague haute Gt (mm)", "h_guide_top_z"),
     ("Hauteur bague basse Gb (mm)", "h_guide_bot_z"),
+    ("Longueur bague guidage (mm)", "bague_guide"),
+    ("Longueur bague piston (mm)", "bague_piston"),
+    ("Précontrainte joint (Pa)", "seal_precomp_pa"),
+]
+_STRUT_SCALAR_FIELDS = [
     ("Longueur bague guidage (mm)", "bague_guide"),
     ("Longueur bague piston (mm)", "bague_piston"),
     ("Précontrainte joint (Pa)", "seal_precomp_pa"),
@@ -172,9 +180,26 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
     geo_col, dmp_col = st.columns(2)
     with geo_col:
         if kind == "strait_strut":
-            st.markdown("**Géométrie jambe StraitStrut**")
-            _num_table(_STRUT_FIELDS, prefix, base_inputs, key=f"{prefix}_strut_tbl")
-            points_df = None
+            st.markdown("**Points jambe (mm, repère avion, pitch 0°)**")
+            pkey = f"{prefix}_points"
+            if pkey not in st.session_state:
+                st.session_state[pkey] = pd.DataFrame({
+                    "Point": ["B", "Gt", "Gb", "R"],
+                    "X": [base_inputs.B.x, base_inputs.Gt.x, base_inputs.Gb.x, base_inputs.R.x],
+                    "Y": [base_inputs.B.y, base_inputs.Gt.y, base_inputs.Gb.y, base_inputs.R.y],
+                    "Z": [base_inputs.B.z, base_inputs.Gt.z, base_inputs.Gb.z, base_inputs.R.z],
+                })
+            points_df = st.data_editor(
+                st.session_state[pkey], hide_index=True, disabled=["Point"],
+                width="stretch", key=f"{prefix}_points_ed",
+            )
+            st.caption(
+                "B = attache fuselage, Gt/Gb = bagues haute/basse (axe de coulisse), "
+                "R = centre roue. B et R peuvent être décalés de l'axe Gt-Gb ; le rake, "
+                "le roll et les hauteurs sont dérivés de ces points."
+            )
+            st.markdown("**Bagues / joint**")
+            _num_table(_STRUT_SCALAR_FIELDS, prefix, base_inputs, key=f"{prefix}_strut_tbl")
         else:
             st.markdown("**Balancier**")
             _num_table([("Inertie balancier Jyy (kg·m²)", "jyy")], prefix, base_inputs, key=f"{prefix}_jyy_tbl")
@@ -271,12 +296,14 @@ def _build_gear_inputs(prefix, kind, base, points_df, rainures_df, tyre_df, mu_d
         **scalars,
     )
 
-    if kind == "strait_strut":
-        strut = {f: g(f) for _, f in _STRUT_FIELDS}
-        return replace(base if isinstance(base, StraitStrutInputs) else default_strait_strut_inputs(),
-                       **common, **strut)
-
     pts = {r["Point"]: Point3(float(r["X"]), float(r["Y"]), float(r["Z"])) for _, r in points_df.iterrows()}
+
+    if kind == "strait_strut":
+        strut_scalars = {f: g(f) for _, f in _STRUT_SCALAR_FIELDS}
+        return replace(base if isinstance(base, StraitStrutInputs) else default_strait_strut_inputs(),
+                       **common, **strut_scalars,
+                       B=pts["B"], Gt=pts["Gt"], Gb=pts["Gb"], R=pts["R"])
+
     return replace(base if isinstance(base, TrailingArmInputs) and base.model_kind == "trailing_arm"
                    else default_trailing_arm_inputs(),
                    **common, jyy=g("jyy"),

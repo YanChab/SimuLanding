@@ -59,7 +59,7 @@ def _coerce_trailing_like_inputs(data: dict, cls: type[TrailingArmInputs] | type
     out = dict(data)
     if out.get("damper_core_solver") in {"legacy", "implicit_adaptive", "auto"}:
         out["damper_core_solver"] = "auto_precise"
-    for key in ("B", "A", "C", "R", "S"):
+    for key in ("B", "A", "C", "R", "S", "Gt", "Gb"):
         if key in out and isinstance(out[key], dict):
             out[key] = Point3(**out[key])
     if "rainures" in out:

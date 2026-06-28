@@ -17,7 +17,7 @@ from .engine import OUTPUT_COLUMNS, run_trailing_arm
 from .engine_aircraft import OUTPUT_COLUMNS_AC, run_aircraft
 from .engine_strait_strut import OUTPUT_COLUMNS_SS, run_strait_strut
 from .errors import ErrorCollector, ErrorLevel, SimError
-from .inputs import AircraftInputs, TrailingArmInputs, StraitStrutInputs
+from .inputs import AircraftInputs, TrailingArmInputs, StraitStrutInputs, _strut_geom_si
 from .integration_pfd_aircraft import run_aircraft_pfd
 from .integration_pfd_strait import run_strait_strut_pfd
 from .integration_pfd_trailing import run_trailing_arm_pfd
@@ -265,20 +265,24 @@ def run_simulation(
         col_map = OUTPUT_COLUMNS_AC
     elif is_strait_strut:
         ss = inputs  # type: ignore[assignment]
-        # Angles totaux jambe (rad) = structural (deg→rad) + avion (déjà en rad via to_si)
-        alfap_rad = getattr(ss, "strut_pitch", 0.0) * math.pi / 180.0 + params.pitch
-        alfar_rad = getattr(ss, "strut_roll", 0.0) * math.pi / 180.0 + params.roll
+        # Géométrie de jambe dérivée des POINTS (B, Gt, Gb, R), en SI.
+        geom = _strut_geom_si(ss)
+        # Angles totaux jambe (rad) = structural + avion (déjà en rad via to_si)
+        alfap_rad = geom.strut_pitch + params.pitch
+        alfar_rad = geom.strut_roll + params.roll
         engine_out = run_strait_strut(
             params,
             progress_callback=progress_callback,
-            seal_precomp_pa=getattr(ss, "seal_precomp_pa", 110_649.0),
-            bague_guide_m=getattr(ss, "bague_guide", 50.0) / 1000.0,
-            bague_piston_m=getattr(ss, "bague_piston", 50.0) / 1000.0,
+            seal_precomp_pa=geom.seal_precomp_pa,
+            bague_guide_m=geom.bague_guide,
+            bague_piston_m=geom.bague_piston,
             alfap=alfap_rad,
             alfar=alfar_rad,
-            h_pivot_z_m=getattr(ss, "h_pivot_z", 600.0) / 1000.0,
-            h_guide_top_z_m=getattr(ss, "h_guide_top_z", 500.0) / 1000.0,
-            h_guide_bot_z_m=getattr(ss, "h_guide_bot_z", 200.0) / 1000.0,
+            h_pivot_z_m=geom.h_pivot_z,
+            h_guide_top_z_m=geom.h_guide_top_z,
+            h_guide_bot_z_m=geom.h_guide_bot_z,
+            r_offset_m=geom.r_offset,
+            b_offset_m=geom.b_offset,
         )
         col_map = OUTPUT_COLUMNS_SS
     else:
@@ -427,18 +431,21 @@ def run_pfd_simulation(
         return run_aircraft_pfd(inputs, m_arm=m_arm)
     if model_kind == "strait_strut":
         ss = inputs  # type: ignore[assignment]
-        alfap_rad = getattr(ss, "strut_pitch", 0.0) * math.pi / 180.0 + params.pitch
-        alfar_rad = getattr(ss, "strut_roll", 0.0) * math.pi / 180.0 + params.roll
+        geom = _strut_geom_si(ss)
+        alfap_rad = geom.strut_pitch + params.pitch
+        alfar_rad = geom.strut_roll + params.roll
         return run_strait_strut_pfd(
             params,
-            seal_precomp_pa=getattr(ss, "seal_precomp_pa", 110_649.0),
-            bague_guide_m=getattr(ss, "bague_guide", 50.0) / 1000.0,
-            bague_piston_m=getattr(ss, "bague_piston", 50.0) / 1000.0,
+            seal_precomp_pa=geom.seal_precomp_pa,
+            bague_guide_m=geom.bague_guide,
+            bague_piston_m=geom.bague_piston,
             alfap=alfap_rad,
             alfar=alfar_rad,
-            h_pivot_z_m=getattr(ss, "h_pivot_z", 600.0) / 1000.0,
-            h_guide_top_z_m=getattr(ss, "h_guide_top_z", 500.0) / 1000.0,
-            h_guide_bot_z_m=getattr(ss, "h_guide_bot_z", 200.0) / 1000.0,
+            h_pivot_z_m=geom.h_pivot_z,
+            h_guide_top_z_m=geom.h_guide_top_z,
+            h_guide_bot_z_m=geom.h_guide_bot_z,
+            r_offset_m=geom.r_offset,
+            b_offset_m=geom.b_offset,
         )
     return run_trailing_arm_pfd(params, m_arm=m_arm)
 

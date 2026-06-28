@@ -19,6 +19,7 @@ from .engine_strait_strut import (
     _strait_strut_resolve_damper_step,
     _ffrijoi_nlg,
     _ffribag_nlg,
+    _bushing_loads,
     StraitStrutLocalState,
 )
 from .errors import OVERSTROKE_CODES, SimError, make_overstroke_warning
@@ -438,6 +439,8 @@ class StraitStrutSlot:
             h_pivot_z_m=strut_geom.h_pivot_z,
             h_guide_top_z_m=strut_geom.h_guide_top_z,
             h_guide_bot_z_m=strut_geom.h_guide_bot_z,
+            r_offset_m=getattr(strut_geom, "r_offset", (0.0, 0.0)),
+            b_offset_m=getattr(strut_geom, "b_offset", (0.0, 0.0)),
         )
         self.r0_sol = self.R_lg_to_sol_init @ self.state.ptR_lg.copy()
         # Renseignés par finalize_reference().
@@ -521,15 +524,7 @@ class StraitStrutSlot:
         mu_v = mu(slip, p.mu_x, p.mu_y)
         fspin = mu_v * tyre_ftyre * math.copysign(1.0, slip) if tyre_ftyre > 0 else 0.0
         tyre_alpha = (fspin * r_eff_v) / p.wheel_inertia if tyre_ftyre > 0 else 0.0
-        xr = abs(float(tr_lg[0]))
-        z_r_lg = float(st.ptR_lg[2])
-        z_gt_lg = float(st.ptGt_lg[2])
-        z_gb_lg = float(st.ptGb_lg[2])
-        if abs(z_gb_lg - z_gt_lg) > 1.0e-9:
-            xgb = -(z_r_lg - z_gt_lg) * xr / (z_gb_lg - z_gt_lg)
-        else:
-            xgb = 0.0
-        xgt = -xgb - xr
+        xgt, xgb = _bushing_loads(tr_lg, st.ptR_lg, st.ptGt_lg, st.ptGb_lg)
         ffribag = _ffribag_nlg(st.v_damper, xgt, xgb, p.Dt, self.bague_guide, self.bague_piston)
         fendstop = _endstop(st.d, p.course, smooth_len=p.endstop_smooth)
         ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + ffribag + fendstop

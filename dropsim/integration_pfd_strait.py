@@ -43,6 +43,8 @@ def run_strait_strut_pfd(
     h_pivot_z_m: float = 0.60,
     h_guide_top_z_m: float = 0.50,
     h_guide_bot_z_m: float = 0.20,
+    r_offset_m: tuple[float, float] = (0.0, 0.0),
+    b_offset_m: tuple[float, float] = (0.0, 0.0),
 ) -> dict[str, np.ndarray]:
     """Drop test NLG, assemblage rigide strictement conforme au PFD (doc §2–§5)."""
     gas = GasSpring(p)
@@ -59,6 +61,8 @@ def run_strait_strut_pfd(
         h_pivot_z_m=h_pivot_z_m,
         h_guide_top_z_m=h_guide_top_z_m,
         h_guide_bot_z_m=h_guide_bot_z_m,
+        r_offset_m=r_offset_m,
+        b_offset_m=b_offset_m,
     )
 
     dt = p.it

@@ -756,7 +756,17 @@ class StraitStrutInputs(TrailingArmInputs):
 
     model_kind: str = "strait_strut"
 
-    # --- Géométrie de jambe (spécifique NLG) -------------------------------- #
+    # --- Géométrie par POINTS (repère avion, mm, à pitch 0°) ---------------- #
+    # B (attache/pivot fuselage) et R (centre roue) sont hérités de TrailingArmInputs.
+    # Gt (bague haute, sur la tige) et Gb (bague basse, sur le fût) définissent
+    # l'axe de coulisse. B et R peuvent être DÉCALÉS de cet axe. La géométrie
+    # interne (rake, hauteurs, décalages) est dérivée de ces points
+    # (cf. _strut_geom_from_points). Les champs scalaires ci-dessous ne servent
+    # plus que de repli si les points sont dégénérés (anciennes sauvegardes).
+    Gt: Point3 = field(default_factory=lambda: Point3(0.0, 0.0, 0.0))
+    Gb: Point3 = field(default_factory=lambda: Point3(0.0, 0.0, 0.0))
+
+    # --- Géométrie de jambe (repli scalaire, dérivé des points sinon) ------- #
     strut_pitch: float = 0.0        # deg rake avant/arrière de la jambe
     strut_roll: float = 0.0         # deg garde hors-tout de la jambe
 
@@ -791,6 +801,19 @@ def default_strait_strut_inputs() -> StraitStrutInputs:
     - tables pneu et mu-slip,
     - table de rainures BH.
     """
+    # Points de jambe par défaut (colinéaires sur l'axe), dérivés des hauteurs
+    # historiques (rake 10°, h_pivot 869, h_guide_top 494, h_guide_bot 346 mm) afin
+    # de reproduire EXACTEMENT la géométrie précédente. Placement absolu arbitraire
+    # (seules les différences comptent ; l'avion place via nlg_station).
+    import math as _m
+    import numpy as _np
+    from .engine_strait_strut import _rot_lg_to_sol as _r_l2s
+    _u = _r_l2s(_m.radians(10.0), 0.0) @ _np.array([0.0, 0.0, 1.0])
+    _ur = 222.25  # mm (unload_radius par défaut)
+    _R = _np.array([1500.0, 0.0, _ur])
+    _Gb = _R + 346.0 * _u
+    _Gt = _R + 494.0 * _u
+    _B = _R + 869.0 * _u
     return StraitStrutInputs(
         # Conditions de chute (Summary NLG cas nominal)
         masse=955.0,
@@ -853,12 +876,15 @@ def default_strait_strut_inputs() -> StraitStrutInputs:
         cx=1612.4515,
         wheelmass=10.4,
 
-        # Champs hérités non utilisés par StraitStrut
+        # Points de jambe (repère avion, mm, pitch 0°). B/Gt/Gb/R définissent la
+        # géométrie ; A/C/S hérités non utilisés par StraitStrut.
         jyy=1.0,
-        B=Point3(0.0, 0.0, 0.0),
+        B=Point3(float(_B[0]), float(_B[1]), float(_B[2])),
+        Gt=Point3(float(_Gt[0]), float(_Gt[1]), float(_Gt[2])),
+        Gb=Point3(float(_Gb[0]), float(_Gb[1]), float(_Gb[2])),
+        R=Point3(float(_R[0]), float(_R[1]), float(_R[2])),
         A=Point3(0.0, 0.0, 0.0),
         C=Point3(0.0, 0.0, 0.0),
-        R=Point3(0.0, 0.0, 0.0),
         S=Point3(0.0, 0.0, 0.0),
 
         # Tables NLG
@@ -994,19 +1020,68 @@ class StraitStrutGeomSI:
     bague_guide: float  # m
     bague_piston: float  # m
     seal_precomp_pa: float  # Pa
+    r_offset: tuple = (0.0, 0.0)  # m, décalage perpendiculaire (jambe-x,y) du centre roue R
+    b_offset: tuple = (0.0, 0.0)  # m, décalage perpendiculaire (jambe-x,y) du pivot B
+
+
+def _strut_geom_from_points(inputs: "TrailingArmInputs") -> dict:
+    """Dérive la géométrie de jambe StraitStrut depuis les POINTS B, Gt, Gb, R
+    (repère avion, mm, à pitch 0°).
+
+    - axe de coulisse = Gt - Gb → ``strut_pitch`` / ``strut_roll`` (deg) ;
+    - hauteurs (mm) = distances AXIALES de Gt/Gb/B au-dessus du centre roue R ;
+    - décalages perpendiculaires (mm) de R et B par rapport à l'axe.
+
+    Repli sur les champs scalaires si les points sont dégénérés (Gt ≈ Gb), pour
+    rester compatible avec d'anciennes sauvegardes ne portant que les hauteurs.
+    """
+    import math
+    import numpy as np
+    from .engine_strait_strut import _rot_sol_to_lg
+
+    Gt = np.array([inputs.Gt.x, inputs.Gt.y, inputs.Gt.z], dtype=float)
+    Gb = np.array([inputs.Gb.x, inputs.Gb.y, inputs.Gb.z], dtype=float)
+    axis = Gt - Gb
+    n = float(np.linalg.norm(axis))
+    if n < 1.0e-9:  # points non renseignés → repli scalaire
+        return dict(
+            strut_pitch=inputs.strut_pitch, strut_roll=inputs.strut_roll,
+            h_pivot_z=inputs.h_pivot_z, h_guide_top_z=inputs.h_guide_top_z,
+            h_guide_bot_z=inputs.h_guide_bot_z, r_offset_mm=(0.0, 0.0),
+            b_offset_mm=(0.0, 0.0),
+        )
+    u = axis / n
+    pitch = math.degrees(math.atan2(u[0], math.hypot(u[1], u[2])))
+    roll = math.degrees(math.atan2(-u[1], u[2]))
+    R = np.array([inputs.R.x, inputs.R.y, inputs.R.z], dtype=float)
+    B = np.array([inputs.B.x, inputs.B.y, inputs.B.z], dtype=float)
+    rs2l = _rot_sol_to_lg(math.radians(pitch), math.radians(roll))
+    vR = rs2l @ (R - Gb)   # position de R en repère jambe, relative à Gb (sur l'axe)
+    vB = rs2l @ (B - Gb)
+    return dict(
+        strut_pitch=pitch, strut_roll=roll,
+        h_pivot_z=float(vB[2] - vR[2]),          # B au-dessus de R (axial)
+        h_guide_top_z=float(n - vR[2]),          # Gt au-dessus de R (axial)
+        h_guide_bot_z=float(-vR[2]),             # Gb au-dessus de R (axial)
+        r_offset_mm=(float(vR[0]), float(vR[1])),
+        b_offset_mm=(float(vB[0]), float(vB[1])),
+    )
 
 
 def _strut_geom_si(inputs: "TrailingArmInputs") -> StraitStrutGeomSI:
-    """Extrait la géométrie strut (SI) d'un jeu d'entrées StraitStrut."""
+    """Extrait la géométrie strut (SI) d'un jeu d'entrées StraitStrut (depuis les points)."""
+    g = _strut_geom_from_points(inputs)
     return StraitStrutGeomSI(
-        strut_pitch=inputs.strut_pitch * U.DEG_TO_RAD,
-        strut_roll=inputs.strut_roll * U.DEG_TO_RAD,
-        h_pivot_z=inputs.h_pivot_z * U.MM_TO_M,
-        h_guide_top_z=inputs.h_guide_top_z * U.MM_TO_M,
-        h_guide_bot_z=inputs.h_guide_bot_z * U.MM_TO_M,
+        strut_pitch=g["strut_pitch"] * U.DEG_TO_RAD,
+        strut_roll=g["strut_roll"] * U.DEG_TO_RAD,
+        h_pivot_z=g["h_pivot_z"] * U.MM_TO_M,
+        h_guide_top_z=g["h_guide_top_z"] * U.MM_TO_M,
+        h_guide_bot_z=g["h_guide_bot_z"] * U.MM_TO_M,
         bague_guide=inputs.bague_guide * U.MM_TO_M,
         bague_piston=inputs.bague_piston * U.MM_TO_M,
         seal_precomp_pa=inputs.seal_precomp_pa,
+        r_offset=(g["r_offset_mm"][0] * U.MM_TO_M, g["r_offset_mm"][1] * U.MM_TO_M),
+        b_offset=(g["b_offset_mm"][0] * U.MM_TO_M, g["b_offset_mm"][1] * U.MM_TO_M),
     )
 
 
