@@ -735,6 +735,158 @@ en plus les efforts de dimensionnement de la jambe et de la bielle.
 
 ---
 
+## 6c. Train à lame (leaf spring) — modèle indépendant
+
+> **Principe.** Modèle de train **le plus simple** : une **lame** flexible se
+> comporte comme un **ressort vertical** monté entre l'attache structure **B**
+> (encastrement) et le **centre roue R** (extrémité libre de la lame). Sous
+> charge, R **descend/remonte verticalement** ; la lame se déforme et développe
+> un effort **élastique + visqueux** qui s'oppose au mouvement vertical. Cet
+> effort est appliqué à l'**extrémité de la lame confondue avec R**, puis
+> **réduit en B** par le PFD de la lame → torseur d'encastrement transmis à la
+> structure.
+>
+> **Différences avec le StraitStrut (§2).** Il n'y a **plus d'amortisseur
+> hydraulique (oléo) ni de ressort gaz** : la raideur et la dissipation sont
+> portées par la **lame seule** (ressort linéaire k + amortisseur visqueux c).
+> En revanche **toute la roue et le pneu sont identiques** au StraitStrut :
+> raideur de pneu, **spring‑back** et **spin‑up** (§5.4) sont **réutilisés tels
+> quels**, ainsi que la **position par défaut de R**.
+
+### 6c.1 Coordonnées et paramètres par défaut (repère avion, mm, à pitch 0°)
+
+| Point | X | Y | Z | Rôle |
+|---|---|---|---|---|
+| B | 3500 | 0 | 1000 | **encastrement** lame ↔ structure |
+| R | 2710 | 0 | 381 | centre roue (extrémité de lame) — **comme StraitStrut** |
+
+Vecteur de lame **BR = R − B = (−790, 0, −619) mm** (R est plus **avant** et plus
+**bas** que B ; longueur ‖BR‖ ≈ 1004 mm, dans le plan X‑Z).
+
+| Paramètre | Symbole | Défaut | Origine |
+|---|---|---|---|
+| Raideur de lame | k | **2000 N/mm** (= 2,0·10⁶ N/m) | **nouveau** (ressort de lame) |
+| Amortissement de lame | c | **1000 N/(m/s)** (= 1000 N·s/m) | **nouveau** (amortisseur visqueux) |
+| Masse non suspendue | m₁ | **10 kg** | **nouveau** (essieu + roue) |
+| Roue + pneu (rayon, raideur pneu, spring‑back, spin‑up, μ…) | — | **StraitStrut** | réutilisés tels quels |
+
+> ⚠️ k, c et m₁ sont les **seuls** paramètres mécaniques propres à ce modèle ;
+> tous les autres (roue/pneu) sont hérités du StraitStrut. Pas de section oléo,
+> pas de gaz, pas de bagues de guidage.
+
+### 6c.2 Solides et liaisons
+
+| Solide | Description | Points | Masse |
+|---|---|---|---|
+| S₁ | **Lame** + essieu + **roue** (masse non suspendue) | B, R | m₁ = 10 kg |
+
+La **lame** est l'élément **élastique/dissipatif** (elle remplace l'oléo+gaz). La
+**roue** tourne librement autour de l'essieu (axe Y) : son équation de rotation
+(**spin‑up**) est **découplée** et traitée comme au **§5.4**.
+
+| Liaison | Nature | Transmet | Ne transmet pas |
+|---|---|---|---|
+| S₁ / cellule en B | **encastrement** | effort **et** moment | — |
+| lame (interne) | **ressort + amortisseur** vertical entre B et R | effort vertical F_lame | — |
+| roue/sol en S | **contact** | effort de contact (Fx, Fz) | moment → rotation roue |
+
+### 6c.3 Cinématique et loi de la lame
+
+Seul DDL d'enfoncement : la **déflexion verticale δ** de la lame, définie comme le
+**rapprochement vertical** de B et R par rapport à la configuration libre :
+
+$$
+\delta = \big(z_B - z_R\big)_{\text{libre}} - \big(z_B - z_R\big),
+\qquad \dot\delta = -\frac{\mathrm d (z_B - z_R)}{\mathrm dt}
+$$
+
+(δ > 0 = lame comprimée, roue rapprochée du corps). La lame développe, **à son
+extrémité R**, un effort **vertical** ressort + amortisseur :
+
+$$
+\boxed{\;F_{lame} = k\,\delta + c\,\dot\delta\;}\qquad (\ge 0\ \text{en compression})
+$$
+
+dirigé pour **s'opposer au mouvement** (pousse le corps vers le haut, la roue vers
+le bas). Il n'y a **pas** de composante axiale d'oléo ni de pression gaz.
+
+### 6c.4 Roue, pneu et contact (réutilisés du StraitStrut)
+
+Strictement comme au **§5.4** : déflexion de pneu δ_pneu, effort vertical de pneu
+F_pneu(δ_pneu) (**spring‑back**), équation de rotation de la roue (**spin‑up**)
+
+$$
+J\,\dot\Omega = R_{eff}\,F_{spin},\qquad F_{spin} = \mu\,F_{pneu}\,\mathrm{sgn}(V_x-\Omega R_{eff})
+$$
+
+et effort de contact horizontal Fx (friction de spin‑up), de **même convention de
+signe** qu'au §5.4. En limite de **roue sans inertie de translation**, l'effort
+vertical au moyeu équilibre la lame : **F_pneu = F_lame** ; sinon
+
+$$
+m_1\,\ddot z_R = F_{pneu} - F_{lame} - m_1 g
+$$
+
+### 6c.5 PFD de la lame → torseur d'encastrement en B
+
+La lame est traitée comme **sans masse propre** (toute la masse non suspendue est
+au moyeu R ; l'inertie de flexion de la lame est négligée). Soit **F_R** l'effort
+**appliqué à la lame en R** par l'ensemble roue/sol :
+
+$$
+\vec F_R = (f_x,\ 0,\ f_z),\qquad f_z = F_{lame}\ (\text{vertical, vers le haut}),\quad f_x = \text{effort de contact (§5.4)}
+$$
+
+**Équilibre de la lame sans masse** (résultante + moment en B) :
+
+$$
+\vec R_B + \vec F_R = \vec 0,\qquad \vec M_B + \vec{BR}\times\vec F_R = \vec 0
+$$
+
+d'où le **torseur transmis par le train à la structure** en B (réaction, = −torseur
+sur la lame) :
+
+$$
+\boxed{\;\vec R_{B}^{\,train\to cell} = \vec F_R,\qquad
+\vec M_{B}^{\,train\to cell} = \vec{BR}\times\vec F_R\;}
+$$
+
+soit en plan X‑Z, le **moment de tangage** (autour de Y) en B :
+
+$$
+\boxed{\;M_{B,y} = (z_R - z_B)\,f_x - (x_R - x_B)\,f_z\;}
+$$
+
+C'est un **encastrement** : il transmet **effort + moment**, comme le StraitStrut
+(§5.2). La composante verticale transmise vaut **F_lame** (cf. §5.3 : F_B,w = F_tot,
+ici F_tot ≡ F_lame) ; la composante horizontale vaut l'**effort de contact**
+(§5.3). Le moment provient du **bras de levier BR** entre l'attache et la roue.
+
+### 6c.6 Report avion et énergie
+
+- **Report avion (§7).** Le train à lame entre dans le PFD avion **exactement
+  comme un NLG StraitStrut** : un **encastrement en B** apportant (Fx, Fz) **et**
+  un moment de tangage M_B,y (terme −M_B dans l'équation de tangage (10)).
+- **Bilan énergétique.** Mêmes postes que les autres trains pour le **pneu**
+  (déformation, spin‑up, glissement) ; côté jambe, l'oléo/gaz est remplacé par
+  l'**énergie élastique de lame** E_lame = ½ k δ² (**stockée**, restituée) et la
+  **dissipation visqueuse** P_amort = c δ̇² (**absorbée**). Convention « travail »
+  identique au reste du document.
+
+### 6c.7 Hypothèses propres au modèle
+
+- **H‑la1** : lame = **ressort linéaire k + amortisseur visqueux c** en parallèle,
+  agissant **verticalement** à l'extrémité R. Comportement linéaire (pas de
+  butée, pas de raidissement géométrique).
+- **H‑la2** : **lame sans masse propre** (inertie de flexion négligée) → réduction
+  statique de l'effort de R en torseur d'encastrement B.
+- **H‑la3** : **roue/pneu identiques au StraitStrut** (spring‑back, spin‑up, μ) ;
+  position R par défaut identique au StraitStrut.
+- **H‑la4** : liaison B = **encastrement parfait** (transmet effort **et** moment),
+  comme le NLG StraitStrut au §7.
+
+---
+
 ## 7. Structure (fuselage) — PFD avion 2 DDL
 
 Un seul solide : le **fuselage** (masse m, inertie de tangage J_yy, CG en G).
