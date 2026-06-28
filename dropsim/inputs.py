@@ -805,10 +805,12 @@ class StraitStrutDragBraceInputs(StraitStrutInputs):
     model_kind: str = "strait_strut_drag_brace"
 
     # Points d'ancrage (repère avion, mm, à pitch 0°).
-    B1: Point3 = field(default_factory=lambda: Point3(1650.0, 70.0, 1078.0))
-    B2: Point3 = field(default_factory=lambda: Point3(1650.0, -70.0, 1078.0))
-    Cdb: Point3 = field(default_factory=lambda: Point3(1620.0, 0.0, 700.0))
-    Ddb: Point3 = field(default_factory=lambda: Point3(1950.0, 0.0, 1120.0))
+    # Ancrages cohérents avec la position avion réelle du NLG (R = 2710,0,381) :
+    # coordonnées d'origine décalées de (1210, 0, 158.75).
+    B1: Point3 = field(default_factory=lambda: Point3(2860.0, 70.0, 1236.75))
+    B2: Point3 = field(default_factory=lambda: Point3(2860.0, -70.0, 1236.75))
+    Cdb: Point3 = field(default_factory=lambda: Point3(2830.0, 0.0, 858.75))
+    Ddb: Point3 = field(default_factory=lambda: Point3(3160.0, 0.0, 1278.75))
 
 
 def default_strait_strut_drag_brace_inputs() -> StraitStrutDragBraceInputs:
@@ -819,10 +821,10 @@ def default_strait_strut_drag_brace_inputs() -> StraitStrutDragBraceInputs:
     data["model_kind"] = "strait_strut_drag_brace"
     return StraitStrutDragBraceInputs(
         **data,
-        B1=Point3(1650.0, 70.0, 1078.0),
-        B2=Point3(1650.0, -70.0, 1078.0),
-        Cdb=Point3(1620.0, 0.0, 700.0),
-        Ddb=Point3(1950.0, 0.0, 1120.0),
+        B1=Point3(2860.0, 70.0, 1236.75),
+        B2=Point3(2860.0, -70.0, 1236.75),
+        Cdb=Point3(2830.0, 0.0, 858.75),
+        Ddb=Point3(3160.0, 0.0, 1278.75),
     )
 
 
@@ -894,15 +896,15 @@ def default_strait_strut_inputs() -> StraitStrutInputs:
     - table de rainures BH.
     """
     # Points de jambe par défaut (colinéaires sur l'axe), dérivés des hauteurs
-    # historiques (rake 10°, h_pivot 869, h_guide_top 494, h_guide_bot 346 mm) afin
-    # de reproduire EXACTEMENT la géométrie précédente. Placement absolu arbitraire
-    # (seules les différences comptent ; l'avion place via nlg_station).
+    # historiques (rake 10°, h_pivot 869, h_guide_top 494, h_guide_bot 346 mm). Le
+    # centre roue R est placé à sa position avion réelle (= ancienne station NLG :
+    # 2710, 0, 381) — les points caractéristiques sont désormais la SEULE source de
+    # position (la station est dérivée de R). Seules les différences fixent la forme.
     import math as _m
     import numpy as _np
     from .engine_strait_strut import _rot_lg_to_sol as _r_l2s
     _u = _r_l2s(_m.radians(10.0), 0.0) @ _np.array([0.0, 0.0, 1.0])
-    _ur = 222.25  # mm (unload_radius par défaut)
-    _R = _np.array([1500.0, 0.0, _ur])
+    _R = _np.array([2710.0, 0.0, 381.0])  # = ancienne station NLG (position avion réelle)
     _Gb = _R + 346.0 * _u
     _Gt = _R + 494.0 * _u
     _B = _R + 869.0 * _u
@@ -1415,11 +1417,12 @@ class AircraftInputs:
             hint="Saisir une valeur entière >= 4.",
         )
         c.check(
-            abs(self.layout.mlg_left_station.y - self.layout.mlg_right_station.y) <= 1.0e-9,
+            abs(self._compose_mlg_inputs().R.y) <= 1.0e-9,
             code="MLG_STATIONS_CONFONDUES",
-            message="Les stations MLG gauche et droite doivent être distinctes latéralement.",
-            field="layout.mlg_left_station",
-            hint="Vérifier les coordonnées Y des deux MLG.",
+            message="Le point roue R du MLG doit être décalé latéralement (Y ≠ 0) : "
+                    "le MLG droit en est le miroir, sinon gauche et droite se confondent.",
+            field="mlg.R",
+            hint="Saisir un Y non nul pour le point R du MLG.",
         )
 
         self._compose_nlg_inputs().validate(c)
@@ -1452,9 +1455,14 @@ class AircraftInputs:
             vx=self.drop.vx,
             pitch=self.drop.pitch * U.DEG_TO_RAD,
             pitch_rate=self.drop.pitch_rate_deg_s * U.DEG_TO_RAD,
-            nlg_station=pt(self.layout.nlg_station),
-            mlg_left_station=pt(self.layout.mlg_left_station),
-            mlg_right_station=pt(self.layout.mlg_right_station),
+            # Implantation des trains DÉRIVÉE du point roue R de chaque train (repère
+            # avion) : les points caractéristiques sont la seule source de position.
+            # Le MLG droit est le miroir en Y du MLG (gauche).
+            nlg_station=pt(nlg_inputs.R),
+            mlg_left_station=pt(mlg_inputs.R),
+            mlg_right_station=np.array(
+                [mlg_inputs.R.x * U.MM_TO_M, -mlg_inputs.R.y * U.MM_TO_M, mlg_inputs.R.z * U.MM_TO_M]
+            ),
             # Champs plats hérités (lecture seule, désormais inutilisés par le
             # moteur qui lit le conteneur nlg_strut). Tolèrent un NLG non-strut.
             nlg_strut_pitch=getattr(self.nlg, "strut_pitch", 0.0) * U.DEG_TO_RAD,

@@ -478,23 +478,11 @@ with _tab_av:
         _num("Pitch avion initial (°)", "ac_drop_pitch", inp.drop.pitch, step=0.1)
         _num("Pitch rate initial (°/s)", "ac_drop_pitch_rate", inp.drop.pitch_rate_deg_s, step=0.1)
 
-    st.subheader("Implantation des trains (stations, mm)")
-    nlg_col, mlg_l_col, mlg_r_col = st.columns(3)
-    with nlg_col:
-        st.markdown("**Station NLG**")
-        _num("NLG X", "ac_nlg_x", inp.layout.nlg_station.x, step=10.0)
-        _num("NLG Y", "ac_nlg_y", inp.layout.nlg_station.y, step=10.0)
-        _num("NLG Z", "ac_nlg_z", inp.layout.nlg_station.z, step=10.0)
-    with mlg_l_col:
-        st.markdown("**Station MLG gauche**")
-        _num("MLGg X", "ac_mlg_l_x", inp.layout.mlg_left_station.x, step=10.0)
-        _num("MLGg Y", "ac_mlg_l_y", inp.layout.mlg_left_station.y, step=10.0)
-        _num("MLGg Z", "ac_mlg_l_z", inp.layout.mlg_left_station.z, step=10.0)
-    with mlg_r_col:
-        st.markdown("**Station MLG droite**")
-        _num("MLGd X", "ac_mlg_r_x", inp.layout.mlg_right_station.x, step=10.0)
-        _num("MLGd Y", "ac_mlg_r_y", inp.layout.mlg_right_station.y, step=10.0)
-        _num("MLGd Z", "ac_mlg_r_z", inp.layout.mlg_right_station.z, step=10.0)
+    st.caption(
+        "ℹ️ L'implantation de chaque train dans l'avion est désormais définie par "
+        "son **point roue R** (onglets NLG / MLG). Le MLG droit est le miroir en Y "
+        "du MLG. Plus besoin de saisir des stations séparées."
+    )
 
 # --- Onglets 3 & 4 : trains (type + jeu complet de paramètres) ------------ #
 with _tab_nlg:
@@ -528,11 +516,9 @@ def _build_aircraft_inputs():
             pitch=float(st.session_state.ac_drop_pitch),
             pitch_rate_deg_s=float(st.session_state.ac_drop_pitch_rate),
         ),
-        layout=_INPUTS.AircraftGearLayoutInputs(
-            nlg_station=_INPUTS.Point3(float(st.session_state.ac_nlg_x), float(st.session_state.ac_nlg_y), float(st.session_state.ac_nlg_z)),
-            mlg_left_station=_INPUTS.Point3(float(st.session_state.ac_mlg_l_x), float(st.session_state.ac_mlg_l_y), float(st.session_state.ac_mlg_l_z)),
-            mlg_right_station=_INPUTS.Point3(float(st.session_state.ac_mlg_r_x), float(st.session_state.ac_mlg_r_y), float(st.session_state.ac_mlg_r_z)),
-        ),
+        # L'implantation des trains est désormais DÉRIVÉE du point roue R de chaque
+        # train (cf. AircraftInputs.to_si) ; le layout n'est plus saisi (vestigial).
+        layout=_INPUTS.AircraftGearLayoutInputs(),
         nlg=nlg_inputs,
         mlg=mlg_inputs,
     )
