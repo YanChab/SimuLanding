@@ -18,10 +18,12 @@ import streamlit as st
 from dropsim import (
     StraitStrutInputs,
     StraitStrutDragBraceInputs,
+    LeafSpringInputs,
     TrailingArmInputs,
     TrailingArmDragBraceInputs,
     default_strait_strut_inputs,
     default_strait_strut_drag_brace_inputs,
+    default_leaf_spring_inputs,
     default_trailing_arm_inputs,
     default_trailing_arm_drag_brace_inputs,
 )
@@ -34,9 +36,10 @@ GEAR_TYPE_LABELS = {
     "strait_strut_drag_brace": "StraitStrut + drag brace",
     "trailing_arm": "TrailingArm (balancier)",
     "trailing_arm_drag_brace": "TrailingArm + jambe/bielle",
+    "leaf_spring": "Train à lame (leaf spring)",
 }
 _GEAR_TYPE_OPTIONS = ["strait_strut", "strait_strut_drag_brace",
-                      "trailing_arm", "trailing_arm_drag_brace"]
+                      "trailing_arm", "trailing_arm_drag_brace", "leaf_spring"]
 
 # Groupes de paramètres scalaires (label, attribut). Les réglages numériques
 # globaux (intégrateur, solveur, tolérance, température) sont gérés au niveau
@@ -126,6 +129,11 @@ _STRUT_SCALAR_FIELDS = [
     ("Longueur bague piston (mm)", "bague_piston"),
     ("Précontrainte joint (Pa)", "seal_precomp_pa"),
 ]
+# Paramètres propres au Train à lame (leaf spring).
+_LEAF_FIELDS = [
+    ("Raideur lame (N/mm)", "lame_raideur"),
+    ("Amortissement lame (N/(m/s))", "lame_amortissement"),
+]
 
 
 def _default_for(kind: str):
@@ -135,6 +143,8 @@ def _default_for(kind: str):
         return default_strait_strut_inputs()
     if kind == "trailing_arm_drag_brace":
         return default_trailing_arm_drag_brace_inputs()
+    if kind == "leaf_spring":
+        return default_leaf_spring_inputs()
     return default_trailing_arm_inputs()
 
 
@@ -228,7 +238,8 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
     if getattr(base_inputs, "model_kind", "") != kind:
         # Purge des clés scalaires pour réamorcer depuis le défaut du nouveau type.
         for _, field in (_DROP_FIELDS + _DAMPER_FIELDS + _GAS_FIELDS + _OIL_FIELDS
-                         + _TYRE_FIELDS + _STRUT_FIELDS + [("", "jyy"), ("", "diametre_rainure")]):
+                         + _TYRE_FIELDS + _STRUT_FIELDS + _LEAF_FIELDS
+                         + [("", "jyy"), ("", "diametre_rainure")]):
             st.session_state.pop(f"{prefix}_{field}", None)
         st.session_state.pop(f"{prefix}_points", None)
         st.session_state.pop(f"{prefix}_rainures", None)
@@ -236,12 +247,40 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
         st.session_state.pop(f"{prefix}_mu", None)
         base_inputs = _default_for(kind)
 
+    _is_leaf = kind == "leaf_spring"
     st.caption(f"Type : **{GEAR_TYPE_LABELS.get(kind, kind)}**")
+
+    # Le Train à lame n'a ni oléo, ni gaz, ni rainures : on ne montre pas ces
+    # sections et on réamorce rainures/tyre/mu depuis les valeurs par défaut.
+    rainures_df = pd.DataFrame(
+        [(r.debut, r.fin, r.profondeur) for r in base_inputs.rainures],
+        columns=["Début (mm)", "Fin (mm)", "Profondeur (mm)"],
+    )
 
     geo_col, dmp_col = st.columns(2)
     with geo_col:
         st.markdown("**Géométrie**")
-        if kind in ("strait_strut", "strait_strut_drag_brace"):
+        if _is_leaf:
+            st.markdown("**Points lame (mm, repère avion, pitch 0°)**")
+            _ls_spec = [("B", "B"), ("R", "R")]
+            pkey = f"{prefix}_points"
+            if pkey not in st.session_state:
+                st.session_state[pkey] = pd.DataFrame({
+                    "Point": [lbl for lbl, _ in _ls_spec],
+                    "X": [getattr(base_inputs, a).x for _, a in _ls_spec],
+                    "Y": [getattr(base_inputs, a).y for _, a in _ls_spec],
+                    "Z": [getattr(base_inputs, a).z for _, a in _ls_spec],
+                })
+            points_df = st.data_editor(
+                st.session_state[pkey], hide_index=True, disabled=["Point"],
+                width="stretch", key=f"{prefix}_points_ed",
+            )
+            st.session_state[pkey] = points_df
+            st.caption(
+                "B = encastrement structure, R = centre roue. La lame agit comme un "
+                "ressort vertical (k) + amortisseur (c) entre B et R. Cf. PFD §6c."
+            )
+        elif kind in ("strait_strut", "strait_strut_drag_brace"):
             st.markdown("**Points jambe (mm, repère avion, pitch 0°)**")
             # Points de l'axe de coulisse + ancrage. Variante drag brace : l'attache
             # B (encastrement) est remplacée par B1/B2 (rotule + linéaire annulaire)
@@ -313,35 +352,46 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                     "(D sur la jambe, E sur la structure). Cf. PFD §6b."
                 )
     with dmp_col:
-        st.markdown("**Amortisseur (géométrie)**")
-        _d1, _d2 = st.columns(2)
-        _dcols = [_d1, _d2, _d1, _d2]
-        for _i, (_title, _sub) in enumerate(_DAMPER_SUB):
-            with _dcols[_i]:
-                st.caption(_title)
-                _num_table(_sub, prefix, base_inputs, key=f"{prefix}_dmp{_i}_tbl")
+        if _is_leaf:
+            st.markdown("**Lame (ressort + amortisseur)**")
+            _num_table(_LEAF_FIELDS, prefix, base_inputs, key=f"{prefix}_leaf_tbl")
+            st.caption(
+                "F_lame = k·δ + c·δ̇ (vertical). Réduit en B par le PFD de la lame → "
+                "torseur d'encastrement. La masse non suspendue est dans « Pneu »."
+            )
+        else:
+            st.markdown("**Amortisseur (géométrie)**")
+            _d1, _d2 = st.columns(2)
+            _dcols = [_d1, _d2, _d1, _d2]
+            for _i, (_title, _sub) in enumerate(_DAMPER_SUB):
+                with _dcols[_i]:
+                    st.caption(_title)
+                    _num_table(_sub, prefix, base_inputs, key=f"{prefix}_dmp{_i}_tbl")
 
     # --- Sections secondaires (repliées par défaut pour alléger la page) ---
-    with st.expander("Ressort gazeux", expanded=False):
-        _num_table(_GAS_FIELDS, prefix, base_inputs, key=f"{prefix}_gas_tbl")
-    with st.expander("Huile", expanded=False):
-        _num_table(_OIL_FIELDS, prefix, base_inputs, key=f"{prefix}_oil_tbl")
+    # Le Train à lame n'a ni ressort gaz, ni huile, ni rainures hydrauliques.
+    if not _is_leaf:
+        with st.expander("Ressort gazeux", expanded=False):
+            _num_table(_GAS_FIELDS, prefix, base_inputs, key=f"{prefix}_gas_tbl")
+        with st.expander("Huile", expanded=False):
+            _num_table(_OIL_FIELDS, prefix, base_inputs, key=f"{prefix}_oil_tbl")
     with st.expander("Pneu / spring-back", expanded=False):
         _num_table(_TYRE_FIELDS, prefix, base_inputs, key=f"{prefix}_tyre_tbl")
 
-    with st.expander("Rainures butée hydraulique", expanded=False):
-        _num_table([("Ø rainure (mm)", "diametre_rainure")], prefix, base_inputs, key=f"{prefix}_drain_tbl")
-        rkey = f"{prefix}_rainures"
-        if rkey not in st.session_state:
-            st.session_state[rkey] = pd.DataFrame(
-                [(r.debut, r.fin, r.profondeur) for r in base_inputs.rainures],
-                columns=["Début (mm)", "Fin (mm)", "Profondeur (mm)"],
+    if not _is_leaf:
+        with st.expander("Rainures butée hydraulique", expanded=False):
+            _num_table([("Ø rainure (mm)", "diametre_rainure")], prefix, base_inputs, key=f"{prefix}_drain_tbl")
+            rkey = f"{prefix}_rainures"
+            if rkey not in st.session_state:
+                st.session_state[rkey] = pd.DataFrame(
+                    [(r.debut, r.fin, r.profondeur) for r in base_inputs.rainures],
+                    columns=["Début (mm)", "Fin (mm)", "Profondeur (mm)"],
+                )
+            rainures_df = st.data_editor(
+                st.session_state[rkey], hide_index=True, width="stretch",
+                num_rows="dynamic", key=f"{prefix}_rainures_ed",
             )
-        rainures_df = st.data_editor(
-            st.session_state[rkey], hide_index=True, width="stretch",
-            num_rows="dynamic", key=f"{prefix}_rainures_ed",
-        )
-        _render_bh_section_curve(prefix, base_inputs, rainures_df)
+            _render_bh_section_curve(prefix, base_inputs, rainures_df)
 
     with st.expander("Courbes pneu & adhérence", expanded=False):
         _c1, _c2 = st.columns(2)
@@ -405,6 +455,13 @@ def _build_gear_inputs(prefix, kind, base, points_df, rainures_df, tyre_df, mu_d
     )
 
     pts = {r["Point"]: Point3(float(r["X"]), float(r["Y"]), float(r["Z"])) for _, r in points_df.iterrows()}
+
+    if kind == "leaf_spring":
+        base_ls = base if isinstance(base, LeafSpringInputs) else default_leaf_spring_inputs()
+        return replace(base_ls, **common,
+                       lame_raideur=g("lame_raideur"),
+                       lame_amortissement=g("lame_amortissement"),
+                       B=pts["B"], R=pts["R"])
 
     if kind == "strait_strut_drag_brace":
         strut_scalars = {f: g(f) for _, f in _STRUT_SCALAR_FIELDS}
@@ -662,13 +719,20 @@ def render_full_gear_result(result, label: str) -> None:
     df = result.df
     cols = list(df.columns)
     t = df["Temps (s)"] if "Temps (s)" in cols else df[cols[0]]
-    p = "StraitStrut" if any(c.startswith("StraitStrut.") for c in cols) else "TrailingArm"
+    _is_leaf = any(c.startswith("LeafSpring.") for c in cols)
+    if _is_leaf:
+        p = "LeafSpring"
+    elif any(c.startswith("StraitStrut.") for c in cols):
+        p = "StraitStrut"
+    else:
+        p = "TrailingArm"
     is_ta = p == "TrailingArm"
 
     m1, m2, m3 = st.columns(3)
     m1.metric("Pas de temps", f"{len(df)}")
     if f"{p}.Ftot (N)" in cols:
-        m2.metric("Effort amortisseur max", f"{float(np.max(np.abs(df[f'{p}.Ftot (N)']))):.0f} N")
+        _flbl = "Effort lame max" if _is_leaf else "Effort amortisseur max"
+        m2.metric(_flbl, f"{float(np.max(np.abs(df[f'{p}.Ftot (N)']))):.0f} N")
     if "Tyre.FTyre (N)" in cols:
         m3.metric("Fz pneu max", f"{float(np.max(np.abs(df['Tyre.FTyre (N)']))):.0f} N")
 
@@ -676,7 +740,9 @@ def render_full_gear_result(result, label: str) -> None:
     # si l'effort de bielle est non nul (sinon config de base, ancrage simple en B).
     _bielle = "DragBrace.Effort bielle (N)"
     _has_db = _bielle in cols and float(np.abs(df[_bielle].to_numpy()).sum()) > 0.0
-    if is_ta:
+    if _is_leaf:
+        _model_kind = "leaf_spring"
+    elif is_ta:
         _model_kind = "trailing_arm_drag_brace" if _has_db else "trailing_arm"
     else:
         _model_kind = "strait_strut_drag_brace" if _has_db else "strait_strut"
@@ -702,15 +768,20 @@ def render_full_gear_result(result, label: str) -> None:
             ], f"{label} - Effort en fonction de la course", "Course amortisseur (mm)", "Effort (N)"), use_container_width=True)
 
     with tabs[2]:
-        pcols = [f"{p}.Pc (bar)", f"{p}.Pg (bar)", f"{p}.Pd (bar)", f"{p}.DeltaPc (bar)", f"{p}.DeltaPd (bar)"]
-        if _req(df, pcols, f"{label} - Pressions"):
-            st.plotly_chart(_gline(t, [
-                ("Pc", df[f"{p}.Pc (bar)"]), ("Pg", df[f"{p}.Pg (bar)"]), ("Pd", df[f"{p}.Pd (bar)"]),
-                ("DeltaPc", df[f"{p}.DeltaPc (bar)"]), ("DeltaPd", df[f"{p}.DeltaPd (bar)"]),
-            ], f"{label} - Pressions en fonction du temps", "Temps (s)", "Pression (bar)"), use_container_width=True)
+        if _is_leaf:
+            st.info("Modèle Train à lame : pas d'hydraulique ni de gaz, donc pas de pressions.", icon="ℹ️")
+        else:
+            pcols = [f"{p}.Pc (bar)", f"{p}.Pg (bar)", f"{p}.Pd (bar)", f"{p}.DeltaPc (bar)", f"{p}.DeltaPd (bar)"]
+            if _req(df, pcols, f"{label} - Pressions"):
+                st.plotly_chart(_gline(t, [
+                    ("Pc", df[f"{p}.Pc (bar)"]), ("Pg", df[f"{p}.Pg (bar)"]), ("Pd", df[f"{p}.Pd (bar)"]),
+                    ("DeltaPc", df[f"{p}.DeltaPc (bar)"]), ("DeltaPd", df[f"{p}.DeltaPd (bar)"]),
+                ], f"{label} - Pressions en fonction du temps", "Temps (s)", "Pression (bar)"), use_container_width=True)
 
     with tabs[3]:
-        if _req(df, ["Hydrau.Erreur convergence (-)", "Hydrau.Itérations convergence (-)"], f"{label} - Conv. hydraulique"):
+        if _is_leaf:
+            st.info("Modèle Train à lame : pas de boucle hydraulique à converger.", icon="ℹ️")
+        elif _req(df, ["Hydrau.Erreur convergence (-)", "Hydrau.Itérations convergence (-)"], f"{label} - Conv. hydraulique"):
             st.plotly_chart(_gline_dual(
                 t,
                 [("Erreur convergence", df["Hydrau.Erreur convergence (-)"])],

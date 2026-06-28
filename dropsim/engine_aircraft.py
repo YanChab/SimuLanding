@@ -24,6 +24,7 @@ from .engine_strait_strut import (
     _drag_brace_step,
     StraitStrutLocalState,
 )
+from .engine_leaf_spring import leaf_spring_step
 from .errors import OVERSTROKE_CODES, SimError, make_overstroke_warning
 from .gas import GasSpring
 from .inputs import AircraftParamsSI, TrailingArmParamsSI, _strut_geom_si
@@ -1063,8 +1064,191 @@ class TrailingArmSlot:
         return SlotStepResult(contributions=contributions, fz_slot=fz_slot, diag=diag, geom=geom)
 
 
-def _build_slot(prefix, model_kind, params, strut_geom, station, cg, vx, pitch_init, arm_mass=0.0):
+class LeafSpringSlot:
+    """Slot « Train à lame » (leaf spring, PFD §6c) : ressort vertical (k) +
+    amortisseur visqueux (c) entre l'encastrement B (structure) et la roue R.
+    Interface avec la cellule = **encastrement** en B (effort + moment de tangage),
+    comme le StraitStrut."""
+
+    def __init__(self, *, prefix, params, leaf_geom, station, cg, vx, pitch_init, ground_z=0.0):
+        self.prefix = prefix
+        self.model_kind = "leaf_spring"
+        self.p = params
+        self.cg = cg
+        self.vx = vx
+        self.ground_z = ground_z
+        self.station = station
+        self.unload_radius = float(params.unload_radius)
+        self.x_offset = float(station[0] - cg[0])
+        self.k_leaf = float(leaf_geom.k_leaf)
+        self.c_leaf = float(leaf_geom.c_leaf)
+        # Offset géométrique de B par rapport à R (= station), repère avion (m).
+        self._b_off_world = np.asarray(leaf_geom.B, float) - np.asarray(leaf_geom.R, float)
+        self.tyre_defl_tbl, self.tyre_load_tbl = build_tyre_tables(params)
+        # État roue (masse non suspendue).
+        self.z_mns = 0.0
+        self.vz_mns = -float(params.vz)
+        self.tyre_omega = 0.0
+        self.tyre_vx = 0.0
+        self.tyre_depx = 0.0
+        self.tyre_defl_val = 0.0
+        self.d = 0.0
+        self.v_damper = 0.0
+        self.station_z_ref = 0.0
+        self.rz_ref = 0.0
+        self.b_body = (0.0, 0.0)
+        self._e = dict(damp=0.0, damp_x=0.0, slip=0.0, tyre=0.0, fwd=0.0, grav=0.0)
+        self._e_started = False
+        self._e_kin_init = 0.0
+
+    def reference_bottom_z(self, pitch_init):
+        _, station_z0 = _rigid_station(self.cg, 0.0, pitch_init, self.station)
+        return station_z0 - self.unload_radius
+
+    def apply_ground_gap(self, gap):
+        # Hauteur de roue encodée par station_z_ref (déflexion calculée en monde).
+        return None
+
+    def finalize_reference(self, z_cg, pitch_init):
+        _, self.station_z_ref = _rigid_station(self.cg, z_cg, pitch_init, self.station)
+        self.rz_ref = self.station_z_ref  # roue R au niveau de sa station
+        self.b_body = _off_world_to_body(
+            float(self._b_off_world[0]), float(self._b_off_world[2]), pitch_init
+        )
+
+    def step(self, *, station_x, station_z, zsup, vsup, asup, theta, dt):
+        p = self.p
+        mns = p.unsprung_mass
+        # Position de l'encastrement B (structure) dans le monde.
+        b_off_x, b_off_z = _off_body_to_world(self.b_body[0], self.b_body[1], theta)
+        bx_step = station_x + b_off_x
+        bz_step = station_z + b_off_z
+        # Roue R : verticale = ref + déplacement propre ; horizontale = station.
+        rz_world = self.rz_ref + self.z_mns
+        rx_world = station_x
+        # Compression de lame d et vitesse ḋ (rapprochement vertical B↔R).
+        self.d = self.z_mns - zsup
+        self.v_damper = self.vz_mns - vsup
+        ftot, f_spring, f_damp = leaf_spring_step(self.d, self.v_damper, self.k_leaf, self.c_leaf)
+
+        # Pneu : effort vertical, spin-up, spring-back.
+        defl_world = p.unload_radius - (rz_world - self.ground_z)
+        self.tyre_defl_val = defl_world if defl_world > 0.0 else 0.0
+        tyre_ftyre = max(0.0, f_tyre(self.tyre_defl_val, self.tyre_defl_tbl, self.tyre_load_tbl))
+        r_eff_v = r_eff(p.unload_radius, self.tyre_defl_val)
+        slip = 0.0
+        if abs(self.vx) > 1.0e-9:
+            slip = (self.vx - self.tyre_omega * r_eff_v) / abs(self.vx)
+        mu_v = mu(slip, p.mu_x, p.mu_y)
+        fspin = mu_v * tyre_ftyre * math.copysign(1.0, slip) if tyre_ftyre > 0 else 0.0
+        tyre_alpha = (fspin * r_eff_v) / p.wheel_inertia if tyre_ftyre > 0 else 0.0
+        fx_spring_wheel = -p.kx * self.tyre_depx - p.cx * self.tyre_vx
+        acc_tyre_x = (fx_spring_wheel + fspin) / p.wheelmass
+        tr_sol = np.array([fx_spring_wheel, 0.0, tyre_ftyre])
+
+        # Torseur d'encastrement transmis à la cellule en B.
+        fx_cell = -float(fx_spring_wheel)
+        fz_cell = float(ftot)
+        br_x = rx_world - bx_step
+        br_z = rz_world - bz_step
+        mom_B_y = br_z * float(tr_sol[0]) - br_x * float(tr_sol[2])
+        fz_slot = fz_cell
+
+        # --- Énergie (exclut la masse suspendue = fuselage) --------------- #
+        if not self._e_started:
+            self._e_kin_init = 0.5 * mns * self.vz_mns ** 2
+            self._d_prev = self.d
+            self._defl_prev = self.tyre_defl_val
+            self._zmns_prev = self.z_mns
+            self._omega_prev = self.tyre_omega
+            self._e_started = True
+        dd = self.d - self._d_prev
+        ddefl = self.tyre_defl_val - self._defl_prev
+        e = self._e
+        e["tyre"] += tyre_ftyre * ddefl
+        e["damp"] += f_damp * dd
+        e["damp_x"] += p.cx * self.tyre_vx ** 2 * dt
+        dke_spin = 0.5 * p.wheel_inertia * (self.tyre_omega ** 2 - self._omega_prev ** 2)
+        if abs(self.vx) > 1.0e-9:
+            e["fwd"] += fspin * self.vx * dt
+            e["slip"] += fspin * (self.vx - self.tyre_vx) * dt - dke_spin
+        e["grav"] += -mns * G * (self.z_mns - self._zmns_prev)
+        e_spring = 0.5 * self.k_leaf * self.d ** 2
+        e_kin_train = (0.5 * mns * self.vz_mns ** 2
+                       + 0.5 * p.wheel_inertia * self.tyre_omega ** 2
+                       + 0.5 * p.wheelmass * self.tyre_vx ** 2)
+        e_stock_train = e_spring + e["tyre"] + 0.5 * p.kx * self.tyre_depx ** 2
+        e_diss_train = e["damp"] + e["damp_x"] + e["slip"]
+        self._d_prev = self.d
+        self._defl_prev = self.tyre_defl_val
+        self._zmns_prev = self.z_mns
+        self._omega_prev = self.tyre_omega
+
+        contributions = [InterfaceContribution(
+            px=bx_step, pz=bz_step, fx=fx_cell, fz=fz_cell, my=mom_B_y,
+        )]
+        diag = {
+            "stroke": self.d,
+            "velocity": self.v_damper,
+            "ftot": ftot,
+            "tyre_defl": self.tyre_defl_val,
+            "tyre_ftyre": tyre_ftyre,
+            "tyre_mu": mu_v,
+            "tyre_slip": slip,
+            "tyre_omega": self.tyre_omega,
+            "tyre_alpha": tyre_alpha,
+            "tr_x": -fx_spring_wheel,
+            "reaction_h": -fx_spring_wheel,
+            "reaction_v": tyre_ftyre,
+            "accms": asup,
+            "accmns": (-ftot + tyre_ftyre - mns * G) / mns,
+            "vitmns": self.vz_mns,
+            "depmns": self.z_mns,
+            "tors_res_x": fx_cell,
+            "tors_res_z": fz_cell,
+            "tors_res_norm": math.hypot(fx_cell, fz_cell),
+            "torsb_fx": fx_cell,
+            "torsb_fz": fz_cell,
+            "torsb_mx": 0.0,
+            "torsb_my": mom_B_y,
+            "torsb_mz": mom_B_y,
+            "e_kin": e_kin_train,
+            "e_stock": e_stock_train,
+            "e_diss": e_diss_train,
+            "e_fwd": e["fwd"],
+            "e_grav": e["grav"],
+            "e_kin_init": self._e_kin_init,
+        }
+        geom = {
+            "bx": bx_step, "bz": bz_step,
+            "gtx": bx_step, "gtz": bz_step,   # pas de bagues : Gt/Gb confondus avec B
+            "gbx": bx_step, "gbz": bz_step,
+            "rx": rx_world, "rz": rz_world,
+            "wheel_radius": p.unload_radius,
+        }
+
+        # --- Intégration de la roue i → i+1 -------------------------------- #
+        acc_mns = (-ftot + tyre_ftyre - mns * G) / mns
+        self.z_mns, self.vz_mns = _integrate_const_acc(self.z_mns, self.vz_mns, acc_mns, dt, p.integrator)
+        self.tyre_omega = self.tyre_omega + tyre_alpha * dt
+        old_vx = self.tyre_vx
+        self.tyre_vx = self.tyre_vx + acc_tyre_x * dt
+        self.tyre_depx = self.tyre_depx + old_vx * dt
+
+        return SlotStepResult(contributions=contributions, fz_slot=fz_slot, diag=diag, geom=geom)
+
+
+def _build_slot(prefix, model_kind, params, strut_geom, station, cg, vx, pitch_init, arm_mass=0.0,
+                leaf_geom=None):
     """Construit le slot adapté au type de train choisi pour la position."""
+    if model_kind == "leaf_spring":
+        if leaf_geom is None:
+            from .inputs import _leaf_geom_si
+            leaf_geom = _leaf_geom_si(params)
+        return LeafSpringSlot(
+            prefix=prefix, params=params, leaf_geom=leaf_geom,
+            station=station, cg=cg, vx=vx, pitch_init=pitch_init,
+        )
     if model_kind in ("strait_strut", "strait_strut_drag_brace"):
         if strut_geom is None:
             strut_geom = _strut_geom_si(params)
@@ -1095,7 +1279,16 @@ def run_aircraft(
 
     # Type de train par position (slot générique). Le slot droit reçoit des
     # paramètres miroir en Y lorsqu'il s'agit d'un TrailingArm.
-    if p.mlg_model_kind in ("trailing_arm", "trailing_arm_drag_brace"):
+    mlg_r_leaf = None
+    if p.mlg_model_kind == "leaf_spring":
+        mlg_r_params = p.mlg
+        mlg_r_strut = None
+        mlg_r_leaf = (
+            replace(p.mlg_leaf, B=p.mlg_leaf.B * np.array([1.0, -1.0, 1.0]),
+                    R=p.mlg_leaf.R * np.array([1.0, -1.0, 1.0]))
+            if p.mlg_leaf is not None else None
+        )
+    elif p.mlg_model_kind in ("trailing_arm", "trailing_arm_drag_brace"):
         mlg_r_params = _mirror_trailing_params_y(p.mlg)
         mlg_r_strut = p.mlg_strut
     else:
@@ -1109,15 +1302,16 @@ def run_aircraft(
         )
 
     nlg_slot = _build_slot(
-        "nlg", p.nlg_model_kind, p.nlg, p.nlg_strut, p.nlg_station, p.cg, p.vx, p.pitch
+        "nlg", p.nlg_model_kind, p.nlg, p.nlg_strut, p.nlg_station, p.cg, p.vx, p.pitch,
+        leaf_geom=p.nlg_leaf,
     )
     mlg_l_slot = _build_slot(
         "mlg_left", p.mlg_model_kind, p.mlg, p.mlg_strut, p.mlg_left_station, p.cg, p.vx, p.pitch,
-        arm_mass=mlg_arm_mass,
+        arm_mass=mlg_arm_mass, leaf_geom=p.mlg_leaf,
     )
     mlg_r_slot = _build_slot(
         "mlg_right", p.mlg_model_kind, mlg_r_params, mlg_r_strut, p.mlg_right_station, p.cg, p.vx, p.pitch,
-        arm_mass=mlg_arm_mass,
+        arm_mass=mlg_arm_mass, leaf_geom=mlg_r_leaf,
     )
     slots = [nlg_slot, mlg_l_slot, mlg_r_slot]
 

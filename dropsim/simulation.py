@@ -15,9 +15,16 @@ import pandas as pd
 
 from .engine import OUTPUT_COLUMNS, run_trailing_arm
 from .engine_aircraft import OUTPUT_COLUMNS_AC, run_aircraft
+from .engine_leaf_spring import OUTPUT_COLUMNS_LS, run_leaf_spring
 from .engine_strait_strut import OUTPUT_COLUMNS_SS, run_strait_strut
 from .errors import ErrorCollector, ErrorLevel, SimError
-from .inputs import AircraftInputs, TrailingArmInputs, StraitStrutInputs, _strut_geom_si
+from .inputs import (
+    AircraftInputs,
+    TrailingArmInputs,
+    StraitStrutInputs,
+    _leaf_geom_si,
+    _strut_geom_si,
+)
 from .integration_pfd_aircraft import run_aircraft_pfd
 from .integration_pfd_strait import run_strait_strut_pfd
 from .integration_pfd_trailing import run_trailing_arm_pfd
@@ -263,9 +270,23 @@ def run_simulation(
         getattr(inputs, "model_kind", "") in ("strait_strut", "strait_strut_drag_brace")
         and not is_aircraft
     )
+    is_leaf_spring = (
+        getattr(inputs, "model_kind", "") == "leaf_spring" and not is_aircraft
+    )
     if is_aircraft:
         engine_out = run_aircraft(params, progress_callback=progress_callback)
         col_map = OUTPUT_COLUMNS_AC
+    elif is_leaf_spring:
+        geom = _leaf_geom_si(inputs)
+        engine_out = run_leaf_spring(
+            params,
+            progress_callback=progress_callback,
+            k_leaf=geom.k_leaf,
+            c_leaf=geom.c_leaf,
+            B_pos=geom.B,
+            R_pos=geom.R,
+        )
+        col_map = OUTPUT_COLUMNS_LS
     elif is_strait_strut:
         ss = inputs  # type: ignore[assignment]
         # Géométrie de jambe dérivée des POINTS (B, Gt, Gb, R), en SI.

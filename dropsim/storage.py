@@ -34,6 +34,7 @@ from .inputs import (
     Rainure,
     StraitStrutInputs,
     StraitStrutDragBraceInputs,
+    LeafSpringInputs,
     TrailingArmInputs,
     TrailingArmDragBraceInputs,
 )
@@ -106,6 +107,8 @@ def inputs_from_dict(d: dict) -> AircraftInputs | TrailingArmInputs | StraitStru
                 return StraitStrutDragBraceInputs
             if kind == "trailing_arm_drag_brace":
                 return TrailingArmDragBraceInputs
+            if kind == "leaf_spring":
+                return LeafSpringInputs
             return StraitStrutInputs if kind == "strait_strut" else TrailingArmInputs
 
         def _override(sub: dict) -> AircraftGearDropOverride:
@@ -137,6 +140,8 @@ def inputs_from_dict(d: dict) -> AircraftInputs | TrailingArmInputs | StraitStru
         cls = StraitStrutInputs
     elif model_kind == "trailing_arm_drag_brace":
         cls = TrailingArmDragBraceInputs
+    elif model_kind == "leaf_spring":
+        cls = LeafSpringInputs
     else:
         cls = TrailingArmInputs
     data = _coerce_trailing_like_inputs(d, cls)

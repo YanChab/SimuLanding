@@ -794,7 +794,7 @@ def _train_kind(train_inputs, base: str) -> str:
     mk = getattr(train_inputs, "model_kind", None)
     if mk in (
         "strait_strut", "strait_strut_drag_brace",
-        "trailing_arm", "trailing_arm_drag_brace",
+        "trailing_arm", "trailing_arm_drag_brace", "leaf_spring",
     ):
         return mk
     is_ta = base.startswith("MLG")

@@ -379,12 +379,13 @@ class TrailingArmInputs:
         )
         c.check(
             self.model_kind not in {"trailing_arm", "strait_strut",
-                                    "strait_strut_drag_brace", "trailing_arm_drag_brace"},
+                                    "strait_strut_drag_brace", "trailing_arm_drag_brace",
+                                    "leaf_spring"},
             code="MODEL_KIND_INVALIDE",
             message=(
                 "Le type de modèle doit être 'trailing_arm', 'strait_strut', "
-                "'strait_strut_drag_brace' ou 'trailing_arm_drag_brace' "
-                f"(reçu : {self.model_kind})."
+                "'strait_strut_drag_brace', 'trailing_arm_drag_brace' ou "
+                f"'leaf_spring' (reçu : {self.model_kind})."
             ),
             field="model_kind",
             hint="Choisir un type de modèle supporté.",
@@ -828,6 +829,77 @@ def default_strait_strut_drag_brace_inputs() -> StraitStrutDragBraceInputs:
     )
 
 
+@dataclass
+class LeafSpringInputs(TrailingArmInputs):
+    """Entrées du modèle « Train à lame » (leaf spring, cf. PFD §6c).
+
+    Lame = ressort vertical (raideur ``lame_raideur``) + amortisseur visqueux
+    (``lame_amortissement``) entre l'encastrement **B** et le centre roue **R**.
+    La roue et le pneu (spring-back, spin-up) sont identiques au StraitStrut ;
+    il n'y a **ni oléo ni ressort gaz**. Seuls B, R, k, c et la masse non
+    suspendue interviennent ; les champs hérités d'amortisseur hydraulique/gaz
+    ne sont pas utilisés par le moteur leaf spring.
+    """
+
+    model_kind: str = "leaf_spring"
+
+    lame_raideur: float = 2000.0        # N/mm  raideur de la lame
+    lame_amortissement: float = 1000.0  # N/(m/s)  amortissement visqueux
+
+
+def default_leaf_spring_inputs() -> LeafSpringInputs:
+    """Entrées par défaut du Train à lame : roue/pneu repris du StraitStrut,
+    B = (3500, 0, 1000), R = position StraitStrut, k = 2000 N/mm, c = 1000 N·s/m,
+    masse non suspendue 10 kg (cf. PFD §6c)."""
+    ss = default_strait_strut_inputs()
+    return LeafSpringInputs(
+        model_kind="leaf_spring",
+        masse=ss.masse, vz=ss.vz, vx=ss.vx, lift=ss.lift, pitch=0.0, roll=0.0,
+        # Pas de temps plus fin : la lame raide (k) + masse non suspendue faible
+        # rendent la dynamique pneu/roue raide (cf. validation dt-scaling, résidu
+        # ~0,3 % à 1e-5 contre ~30 % à 1e-4).
+        temps_simu=ss.temps_simu, it=1.0e-5, integrator=ss.integrator,
+        damper_core_solver=ss.damper_core_solver, temperature=ss.temperature,
+        # Roue / pneu repris du StraitStrut (NLG nominal).
+        unsprung_mass=10.0,
+        wheel_inertia=ss.wheel_inertia,
+        unload_radius=ss.unload_radius,
+        kx=ss.kx, cx=ss.cx, wheelmass=ss.wheelmass,
+        tyre_curve=list(ss.tyre_curve), mu_curve=list(ss.mu_curve),
+        # Géométrie de lame.
+        B=Point3(3500.0, 0.0, 1000.0),
+        R=Point3(ss.R.x, ss.R.y, ss.R.z),
+        # Lame.
+        lame_raideur=2000.0,
+        lame_amortissement=1000.0,
+    )
+
+
+@dataclass
+class LeafSpringGeomSI:
+    """Géométrie SI du Train à lame transmise au moteur."""
+
+    k_leaf: float   # N/m  (raideur convertie)
+    c_leaf: float   # N·s/m
+    B: "object"     # np.ndarray (m), repère avion
+    R: "object"     # np.ndarray (m), repère avion
+
+
+def _leaf_geom_si(inputs: "TrailingArmInputs") -> LeafSpringGeomSI:
+    """Extrait la géométrie leaf spring (SI) : raideur/amortissement + points B, R."""
+    import numpy as np
+
+    def pt(p: Point3) -> np.ndarray:
+        return np.array([p.x * U.MM_TO_M, p.y * U.MM_TO_M, p.z * U.MM_TO_M])
+
+    return LeafSpringGeomSI(
+        k_leaf=float(getattr(inputs, "lame_raideur", 2000.0)) * 1000.0,   # N/mm → N/m
+        c_leaf=float(getattr(inputs, "lame_amortissement", 1000.0)),
+        B=pt(inputs.B),
+        R=pt(inputs.R),
+    )
+
+
 def default_trailing_arm_inputs() -> TrailingArmInputs:
     """Retourne les entrées par défaut (cas nominal trailing arm)."""
     return TrailingArmInputs()
@@ -1246,6 +1318,10 @@ class AircraftParamsSI:
     # restent disponibles pour compat ascendante.
     nlg_strut: StraitStrutGeomSI | None = None
     mlg_strut: StraitStrutGeomSI | None = None
+    # Géométrie leaf spring par position (renseignée si le slot est un Train à
+    # lame ; None sinon).
+    nlg_leaf: "LeafSpringGeomSI | None" = None
+    mlg_leaf: "LeafSpringGeomSI | None" = None
 
     @property
     def Sc(self) -> float:
@@ -1487,6 +1563,8 @@ class AircraftInputs:
                 if mlg_inputs.model_kind in ("strait_strut", "strait_strut_drag_brace")
                 else None
             ),
+            nlg_leaf=(_leaf_geom_si(nlg_inputs) if nlg_inputs.model_kind == "leaf_spring" else None),
+            mlg_leaf=(_leaf_geom_si(mlg_inputs) if mlg_inputs.model_kind == "leaf_spring" else None),
         )
 
 
