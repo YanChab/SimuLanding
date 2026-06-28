@@ -193,6 +193,7 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 st.session_state[pkey], hide_index=True, disabled=["Point"],
                 width="stretch", key=f"{prefix}_points_ed",
             )
+            st.session_state[pkey] = points_df  # persiste les éditions au rerun (lancement)
             st.caption(
                 "B = attache fuselage, Gt/Gb = bagues haute/basse (axe de coulisse), "
                 "R = centre roue. B et R peuvent être décalés de l'axe Gt-Gb ; le rake, "
@@ -216,6 +217,7 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 st.session_state[pkey], hide_index=True, disabled=["Point"],
                 width="stretch", key=f"{prefix}_points_ed",
             )
+            st.session_state[pkey] = points_df  # persiste les éditions au rerun (lancement)
     with dmp_col:
         st.markdown("**Amortisseur (géométrie)**")
         _num_table(_DAMPER_FIELDS, prefix, base_inputs, key=f"{prefix}_dmp_tbl")
