@@ -261,18 +261,29 @@ def _strait_strut_advance_local_state(
     tyre_ftyre_i: float,
     dt: float,
     method: str,
+    contact_axial: float | None = None,
 ) -> StraitStrutLocalState:
-    """Avance l'état local StraitStrut d'un pas sous cinématique support imposée."""
+    """Avance l'état local StraitStrut d'un pas sous cinématique support imposée.
+
+    ``contact_axial`` : composante de l'effort de contact projetée sur l'axe de
+    coulisse (= tr_lg[2]). Si None, on utilise l'effort pneu vertical (legacy,
+    exact pour une jambe verticale).
+    """
     poids_ms = p.masse * G * (1.0 - p.lift)
     mns = p.unsprung_mass
-    poids_mns_lg_z = mns * G
+    # Gravité du rod PROJETÉE sur l'axe de coulisse (composante z repère jambe du
+    # poids vertical) — exacte pour une jambe inclinée (cf. audit énergétique).
+    poids_mns_lg_z = float((R_sol_to_lg @ np.array([0.0, 0.0, mns * G]))[2])
 
     z_ms, vz_ms = _integrate_const_acc(state.z_ms, state.vz_ms, support_acc_ms_z, dt, method)
     v_ms_sol_vec = np.array([0.0, 0.0, vz_ms])
     v_ms_lg_vec = R_sol_to_lg @ v_ms_sol_vec
     vz_ms_lg = float(v_ms_lg_vec[2])
 
-    acc_mns_lg_z = (-ftot + tyre_ftyre_i - poids_mns_lg_z) / mns
+    # Effort de contact projeté sur l'axe de coulisse (composante axiale). À défaut
+    # (appel legacy), on retombe sur l'effort pneu vertical (jambe verticale).
+    contact_axial = tyre_ftyre_i if contact_axial is None else contact_axial
+    acc_mns_lg_z = (-ftot + contact_axial - poids_mns_lg_z) / mns
     z_mns_lg, vz_mns_lg = _integrate_const_acc(
         state.z_mns_lg,
         state.vz_mns_lg,
@@ -281,20 +292,23 @@ def _strait_strut_advance_local_state(
         method,
     )
 
-    ptR_lg = state.ptR_lg.copy()
-    ptR_lg[2] += vz_mns_lg * dt
-    ptB_lg = state.ptB_lg.copy()
-    ptB_lg[2] += vz_ms_lg * dt
-    ptGb_lg = state.ptGb_lg.copy()
-    ptGb_lg[2] += vz_ms_lg * dt
-    ptGt_lg = state.ptGt_lg.copy()
-    ptGt_lg[2] += vz_ms_lg * dt
+    # Cinématique cohérente pour jambe inclinée : le cylindre (B, Gb) suit le
+    # mouvement vertical COMPLET de Ms ; le rod (R, Gt) suit Ms + glisse le long de
+    # l'axe. Le modèle historique ne prenait que la projection AXIALE du mouvement
+    # de Ms (·cos²β côté sol) → mouvement latéral relatif parasite aux bagues →
+    # travail latéral parasite (non-conservation d'énergie pour β ≠ 0).
+    v_damper = -(vz_ms_lg - vz_mns_lg)
+    d = state.d + v_damper * dt
+    col_vert = R_sol_to_lg @ np.array([0.0, 0.0, 1.0])   # vertical sol exprimé en repère jambe
+    ms_disp = (vz_ms * dt) * col_vert                    # déplacement de Ms (complet)
+    slide = np.array([0.0, 0.0, v_damper * dt])          # glissement axial relatif du rod
+    ptB_lg = state.ptB_lg + ms_disp
+    ptGb_lg = state.ptGb_lg + ms_disp                    # bague basse : sur le fût (corps fixe)
+    ptR_lg = state.ptR_lg + ms_disp + slide
+    ptGt_lg = state.ptGt_lg + ms_disp + slide            # bague haute : sur la TIGE
 
     ptR_sol = R_lg_to_sol @ ptR_lg
     tyre_defl_val = max(0.0, p.unload_radius - float(ptR_sol[2]))
-
-    v_damper = -(vz_ms_lg - vz_mns_lg)
-    d = state.d + v_damper * dt
 
     r_eff_val = r_eff(p.unload_radius, state.tyre_defl_val)
     slip = 0.0
@@ -484,7 +498,7 @@ def run_strait_strut(
     poids_ms = p.masse * G * (1.0 - p.lift)  # N (poids effectif sol)
 
     mns = p.unsprung_mass           # masse non suspendue totale (kg)
-    poids_mns_lg_z = mns * G       # N (poids Mns dans repère jambe, projeté)
+    poids_mns_lg_z = float((R_sol_to_lg @ np.array([0.0, 0.0, mns * G]))[2])  # gravité rod projetée sur l'axe
 
     # Pneu / sol
     unload_r = p.unload_radius
@@ -495,10 +509,10 @@ def run_strait_strut(
     tb_sol = R_lg_to_sol @ np.array([0.0, 0.0, tb_lg_z])
 
     # Énergies cumulées
-    e_kin_prev = 0.5 * p.masse * state.vz_ms ** 2
-    e_kin_mns_prev = 0.5 * mns * state.vz_mns_lg ** 2
-    e_kin_spin_prev = 0.5 * p.wheel_inertia * state.tyre_omega ** 2
-    e_kin_horiz_prev = 0.5 * p.wheelmass * state.tyre_vx ** 2
+    # Bilan énergétique en TRAVAIL — même démarche que engine.py/MLG
+    # (cf. docs/Bilan_energetique.md) : travaux signés F·dd (télescopage), apport
+    # d'avancement, ΔEc_rot exact. Réservoirs = ressorts + pièces en mouvement.
+    e_kin_init = 0.5 * p.masse * state.vz_ms ** 2 + 0.5 * mns * state.vz_mns_lg ** 2
     e_gas_acc = 0.0
     e_tyre_acc = 0.0
     e_spring_x_acc = 0.0
@@ -508,8 +522,14 @@ def run_strait_strut(
     e_damp_x_acc = 0.0
     e_slip_acc = 0.0
     e_endstop_acc = 0.0
-    # Apport initial (cinétique + Mns)
-    e_input_0 = e_kin_prev + e_kin_mns_prev
+    e_fwd_acc = 0.0
+    e_grav_acc = 0.0
+    # Trackers du pas précédent (pour les travaux signés)
+    d_prev = max(0.0, state.d)
+    defl_prev = state.tyre_defl_val
+    z_ms_prev = state.z_ms
+    z_mns_prev = state.z_mns_lg
+    omega_prev = state.tyre_omega
 
     # --- Tableaux de sortie ----------------------------------------------- #
     n_out = n_steps + 1
@@ -600,31 +620,65 @@ def run_strait_strut(
         r_b = ptR_sol_cur - ptB_sol
         mom_B = np.cross(r_b, tr_sol)
 
-        # Bilan énergétique (simplifié — diagnostic)
+        # Bilan énergétique en TRAVAIL (doc Bilan_energetique.md §3)
         e_kin_new = 0.5 * p.masse * state.vz_ms ** 2
-        e_kin_mns_new = 0.5 * mns * state.vz_mns_lg ** 2
+        # Cinétique du rod : vitesse ABSOLUE = mouvement vertical de Ms + glissement
+        # axial (|v|² = vz_ms² + v_damper² + 2·vz_ms·v_damper·cosβ), pas seulement
+        # la composante axiale vz_mns_lg (sinon sous-compte de ½m·vz_ms²·sin²β).
+        _cosb = float(R_lg_to_sol[2, 2])
+        e_kin_mns_new = 0.5 * mns * (state.vz_ms ** 2 + state.v_damper ** 2
+                                     + 2.0 * state.vz_ms * state.v_damper * _cosb)
         e_kin_spin_new = 0.5 * p.wheel_inertia * state.tyre_omega ** 2
         e_kin_horiz_new = 0.5 * p.wheelmass * state.tyre_vx ** 2
-        e_gas_acc += fgas * state.v_damper * dt
-        e_tyre_acc += tyre_ftyre_i * max(0.0, state.vz_mns_lg) * dt
-        e_spring_x_acc = 0.5 * p.kx * state.tyre_depx ** 2
-        e_hyd_acc += abs(fhyd * state.v_damper * dt)
-        e_fric_acc += abs(ffrijoi * state.v_damper * dt)
-        e_fribag_acc += abs(ffribag * state.v_damper * dt)
+        e_spring_x_acc = 0.5 * p.kx * state.tyre_depx ** 2          # stocké (ressort horizontal)
+        d_cur = max(0.0, state.d)
+        dd = d_cur - d_prev                                         # variation de course
+        ddefl = state.tyre_defl_val - defl_prev
+        # Travaux signés : Ftot = Fgas + Fhyd + Ffrijoi + Ffribag + Fbutée → télescopage exact
+        e_gas_acc += fgas * dd
+        e_endstop_acc += fendstop * dd
+        e_tyre_acc += tyre_ftyre_i * ddefl
+        e_hyd_acc += fhyd * dd
+        e_fric_acc += ffrijoi * dd
+        e_fribag_acc += ffribag * dd
         e_damp_x_acc += p.cx * state.tyre_vx ** 2 * dt
-        e_slip_acc += abs(fspin * p.vx * dt) if abs(p.vx) > 1.0e-9 else 0.0
-        e_endstop_acc += abs(fendstop * state.v_damper * dt)
-        e_input_total = (e_kin_new + e_kin_mns_new + e_kin_spin_new + e_kin_horiz_new
-                         + e_gas_acc + e_tyre_acc + e_hyd_acc + e_fric_acc
-                         + e_fribag_acc + e_damp_x_acc + e_slip_acc + e_endstop_acc)
-        e_residual = e_input_0 + p.masse * G * abs(state.z_ms) + mns * G * abs(state.z_mns_lg) - e_input_total
+        # Spin-up : apport d'avancement + glissement avec ΔEc_rot EXACT
+        # (R sur la tige ne se déplace pas horizontalement → pas de couplage hub).
+        dke_spin = 0.5 * p.wheel_inertia * (state.tyre_omega ** 2 - omega_prev ** 2)
+        if abs(p.vx) > 1.0e-9:
+            e_fwd_acc += fspin * p.vx * dt
+            e_slip_acc += fspin * (p.vx - state.tyre_vx) * dt - dke_spin
+        # Couplage moyeu (jambe inclinée) : R se déplace horizontalement avec le
+        # glissement axial (vR_x = v_damper·û_x). La réaction horizontale tr_x y
+        # travaille → travail à reverser dans le bilan (cf. engine.py MLG, terme
+        # tr_x·vR_x). Nul pour jambe verticale (û_x = 0).
+        e_slip_acc += tr_x * state.v_damper * float(R_lg_to_sol[0, 2]) * dt
+        # Travail de la pesanteur. Ms : déplacement vertical sol. Rod : déplacement
+        # vertical ABSOLU = Δz_ms (suit le cylindre) + Δd·cosβ (glissement axial
+        # projeté), et non le déplacement axial seul (qui sous-compterait de
+        # mns·g·vz_ms·sin²β·dt pour β ≠ 0).
+        rod_vert_disp = (state.z_ms - z_ms_prev) + _cosb * dd
+        e_grav_acc += (-poids_ms * (state.z_ms - z_ms_prev)
+                       - mns * G * rod_vert_disp)
+        d_prev = d_cur
+        defl_prev = state.tyre_defl_val
+        z_ms_prev = state.z_ms
+        z_mns_prev = state.z_mns_lg
+        omega_prev = state.tyre_omega
+
+        e_input_total = e_kin_init + e_grav_acc + e_fwd_acc
+        e_residual = e_input_total - (
+            e_kin_new + e_kin_mns_new + e_kin_spin_new + e_kin_horiz_new
+            + e_gas_acc + e_tyre_acc + e_spring_x_acc + e_endstop_acc
+            + e_hyd_acc + e_fric_acc + e_fribag_acc + e_damp_x_acc + e_slip_acc
+        )
 
         # Enregistrement
         out["temps"][i] = t
         out["accms"][i] = float(tb_sol_cur[2] - poids_ms) / p.masse
         out["vitms"][i] = state.vz_ms
         out["depms"][i] = state.z_ms
-        out["accmns"][i] = (-ftot + tyre_ftyre_i - poids_mns_lg_z) / mns
+        out["accmns"][i] = (-ftot + float(tr_lg[2]) - poids_mns_lg_z) / mns
         out["vitmns"][i] = state.vz_mns_lg
         out["depmns"][i] = state.z_mns_lg
         out["trailing_arm_v"][i] = state.v_damper
@@ -702,6 +756,7 @@ def run_strait_strut(
             tyre_ftyre_i=tyre_ftyre_i,
             dt=dt,
             method=method,
+            contact_axial=float(tr_lg[2]),
         )
 
     warnings = list(c.warnings)

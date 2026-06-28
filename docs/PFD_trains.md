@@ -137,6 +137,14 @@ avec l'enfoncement.
 **Centre d'inertie de la tige.** G₁ est placé au **milieu de R et Gt** :
 G₁ = (R + Gt)/2, soit ξ₁ = ξR/2 et ζ₁ = (ζR + ζt)/2.
 
+**Appartenance des bagues (important pour la friction).** La bague haute **Gt est
+portée par la tige** (elle **coulisse** : sa position avance avec la masse non
+suspendue, comme R) ; la bague basse **Gb est portée par le corps fixe** (solidaire
+de la cellule). L'**entraxe Gt–Gb varie donc avec la course**, ce qui modifie la
+répartition des réactions de bague Xgt/Xgb (§2.2, règle du levier) et **donc
+l'effort de frottement de bague** ``ffribag``. (Le modèle initial figeait Gt sur le
+corps fixe — corrigé.)
+
 Le point de contact S est sous R : vecteur RS = −R_eff·Z.
 
 ---
@@ -299,7 +307,11 @@ $$
 
 ## 6. TrailingArm (MLG)
 
-Même méthode, en **repère sol** (X arrière, Z haut ; plan longitudinal X‑Z).
+Même méthode, en **repère sol** (X arrière, Z haut). ⚠️ **Le torseur d'interface
+se calcule en 3D** (efforts **et** moments) : la rotation du balancier reste plane
+(autour de Y), mais les **décalages en Y** — roue déportée (R_y ≠ B_y),
+amortisseur oblique (A‑C en Y) — produisent des composantes **Fy** et surtout des
+**moments Mx, Mz** au pivot, qu'un calcul purement plan raterait.
 
 ### 6.1 Les solides isolés
 
@@ -341,10 +353,10 @@ $$
 
 | Action | Point | Résultante (rep. sol) | Moment propre |
 |---|---|---|---|
-| Pesanteur | G′ | poids m′g | 0 |
-| Contact sol → roue | R | T_R = (Fx, Fz) | 0 (le moment de spin part en rotation roue) |
-| Amortisseur → balancier | A | T_A = F_tot·(A−C)/‖A−C‖ | 0 |
-| Pivot cellule → balancier | B | T_B = (T_Bx, T_Bz) | 0 (pivot axe Y : pas de moment My) |
+| Pesanteur | G′ | poids m′g = (0, 0, −m′g) | 0 |
+| Contact sol → roue | R | T_R = (Fx, Fy, Fz) **(3D)** | 0 (le moment de spin part en rotation roue) |
+| Amortisseur → balancier | A | T_A = F_tot·(A−C)/‖A−C‖ **(3D)** | 0 |
+| Pivot cellule → balancier | B | T_B **(3D)** | **moments Mx, Mz** (pas de My) |
 
 **Théorème de la résultante dynamique** :
 
@@ -378,6 +390,29 @@ $$
 > + inertie de translation du balancier+roue) à F_B. La rotation θ est, elle, déjà
 > gardée via (8) ; `fc = -ta` (l.334) reste conforme.
 
+**Moment transmis au pivot B (Mx, Mz) — calcul 3D.** Le pivot d'axe Y reprend
+l'effort 3D **et** les moments autour de X et Z (pas autour de Y, axe libre). Le
+moment des efforts du balancier réduit en B (d'Alembert : l'inertie −m′·a_G′ agit
+en G′) est :
+
+$$
+\boxed{\;\vec M_B = \vec{BA}\times\vec T_A + \vec{BR}\times\vec T_R + \vec{BG'}\times(\vec P' - m'\,\vec a_{G'})\;}
+$$
+
+La composante **My n'est pas transmise** (elle équilibre la rotation, eq (8) :
+J_yy·θ̈) ; le pivot ne réagit que **Mx et Mz**. En notant BA = A−B, BR = R−B :
+
+$$
+M_{B,x} = (BA_y\,T_{A,z} - BA_z\,T_{A,y}) + (BR_y\,T_{R,z} - BR_z\,T_{R,y}) + (\text{terme masse})_x
+$$
+$$
+M_{B,z} = (BA_x\,T_{A,y} - BA_y\,T_{A,x}) + (BR_x\,T_{R,y} - BR_y\,T_{R,x}) + (\text{terme masse})_z
+$$
+
+> **Code** (`engine.py` l.342‑343) : `mb_x`, `mb_z` = (BA×T_A + BR×T_R)\_{x,z}
+> (sans terme de masse). **Conforme** pour m′ = 0. C'est le **décalage R_y ≠ B_y**
+> (roue déportée) qui rend Mx, Mz non nuls — d'où la **nécessité du calcul 3D**.
+
 ### 6.6 Lecture du résultat
 
 - **Résultante transmise à la cellule** : F_B + F_C = (T_R + T_A + P′ − m′·a_G′)
@@ -393,11 +428,66 @@ $$
   **la même réaction de contact horizontale** ; seule la **répartition** diffère
   (StraitStrut : tout en B ; TrailingArm : réparti pivot B / rotule C, le terme
   d'amortisseur T_A,x au pivot étant compensé par F_C,x = −T_A,x à la rotule).
+- **Moments 3D au pivot** : Mx, Mz sont non nuls dès qu'il existe un **décalage en
+  Y** (roue déportée, amortisseur oblique). Sur le cas par défaut, R_y − B_y ≈
+  −0,16 m donne **Mx ≈ −7000 N·m** et Mz ≈ −950 N·m : un calcul purement plan les
+  **annulerait à tort**. → l'assemblage TrailingArm **doit** être 3D.
 - **Signe** : comme au §5.4, tout repose sur le **signe de l'effort de contact
   Fx** (convention commune Vx/X). La cohérence NLG↔MLG se joue sur cette
   **définition unique de Fx**, pas sur la mécanique de transmission (identique en
   résultante). Or `tr_x = kx·δx + cx·(dδx/dt)` (code, l.229) est **de signe
   opposé à `fx_spring_wheel`** du StraitStrut (§1.3) → décalage à instruire.
+
+### 6.7 Balancier corps rigide — masse active (modèle PFD complet)
+
+> ⚠️ **Modèle nouveau.** Le modèle historique est **incohérent** : balancier sans
+> masse en translation (fb = ta + tr) **mais** doté d'une inertie de rotation
+> jyy ≠ 0. Le modèle ci‑dessous traite le balancier comme un **vrai corps
+> rigide** (masse m′, centre d'inertie G′, inertie propre I_{G′}). Il **change la
+> trajectoire** (la masse agit dans la dynamique).
+>
+> **Référence de validation.** En **réutilisant jyy comme inertie au pivot**
+> (I_B = jyy fixe) et G′ = milieu(B, R), la limite **m′ → 0 redonne exactement
+> l'historique** — y compris la rotation : avec m′ = 0, (6a) donne
+> T_B = −(T_A+T_R) et (6b) se réduit à jyy·θ̈ = [(A−B)×T_A + (R−B)×T_R]_Y, soit
+> l'équation de rotation du code (l.197‑202). On valide donc m′ = 0 contre
+> l'historique, et m′ > 0 par **bilan d'énergie**.
+
+**Paramétrage retenu** (un seul nouveau paramètre d'entrée) :
+- **m′** : masse balancier + roue (nouveau, = `m_arm`) ;
+- **G′ = milieu(B, R)** par défaut (pas de nouvel input) ;
+- **I_B = jyy** (réutilisé), d'où I_{G′} = jyy − m′·‖BG′‖² (rester I_{G′} ≥ 0 ⇒
+  m′ ≤ jyy/‖BG′‖²).
+
+**Cinématique** (plan X–Z ; pivot B en translation verticale avec la cellule,
+bras en rotation θ autour de B) :
+
+$$
+\vec a_{G'} = \vec a_B + \ddot\theta\,(\hat y \times \vec r_{BG'}) - \dot\theta^{2}\,\vec r_{BG'},
+\qquad \vec r_{BG'} = G' - B
+$$
+
+**PFD du balancier (corps rigide).** Inconnues : réaction pivot $\vec T_B$ (2
+comp.) et $\ddot\theta$ (1).
+
+$$
+\boxed{\;m'\,\vec a_{G'} = \vec T_A + \vec T_R + \vec T_B + \vec P'\;}\tag{6a}
+$$
+$$
+\boxed{\;I_{G'}\,\ddot\theta = \big[(A-G')\times\vec T_A + (R-G')\times\vec T_R + (B-G')\times\vec T_B\big]_Y\;}\tag{6b}
+$$
+
+(6a)+(6b) = 3 équations scalaires → $\vec T_B$ et $\ddot\theta$. Effort transmis à
+la cellule : $\vec F_B = -\vec T_B$ (pivot), $\vec F_C = -\vec T_A$ (rotule).
+
+**Couplage structure.** $\vec F_B + \vec F_C$ pilotent la masse suspendue (train
+isolé) ou le fuselage (avion, §7) ; $\ddot\theta$ remplace l'équation de rotation
+historique (jyy). La **boucle d'intégration** avance θ, θ̇ **et** la cellule de
+façon couplée.
+
+**Différences clés avec §6.5** (modèle interface) : ici la rotation est pilotée
+par I_{G′} (et non jyy), le poids m′g crée un moment, et l'inertie m′·a_{G′}
+entre **dans la trajectoire** (pas seulement dans l'effort reporté).
 
 ---
 
