@@ -208,6 +208,8 @@ GEOMETRY_KEYS_AC: tuple[str, ...] = (
     "nlg_rx",
     "nlg_rz",
     "nlg_wheel_radius",
+    "nlg_b1x", "nlg_b1z", "nlg_b2x", "nlg_b2z",
+    "nlg_cdbx", "nlg_cdbz", "nlg_ddbx", "nlg_ddbz",
     "mlg_left_ax",
     "mlg_left_az",
     "mlg_left_bx",
@@ -217,6 +219,8 @@ GEOMETRY_KEYS_AC: tuple[str, ...] = (
     "mlg_left_rx",
     "mlg_left_rz",
     "mlg_left_wheel_radius",
+    "mlg_left_b1x", "mlg_left_b1z", "mlg_left_b2x", "mlg_left_b2z",
+    "mlg_left_cdbx", "mlg_left_cdbz", "mlg_left_ddbx", "mlg_left_ddbz",
     "mlg_right_ax",
     "mlg_right_az",
     "mlg_right_bx",
@@ -226,6 +230,8 @@ GEOMETRY_KEYS_AC: tuple[str, ...] = (
     "mlg_right_rx",
     "mlg_right_rz",
     "mlg_right_wheel_radius",
+    "mlg_right_b1x", "mlg_right_b1z", "mlg_right_b2x", "mlg_right_b2z",
+    "mlg_right_cdbx", "mlg_right_cdbz", "mlg_right_ddbx", "mlg_right_ddbz",
 )
 
 
@@ -719,6 +725,14 @@ class StraitStrutSlot:
             "rz": bz_step + br_sol_z,
             "wheel_radius": p.unload_radius,
         }
+        # Ancrage drag brace (§5b) : points solidaires du corps/structure, placés
+        # rigidement par rapport à Gb (positions jambe rel. Gb → monde vue de côté).
+        if self.drag_brace is not None:
+            for key, rel in (("b1", self.drag_brace["B1"]), ("b2", self.drag_brace["B2"]),
+                             ("cdb", self.drag_brace["C"]), ("ddb", self.drag_brace["D"])):
+                disp = R_lg_to_sol_step @ rel
+                geom[key + "x"] = geom["gbx"] + float(disp[0])
+                geom[key + "z"] = geom["gbz"] + float(disp[2])
 
         return SlotStepResult(contributions=contributions, fz_slot=fz_slot, diag=diag, geom=geom)
 

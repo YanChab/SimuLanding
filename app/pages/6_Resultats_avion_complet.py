@@ -309,6 +309,7 @@ def _render_aircraft_animation() -> None:
         "mlg_right_wheel_radius",
     ]
     use_geom = geom is not None and not geom.empty and all(col in geom.columns for col in geom_required)
+    nlg_has_db = False  # ancrage drag brace (renseigné si géométrie disponible)
 
     st.caption(
         "Vue de côté du fuselage, du centre de gravité et des trains. "
@@ -390,6 +391,19 @@ def _render_aircraft_animation() -> None:
             nlg_rx = geom["nlg_rx"].to_numpy(dtype=float) * 1000.0
             nlg_rz = geom["nlg_rz"].to_numpy(dtype=float) * 1000.0
             nlg_radius_anim = geom["nlg_wheel_radius"].to_numpy(dtype=float) * 1000.0
+
+            # Ancrage drag brace (§5b) : présent si les points C/D sont non nuls.
+            nlg_has_db = ("nlg_cdbx" in geom.columns
+                          and bool(np.any(geom["nlg_cdbx"].to_numpy(dtype=float) != 0.0)))
+            if nlg_has_db:
+                nlg_b1x = geom["nlg_b1x"].to_numpy(dtype=float) * 1000.0
+                nlg_b1z = geom["nlg_b1z"].to_numpy(dtype=float) * 1000.0
+                nlg_b2x = geom["nlg_b2x"].to_numpy(dtype=float) * 1000.0
+                nlg_b2z = geom["nlg_b2z"].to_numpy(dtype=float) * 1000.0
+                nlg_cdx = geom["nlg_cdbx"].to_numpy(dtype=float) * 1000.0
+                nlg_cdz = geom["nlg_cdbz"].to_numpy(dtype=float) * 1000.0
+                nlg_ddx = geom["nlg_ddbx"].to_numpy(dtype=float) * 1000.0
+                nlg_ddz = geom["nlg_ddbz"].to_numpy(dtype=float) * 1000.0
 
             mlg_l_ax = geom["mlg_left_ax"].to_numpy(dtype=float) * 1000.0
             mlg_l_az = geom["mlg_left_az"].to_numpy(dtype=float) * 1000.0
@@ -559,7 +573,7 @@ def _render_aircraft_animation() -> None:
             line=dict(color="#878786", width=4, dash="dash"),
             name="Amortisseur MLG droite",
         )
-        return [
+        traces = [
             fuselage,
             cg_marker,
             nlg_leg,
@@ -574,12 +588,34 @@ def _render_aircraft_animation() -> None:
             _wheel_trace(mlg_l_rx[i], mlg_l_rz[i], mlg_l_radius_anim[i], "Roue MLG gauche", "#4A4949"),
             _wheel_trace(mlg_r_rx[i], mlg_r_rz[i], mlg_r_radius_anim[i], "Roue MLG droite", "#878786"),
         ]
+        if nlg_has_db:
+            traces.append(go.Scatter(  # bielle drag brace C–D
+                x=[nlg_cdx[i], nlg_ddx[i]], y=[nlg_cdz[i], nlg_ddz[i]], mode="lines",
+                line=dict(color="#1F7A3D", width=4), name="Drag brace",
+            ))
+            traces.append(go.Scatter(  # axe trunnion B1–B2 (projeté de côté)
+                x=[nlg_b1x[i], nlg_b2x[i]], y=[nlg_b1z[i], nlg_b2z[i]], mode="lines",
+                line=dict(color="#1F7A3D", width=2, dash="dot"), name="Trunnion B1-B2",
+            ))
+            traces.append(go.Scatter(
+                x=[nlg_b1x[i], nlg_b2x[i], nlg_cdx[i], nlg_ddx[i]],
+                y=[nlg_b1z[i], nlg_b2z[i], nlg_cdz[i], nlg_ddz[i]],
+                mode="markers+text", text=["B1", "B2", "C", "D"], textposition="top center",
+                marker=dict(size=8, color="#1F7A3D"), name="Points drag brace",
+            ))
+        return traces
 
     if use_geom:
         xmin = float(min(body_x_world.min(), nlg_bx.min(), nlg_gtx.min(), nlg_gbx.min(), nlg_rx.min() - nlg_radius_anim.max(), mlg_l_ax.min(), mlg_l_bx.min(), mlg_l_cx.min(), mlg_l_rx.min() - mlg_l_radius_anim.max(), mlg_r_ax.min(), mlg_r_bx.min(), mlg_r_cx.min(), mlg_r_rx.min() - mlg_r_radius_anim.max()) - 120.0)
         xmax = float(max(body_x_world.max(), nlg_bx.max(), nlg_gtx.max(), nlg_gbx.max(), nlg_rx.max() + nlg_radius_anim.max(), mlg_l_ax.max(), mlg_l_bx.max(), mlg_l_cx.max(), mlg_l_rx.max() + mlg_l_radius_anim.max(), mlg_r_ax.max(), mlg_r_bx.max(), mlg_r_cx.max(), mlg_r_rx.max() + mlg_r_radius_anim.max()) + 120.0)
         zmax = float(max(body_z_world.max(), cg_z_anim.max(), nlg_bz.max(), nlg_gtz.max(), nlg_gbz.max(), nlg_rz.max() + nlg_radius_anim.max(), mlg_l_az.max(), mlg_l_bz.max(), mlg_l_cz.max(), mlg_l_rz.max() + mlg_l_radius_anim.max(), mlg_r_az.max(), mlg_r_bz.max(), mlg_r_cz.max(), mlg_r_rz.max() + mlg_r_radius_anim.max()) + 180.0)
         zmin = float(min(ground_anim.min() - 60.0, nlg_rz.min() - nlg_radius_anim.max() - 60.0, mlg_l_rz.min() - mlg_l_radius_anim.max() - 60.0, mlg_r_rz.min() - mlg_r_radius_anim.max() - 60.0))
+        if nlg_has_db:
+            _dbx = np.concatenate([nlg_b1x, nlg_b2x, nlg_cdx, nlg_ddx])
+            _dbz = np.concatenate([nlg_b1z, nlg_b2z, nlg_cdz, nlg_ddz])
+            xmin = min(xmin, float(_dbx.min()) - 120.0)
+            xmax = max(xmax, float(_dbx.max()) + 120.0)
+            zmax = max(zmax, float(_dbz.max()) + 120.0)
     else:
         xmin = float(min(body_x_world.min(), nlg_wheel_x.min() - nlg_radius, mlg_l_wheel_x.min() - mlg_radius, mlg_r_wheel_x.min() - mlg_radius) - 120.0)
         xmax = float(max(body_x_world.max(), nlg_wheel_x.max() + nlg_radius, mlg_l_wheel_x.max() + mlg_radius, mlg_r_wheel_x.max() + mlg_radius) + 120.0)
