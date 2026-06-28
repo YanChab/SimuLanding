@@ -265,8 +265,9 @@ with _launch_bar:
     launch_ac = _lb1.button("▶️ Avion complet", type="primary", use_container_width=True)
     launch_nlg = _lb2.button("Lancer NLG seul", use_container_width=True)
     launch_mlg = _lb3.button("Lancer MLG seul", use_container_width=True)
-# Conteneur de statut (progression / messages), rempli par les handlers plus bas.
-_launch_msg = st.container()
+    # Conteneur de statut (progression / messages) DANS la barre sticky : reste
+    # visible avec les boutons même quand on a fait défiler la page.
+    _launch_msg = st.container()
 
 
 def _num(label: str, key: str, value: float, *, step: float = 1.0, min_value=None) -> float:
