@@ -538,6 +538,7 @@ class StraitStrutSlot:
             tyre_ftyre_i=tyre_ftyre,
             dt=dt,
             method=p.integrator,
+            contact_axial=float(tr_lg[2]),
         )
         adv = self.state
 

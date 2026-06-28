@@ -166,6 +166,45 @@ encore non modélisés » (caption l.850‑854).
 
 ---
 
+## 5 bis. Découverte : non‑conservation cinématique du NLG (jambe inclinée)
+
+> L'audit énergétique a révélé un **vrai défaut de modélisation** dans le NLG
+> (`engine_strait_strut.py`), pas un simple oubli de bilan : pour β ≠ 0 le résidu
+> ne tombait pas à l'erreur d'intégration (1,5–2,6 %, **constant en Δt**).
+
+**Cause.** Le suivi de position ne prenait que la projection **axiale** du mouvement
+vertical de la masse suspendue Ms (`vz_ms·cosβ` le long de l'axe), pas le
+déplacement vertical **complet**. Le cylindre étant rigidement lié à Ms, R (et tout
+le train) doit suivre Ms verticalement **en entier** ; la composante
+perpendiculaire (`vz_ms·sinβ`) était perdue. Conséquences en cascade :
+
+| Terme | Erreur | Ordre |
+|---|---|---|
+| Position verticale de R (→ écrasement pneu) | recevait `vz_ms·cos²β` au lieu de `vz_ms` | sin²β |
+| Énergie cinétique du rod | `½m·vz_mns_lg²` (axial) au lieu de `½m·\|v_abs\|²` | sin²β |
+| Travail de pesanteur du rod | `mns·g·(dépl. axial)` au lieu de `mns·g·(dépl. vertical)` | sin²β |
+| Couplage moyeu | R se déplace horizontalement (`v_damper·sinβ`) → la réaction tr_x y travaille ; terme **omis** (comme `engine.py` MLG l'inclut) | sinβ·charge |
+
+**Correction (validée).** (1) tous les points (B, Gb, R, Gt) reçoivent le
+déplacement vertical complet de Ms ; (2) E_cin rod = vitesse absolue
+`½m(vz_ms² + v_damper² + 2·vz_ms·v_damper·cosβ)` ; (3) gravité rod sur le
+déplacement vertical `Δz_ms + Δd·cosβ` ; (4) terme de couplage moyeu
+`tr_x·v_damper·û_x` (cf. MLG). **Résidu : 1,5–2,6 % → 0,03–0,13 %** et **décroît
+avec Δt** (erreur d'intégration pure) pour β jusqu'à 20° de tangage.
+
+**Impact physique.** L'ancien modèle **sous‑estimait les charges NLG d'environ 5 %**
+à 10° (la vitesse de fermeture sous‑comptée de ~3 % s'amplifie en v² dans
+l'amortisseur : pression compression +17 %, Fz max +5 %, facteur de charge +4,5 %).
+Golden NLG + avion régénérés.
+
+> ⚠️ **Limitation résiduelle (roulis).** Le modèle de guidage est plan (x‑z jambe) :
+> la composante latérale leg‑y de l'effort pneu est ignorée (`tb_lg = [tr_lg[0], 0,
+> ftot]`). En **roulis pur** le résidu remonte (~1,5 % à 10°). Sans impact pratique :
+> l'avion couplé est 2‑DDL (z + tangage, **pas de roulis**) et `strut_roll` vaut 0
+> par défaut. Correction = guidage 3D (hors périmètre actuel).
+
+---
+
 ## 6. Recommandation (à valider)
 
 **Propager le bilan rigoureux du moteur jusqu'à l'avion**, au lieu de le recalculer
