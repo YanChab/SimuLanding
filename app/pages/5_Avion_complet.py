@@ -294,17 +294,50 @@ def _num_precise(label: str, key: str, value: float, *, step: float, min_value=N
 # --------------------------------------------------------------------------- #
 #  Sauvegarde / chargement
 # --------------------------------------------------------------------------- #
+def _purge_form_keys(*prefixes) -> None:
+    for k in list(st.session_state.keys()):
+        if k.startswith(prefixes):
+            del st.session_state[k]
+
+
 def _set_loaded_aircraft_state(inputs: Any, result, *, name: str, project: str) -> None:
     st.session_state.aircraft_inputs = inputs
     st.session_state.aircraft_result = result
     st.session_state.aircraft_result_name = name
     st.session_state.aircraft_current_project = project
     # Purge des états de formulaire pour réamorcer depuis les inputs chargés.
-    for k in list(st.session_state.keys()):
-        if k.startswith("ac_nlg") or k.startswith("ac_mlg") or k.startswith("ac_body") \
-                or k.startswith("ac_sim") or k.startswith("ac_drop") or k.startswith("ac_cg") \
-                or k.startswith("ac_lay"):
-            del st.session_state[k]
+    _purge_form_keys("ac_nlg", "ac_mlg", "ac_body", "ac_sim", "ac_drop", "ac_cg", "ac_lay")
+
+
+def _apply_loaded_bundle(loaded: dict) -> bool:
+    """Restaure en session les éléments d'une sauvegarde (bundle ou simple).
+    Retourne False si rien d'exploitable. Voir storage.load_bundle."""
+    from dataclasses import replace as _replace
+    items = loaded.get("items", {})
+    name = loaded.get("name", "Simulation")
+    project = loaded.get("project", ds_storage.DEFAULT_PROJECT)
+    if not any(k in items for k in ("aircraft", "nlg", "mlg")):
+        return False
+    if "aircraft" in items:
+        inp, res = items["aircraft"]
+        _set_loaded_aircraft_state(inp, res, name=name, project=project)
+        # Trains isolés : ceux du bundle, sinon vidés (cohérence avec l'avion chargé).
+        st.session_state.aircraft_nlg_result = items["nlg"][1] if "nlg" in items else None
+        st.session_state.aircraft_mlg_result = items["mlg"][1] if "mlg" in items else None
+    else:
+        # Pas d'avion : on met à jour les trains isolés + leur géométrie dans le form.
+        ac = st.session_state.aircraft_inputs
+        if "nlg" in items:
+            ac = _replace(ac, nlg=items["nlg"][0])
+            st.session_state.aircraft_nlg_result = items["nlg"][1]
+            _purge_form_keys("ac_nlg")
+        if "mlg" in items:
+            ac = _replace(ac, mlg=items["mlg"][0])
+            st.session_state.aircraft_mlg_result = items["mlg"][1]
+            _purge_form_keys("ac_mlg")
+        st.session_state.aircraft_inputs = ac
+        st.session_state.aircraft_current_project = project
+    return True
 
 
 with st.expander("Sauvegarder / charger une simulation avion complet", expanded=False):
@@ -313,8 +346,11 @@ with st.expander("Sauvegarder / charger une simulation avion complet", expanded=
     col_save, col_load = st.columns(2)
     with col_save:
         st.markdown("**Sauvegarder la simulation courante**")
-        if st.session_state.aircraft_result is None:
-            st.caption("Aucun résultat avion complet à sauvegarder.")
+        _has_ac = st.session_state.aircraft_result is not None
+        _has_nlg = st.session_state.get("aircraft_nlg_result") is not None
+        _has_mlg = st.session_state.get("aircraft_mlg_result") is not None
+        if not (_has_ac or _has_nlg or _has_mlg):
+            st.caption("Aucun résultat à sauvegarder (lancer une simulation).")
         else:
             current_project = st.session_state.get("aircraft_current_project", ds_storage.DEFAULT_PROJECT)
             save_options = projects + [new_project_label]
@@ -328,17 +364,32 @@ with st.expander("Sauvegarder / charger une simulation avion complet", expanded=
             else:
                 project_name = project_choice
             save_name = st.text_input("Nom de la sauvegarde",
-                                      value=st.session_state.get("aircraft_result_name", "Simulation avion complet"),
+                                      value=st.session_state.get("aircraft_result_name", "Simulation"),
                                       key="ac_save_name")
+            st.caption("Que sauvegarder ? (un seul fichier + un CSV lisible des paramètres)")
+            save_ac = st.checkbox("Avion complet", value=_has_ac, disabled=not _has_ac, key="ac_save_ac")
+            save_nlg = st.checkbox("NLG seul", value=_has_nlg, disabled=not _has_nlg, key="ac_save_nlg")
+            save_mlg = st.checkbox("MLG seul", value=_has_mlg, disabled=not _has_mlg, key="ac_save_mlg")
             if st.button("Enregistrer", key="ac_save_btn", use_container_width=True):
-                path = ds_storage.save_simulation(
-                    st.session_state.aircraft_inputs, st.session_state.aircraft_result,
-                    name=save_name, project=project_name)
-                st.session_state.aircraft_result_name = save_name
-                st.session_state.aircraft_current_project = project_name
-                st.success(f"Sauvegarde enregistrée: {path.name}", icon="✅")
+                ac_inp = st.session_state.aircraft_inputs
+                items = {}
+                if save_ac and _has_ac:
+                    items["aircraft"] = (ac_inp, st.session_state.aircraft_result)
+                if save_nlg and _has_nlg:
+                    items["nlg"] = (ac_inp.nlg, st.session_state.aircraft_nlg_result)
+                if save_mlg and _has_mlg:
+                    items["mlg"] = (ac_inp.mlg, st.session_state.aircraft_mlg_result)
+                if not items:
+                    st.warning("Coche au moins un élément à sauvegarder.", icon="⚠️")
+                else:
+                    path = ds_storage.save_bundle(items, name=save_name, project=project_name)
+                    st.session_state.aircraft_result_name = save_name
+                    st.session_state.aircraft_current_project = project_name
+                    st.success(
+                        f"Sauvegardé : {path.name} (+ {path.with_suffix('.csv').name} — "
+                        f"paramètres lisibles dans Excel/bloc-notes).", icon="✅")
     with col_load:
-        st.markdown("**Charger une simulation avion complet**")
+        st.markdown("**Charger une simulation**")
         if not projects:
             st.caption("Aucune sauvegarde disponible.")
         else:
@@ -349,17 +400,21 @@ with st.expander("Sauvegarder / charger une simulation avion complet", expanded=
             if not entries:
                 st.caption("Aucune sauvegarde dans ce projet.")
             else:
-                labels = {f"{e['name']} · {e['saved_at'][:16].replace('T', ' ')}": e["path"] for e in entries}
+                _content_lbl = {"aircraft": "Avion", "nlg": "NLG", "mlg": "MLG"}
+
+                def _entry_label(e):
+                    parts = e["saved_at"][:16].replace("T", " ")
+                    tags = ", ".join(_content_lbl.get(c, c) for c in e.get("contents", [])) or e.get("model_kind", "")
+                    return f"{e['name']} · {parts} · [{tags}]"
+
+                labels = {_entry_label(e): e["path"] for e in entries}
                 selected = st.selectbox("Sauvegardes disponibles", list(labels.keys()), key="ac_load_choice")
                 load_col, del_col = st.columns(2)
                 if load_col.button("Charger", key="ac_load_btn", use_container_width=True):
-                    loaded_inputs, loaded_result, meta = ds_storage.load_simulation(labels[selected])
-                    if getattr(loaded_inputs, "model_kind", "") != "aircraft":
-                        st.error("La sauvegarde sélectionnée n'est pas une simulation avion complet.", icon="🛑")
+                    loaded = ds_storage.load_bundle(labels[selected])
+                    if not _apply_loaded_bundle(loaded):
+                        st.error("Sauvegarde vide ou non reconnue.", icon="🛑")
                     else:
-                        _set_loaded_aircraft_state(loaded_inputs, loaded_result,
-                                                   name=meta.get("name", "Simulation avion complet"),
-                                                   project=meta.get("project", ds_storage.DEFAULT_PROJECT))
                         st.rerun()
                 if del_col.button("Supprimer", key="ac_delete_btn", use_container_width=True):
                     ds_storage.delete_saved(labels[selected])

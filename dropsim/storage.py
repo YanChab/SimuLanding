@@ -255,11 +255,22 @@ def _read_meta(path: Path) -> dict | None:
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema") != SCHEMA:
         return None
+    if data.get("kind") == "bundle":
+        contents = list((data.get("items") or {}).keys())
+        return {
+            "name": data.get("name", path.stem),
+            "saved_at": data.get("saved_at", ""),
+            "project": data.get("project") or DEFAULT_PROJECT,
+            "model_kind": "bundle",
+            "contents": contents,
+            "path": str(path),
+        }
     return {
         "name": data.get("name", path.stem),
         "saved_at": data.get("saved_at", ""),
         "project": data.get("project") or DEFAULT_PROJECT,
         "model_kind": (data.get("inputs") or {}).get("model_kind", "trailing_arm"),
+        "contents": [],
         "path": str(path),
     }
 
@@ -309,8 +320,121 @@ def list_saved(
 
 
 def delete_saved(path: Path | str) -> None:
-    """Supprime un fichier de sauvegarde (ignore l'absence du fichier)."""
-    Path(path).unlink(missing_ok=True)
+    """Supprime un fichier de sauvegarde (ignore l'absence du fichier) + le CSV associé."""
+    p = Path(path)
+    p.unlink(missing_ok=True)
+    p.with_suffix(".csv").unlink(missing_ok=True)
+
+
+# --------------------------------------------------------------------------- #
+#  Sauvegarde groupée (bundle) + export lisible (CSV)
+# --------------------------------------------------------------------------- #
+from dataclasses import is_dataclass  # noqa: E402
+
+_BUNDLE_LABELS = {"aircraft": "Avion complet", "nlg": "NLG seul", "mlg": "MLG seul"}
+
+
+def _flatten_params(obj, prefix: str = "") -> list[tuple[str, object]]:
+    """Aplatissement récursif des paramètres d'un objet d'entrées en lignes
+    (paramètre, valeur) lisibles. Les Point3 sont éclatés en .x/.y/.z ; les listes
+    de dataclasses (rainures) sont indexées ; les grandes courbes (pneu, mu) sont
+    résumées par leur nombre de points."""
+    rows: list[tuple[str, object]] = []
+    if is_dataclass(obj):
+        for f in fields(obj):
+            rows += _flatten_params(getattr(obj, f.name), f"{prefix}{f.name}.")
+    elif isinstance(obj, (list, tuple)):
+        if obj and is_dataclass(obj[0]):
+            for k, item in enumerate(obj):
+                rows += _flatten_params(item, f"{prefix[:-1]}[{k}].")
+        else:
+            rows.append((prefix.rstrip("."), f"[{len(obj)} points]"))
+    elif isinstance(obj, dict):
+        rows.append((prefix.rstrip("."), "[…]"))
+    else:
+        rows.append((prefix.rstrip("."), obj))
+    return rows
+
+
+def params_csv_text(items: dict) -> str:
+    """Construit un CSV **lisible** (Excel / bloc-notes) des paramètres de simulation
+    et de configuration des amortisseurs, pour chaque élément sauvegardé.
+
+    ``items`` : dict ``{clé: inputs}`` avec clé ∈ {aircraft, nlg, mlg}. Format long
+    (Portée ; Paramètre ; Valeur), séparateur ``;`` (directive ``sep`` pour qu'Excel
+    ouvre directement en colonnes)."""
+    lines = ["sep=;", "Portée;Paramètre;Valeur"]
+    for key in ("aircraft", "nlg", "mlg"):
+        if key not in items or items[key] is None:
+            continue
+        scope = _BUNDLE_LABELS[key]
+        for param, value in _flatten_params(items[key]):
+            sval = value if isinstance(value, str) else (
+                f"{value:.6g}" if isinstance(value, (int, float)) else str(value))
+            lines.append(f"{scope};{param};{sval}")
+    return "\n".join(lines) + "\n"
+
+
+def save_bundle(
+    items: dict,
+    *,
+    name: str,
+    project: str = DEFAULT_PROJECT,
+    directory: Path | str = DEFAULT_SAVE_DIR,
+) -> Path:
+    """Sauvegarde groupée : un fichier JSON (rechargeable) contenant le sous-ensemble
+    fourni parmi {aircraft, nlg, mlg}, **plus** un CSV compagnon lisible des
+    paramètres. ``items`` : dict ``{clé: (inputs, result)}``. Renvoie le chemin JSON."""
+    present = {k: v for k, v in items.items() if v is not None}
+    if not present:
+        raise ValueError("Rien à sauvegarder (aucun résultat sélectionné).")
+    pdir = _project_dir(directory, project)
+    pdir.mkdir(parents=True, exist_ok=True)
+    path = pdir / f"{_slugify(name)}.json"
+    data = {
+        "schema": SCHEMA,
+        "kind": "bundle",
+        "name": name,
+        "project": project or DEFAULT_PROJECT,
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "items": {
+            k: {"inputs": inputs_to_dict(inp), "result": result_to_dict(res)}
+            for k, (inp, res) in present.items()
+        },
+    }
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # CSV compagnon (paramètres lisibles).
+    csv_text = params_csv_text({k: inp for k, (inp, res) in present.items()})
+    path.with_suffix(".csv").write_text(csv_text, encoding="utf-8-sig")
+    return path
+
+
+def load_bundle(path: Path | str) -> dict:
+    """Charge un fichier de sauvegarde (bundle OU simple, rétro-compatible).
+
+    Renvoie ``{"kind", "name", "project", "saved_at", "items": {clé: (inputs, result)}}``
+    où, pour un fichier simple, ``items`` contient une seule entrée déduite du
+    ``model_kind`` (aircraft → 'aircraft', sinon le train isolé)."""
+    path = Path(path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("schema") != SCHEMA:
+        raise ValueError(f"Schéma non reconnu : {data.get('schema')!r}.")
+    meta = {
+        "name": data.get("name", path.stem),
+        "project": data.get("project") or DEFAULT_PROJECT,
+        "saved_at": data.get("saved_at", ""),
+    }
+    if data.get("kind") == "bundle":
+        items = {
+            k: (inputs_from_dict(v["inputs"]), result_from_dict(v["result"]))
+            for k, v in data.get("items", {}).items()
+        }
+        return {"kind": "bundle", **meta, "items": items}
+    # Fichier simple (format historique).
+    inp = inputs_from_dict(data["inputs"])
+    res = result_from_dict(data["result"])
+    key = "aircraft" if getattr(inp, "model_kind", "") == "aircraft" else "gear"
+    return {"kind": "single", **meta, "items": {key: (inp, res)}}
 
 
 __all__ = [
@@ -324,6 +448,9 @@ __all__ = [
     "bundle",
     "save_simulation",
     "load_simulation",
+    "save_bundle",
+    "load_bundle",
+    "params_csv_text",
     "list_projects",
     "list_saved",
     "delete_saved",

@@ -48,7 +48,36 @@ def _set_loaded_aircraft_state(inputs, result, *, name: str, project: str) -> No
             del st.session_state[k]
 
 
-with st.expander("Charger une simulation avion complet sauvegardée", expanded=False):
+def _apply_loaded_bundle(loaded: dict) -> bool:
+    """Restaure en session les éléments d'une sauvegarde (bundle ou simple)."""
+    from dataclasses import replace as _replace
+    items = loaded.get("items", {})
+    name = loaded.get("name", "Simulation")
+    project = loaded.get("project", ds_storage.DEFAULT_PROJECT)
+    if not any(k in items for k in ("aircraft", "nlg", "mlg")):
+        return False
+    if "aircraft" in items:
+        inp, res = items["aircraft"]
+        _set_loaded_aircraft_state(inp, res, name=name, project=project)
+        st.session_state.aircraft_nlg_result = items["nlg"][1] if "nlg" in items else None
+        st.session_state.aircraft_mlg_result = items["mlg"][1] if "mlg" in items else None
+    else:
+        ac = st.session_state.get("aircraft_inputs")
+        if ac is not None and "nlg" in items:
+            ac = _replace(ac, nlg=items["nlg"][0])
+        if ac is not None and "mlg" in items:
+            ac = _replace(ac, mlg=items["mlg"][0])
+        if ac is not None:
+            st.session_state.aircraft_inputs = ac
+        if "nlg" in items:
+            st.session_state.aircraft_nlg_result = items["nlg"][1]
+        if "mlg" in items:
+            st.session_state.aircraft_mlg_result = items["mlg"][1]
+        st.session_state.aircraft_current_project = project
+    return True
+
+
+with st.expander("Charger une simulation sauvegardée", expanded=False):
     projects = ds_storage.list_projects()
     if not projects:
         st.caption("Aucune sauvegarde disponible.")
@@ -60,19 +89,18 @@ with st.expander("Charger une simulation avion complet sauvegardée", expanded=F
         if not entries:
             st.caption("Aucune sauvegarde dans ce projet.")
         else:
-            labels = {f"{e['name']} · {e['saved_at'][:16].replace('T', ' ')}": e["path"] for e in entries}
+            _cl = {"aircraft": "Avion", "nlg": "NLG", "mlg": "MLG"}
+            labels = {
+                f"{e['name']} · {e['saved_at'][:16].replace('T', ' ')} · "
+                f"[{', '.join(_cl.get(c, c) for c in e.get('contents', [])) or e.get('model_kind', '')}]": e["path"]
+                for e in entries
+            }
             selected = st.selectbox("Sauvegardes disponibles", list(labels.keys()), key="ac_res_load_choice")
             if st.button("Charger", key="ac_res_load_btn", use_container_width=True):
-                loaded_inputs, loaded_result, meta = ds_storage.load_simulation(labels[selected])
-                if getattr(loaded_inputs, "model_kind", "") != "aircraft":
-                    st.error("La sauvegarde sélectionnée n'est pas une simulation avion complet.", icon="🛑")
-                else:
-                    _set_loaded_aircraft_state(
-                        loaded_inputs, loaded_result,
-                        name=meta.get("name", "Simulation avion complet"),
-                        project=meta.get("project", ds_storage.DEFAULT_PROJECT),
-                    )
+                if _apply_loaded_bundle(ds_storage.load_bundle(labels[selected])):
                     st.rerun()
+                else:
+                    st.error("Sauvegarde vide ou non reconnue.", icon="🛑")
 
 
 result = st.session_state.get("aircraft_result")

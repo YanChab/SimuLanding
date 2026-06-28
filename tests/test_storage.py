@@ -15,7 +15,9 @@ from dropsim.storage import (
     inputs_to_dict,
     list_projects,
     list_saved,
+    load_bundle,
     load_simulation,
+    save_bundle,
     save_simulation,
 )
 
@@ -146,3 +148,47 @@ def test_projects(tmp_path):
     # Le filtrage par projet isole bien les sauvegardes homonymes.
     _, _, meta = load_simulation(saved_b[0]["path"])
     assert meta["project"] == "Avion B"
+
+
+def test_bundle_save_load_and_csv(tmp_path):
+    """Sauvegarde groupée (avion + NLG seul + MLG seul) : round-trip + CSV lisible."""
+    ac = default_aircraft_inputs()
+    items = {
+        "aircraft": (ac, run_simulation(ac)),
+        "nlg": (default_strait_strut_inputs(), run_simulation(default_strait_strut_inputs())),
+        "mlg": (default_trailing_arm_inputs(), run_simulation(default_trailing_arm_inputs())),
+    }
+    path = save_bundle(items, name="Bundle test", project="T", directory=tmp_path)
+    # CSV compagnon présent et lisible (paramètres amortisseur).
+    csv = path.with_suffix(".csv")
+    assert csv.exists()
+    text = csv.read_text(encoding="utf-8-sig")
+    assert "sep=;" in text and "Dpis" in text and "NLG seul" in text
+    # Round-trip JSON.
+    loaded = load_bundle(path)
+    assert loaded["kind"] == "bundle"
+    assert set(loaded["items"]) == {"aircraft", "nlg", "mlg"}
+    assert loaded["items"]["aircraft"][0] == ac
+    assert loaded["items"]["nlg"][0] == default_strait_strut_inputs()
+    # meta liste bien le type bundle + contenu.
+    metas = list_saved(project="T", directory=tmp_path)
+    assert metas and metas[0]["model_kind"] == "bundle"
+    assert set(metas[0]["contents"]) == {"aircraft", "nlg", "mlg"}
+
+
+def test_bundle_subset(tmp_path):
+    """On peut sauvegarder un seul élément (NLG seul)."""
+    items = {"nlg": (default_strait_strut_inputs(), run_simulation(default_strait_strut_inputs()))}
+    path = save_bundle(items, name="NLG only", project="T", directory=tmp_path)
+    loaded = load_bundle(path)
+    assert set(loaded["items"]) == {"nlg"}
+
+
+def test_load_bundle_backward_compat_single(tmp_path):
+    """Un fichier simple (ancien format) se charge via load_bundle."""
+    ac = default_aircraft_inputs()
+    path = save_simulation(ac, run_simulation(ac), name="legacy", project="T", directory=tmp_path)
+    loaded = load_bundle(path)
+    assert loaded["kind"] == "single"
+    assert "aircraft" in loaded["items"]
+    assert loaded["items"]["aircraft"][0] == ac
