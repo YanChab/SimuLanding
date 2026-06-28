@@ -300,6 +300,64 @@ def render_single_gear_result(result, label: str) -> None:
     plot_cols = [c for c in (ftot_col, stroke_col) if c is not None]
     if plot_cols:
         st.line_chart(df.set_index(cols[0])[plot_cols])
+
+    # --- Bilan énergétique (si les colonnes Énergie.* sont présentes) ---------
+    e_cols = [c for c in cols if c.startswith("Énergie.")]
+    if e_cols:
+        import plotly.graph_objects as go
+
+        apport = next((c for c in e_cols if "Apport" in c), None)
+        residual = next((c for c in e_cols if "Résidu" in c), None)
+        kin = [c for c in e_cols if "Cinétique" in c]
+        stock = [c for c in e_cols if "Stockée" in c or "Emmagasinée" in c]
+        diss = [c for c in e_cols if "Dissipée" in c]
+        zero = t * 0.0
+        e_kin_tot = df[kin].sum(axis=1) if kin else zero
+        e_stock_tot = df[stock].sum(axis=1) if stock else zero
+        e_diss_tot = df[diss].sum(axis=1) if diss else zero
+        somme = e_kin_tot + e_stock_tot + e_diss_tot
+
+        st.markdown(f"#### Bilan énergétique — {label}")
+        if apport is not None and residual is not None:
+            ref = max(1.0, float(np.max(np.abs(df[apport]))))
+            res_max = float(np.max(np.abs(df[residual])))
+            st.caption(
+                f"Résidu max = {res_max:.1f} J ({100.0 * res_max / ref:.3f} % de l'apport) "
+                "— doit rester au niveau de l'erreur d'intégration."
+            )
+
+        def _energy_layout(fig, title, b=90):
+            fig.update_layout(
+                height=420,
+                title=dict(text=title, y=0.98, yanchor="top"),
+                margin=dict(l=10, r=10, t=56, b=b),
+                xaxis_title="Temps (s)", yaxis_title="Énergie (J)",
+                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
+            )
+            return fig
+
+        fig = go.Figure()
+        if apport is not None:
+            fig.add_trace(go.Scatter(x=t, y=df[apport], mode="lines", name="Apport (à absorber)"))
+        fig.add_trace(go.Scatter(x=t, y=e_diss_tot, mode="lines", name="Dissipée (absorbée déf.)"))
+        fig.add_trace(go.Scatter(x=t, y=e_stock_tot, mode="lines", name="Stockée (ressorts)"))
+        fig.add_trace(go.Scatter(x=t, y=e_kin_tot, mode="lines", name="Cinétique (pièces en mvt)"))
+        fig.add_trace(go.Scatter(x=t, y=somme, mode="lines", name="Somme cin+stock+diss", line=dict(dash="dot")))
+        if residual is not None:
+            fig.add_trace(go.Scatter(x=t, y=df[residual], mode="lines", name="Résidu"))
+        st.plotly_chart(_energy_layout(fig, f"Bilan énergétique — {label}"), use_container_width=True)
+
+        with st.expander(f"Détail des réservoirs / dissipations — {label}"):
+            fig2 = go.Figure()
+            for c in e_cols:
+                if c not in (apport, residual):
+                    fig2.add_trace(go.Scatter(
+                        x=t, y=df[c], mode="lines",
+                        name=c.replace("Énergie.", "").replace(" (J)", ""),
+                    ))
+            st.plotly_chart(_energy_layout(fig2, f"Détail énergétique — {label}", b=130),
+                            use_container_width=True)
+
     if getattr(result, "warnings", None):
         with st.expander(f"⚠️ {len(result.warnings)} avertissement(s) — {label}"):
             for w in result.warnings:
