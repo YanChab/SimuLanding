@@ -14,7 +14,8 @@ référence projet **Strait Strut Reference**.
 
 ```
 dropsim/      Moteur de calcul Python pur (NumPy), indépendant de l'UI.
-              Reproduit fidèlement la méthodologie décrite dans EtatDesLieux.md.
+              Méthodologie : docs/Dossier_de_calcul_complet.md
+              (analyse legacy : Archive/EtatDesLieux.md).
   units.py        Conversions d'unités (affichage <-> SI)
   errors.py       Système de détection/localisation d'erreurs (SimError)
   inputs.py       Modèle de données d'entrée + valeurs par défaut + validation

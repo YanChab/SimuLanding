@@ -1,7 +1,8 @@
 """Moteur de simulation de drop test pour trains d'atterrissage.
 
 Le moteur est volontairement séparé de toute interface utilisateur : il ne
-dépend que de NumPy et reproduit la méthodologie décrite dans EtatDesLieux.md.
+dépend que de NumPy et reproduit la méthodologie décrite dans
+docs/Dossier_de_calcul_complet.md (analyse legacy : Archive/EtatDesLieux.md).
 """
 from .errors import SimError, ErrorCollector, ErrorLevel
 from .inputs import (
