@@ -1,20 +1,14 @@
--> affichage des données saisi en tableau -> OK à améliorer encore
--> intégration de la température -> OK
--> intégration du calcul en train droit
--> intégration du calcul avion complet
--> créer un système de sauvegarde des configurations -> OK
--> lui faire faire un fichier scientifique -> OK
--> revoir interface résultats -> OK
--> séparer le mode auto en rapide/précis -> OK
--> rajouter un graphe sur le quel on peut mettre les courbes que l'on veut-> OK
--> rajouter la fuite entre le palbh et la BH -> OK
--> remplacement de la méthode de calcul en RK
--> calcul des efforts aux liaisons -> OK
--> afficher le teblea d'effort hydraulique -> OK
--> intégrer les tolérances sur les effort hydrauliques -> OK
--> permettre le calcul du bulk en fonction de l'aeration -> OK
 -> intégré la variation du gamma en fonction de la vitesse
--> Rajouter un avertissement lorqu'il y a des pression négatives
--> page paramètre du modèle pour pouvoir le configurer.
--> Rajouter une courbe du ratio cinématique -> ok
--> aligner les défauts StraitStrut sur une référence projet + golden dédié -> OK
+-> amélioration de l'interface
+    -> page paramètre du modèle pour pouvoir le configurer.
+    -> première page avec les données projet et la possibilité de chargé un projet
+-> revoir le calcul de l'énergie
+    -> Comment faire pour bien prendre en compte la rotation de la roue
+-> vérifier que les résultats soit cohérent
+    -> j'ai l'impression que Gt ne bouge pas
+-> Trois type de résultats
+    -> amortisseur
+    -> Efforts aux liaisons
+    -> bilan énergétique
+-> rajouter un modèle strit strut (Point B1 rotule, et point B2 lineaire annulaire) + drag brace (pt C et D rotules)
+-> rajouter un modèle trailing arm + jambe (j1 + J2) + drag brace (E et F rotules)
