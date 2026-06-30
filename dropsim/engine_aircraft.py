@@ -333,7 +333,15 @@ def _init_trailing_runtime(p: TrailingArmParamsSI) -> _TrailingRuntime:
     th_ry = math.atan((R[0] - B[0]) / (R[2] - B[2]))
     th_ay = math.atan((A[0] - B[0]) / (A[2] - B[2]))
 
-    fast_time_scale = 1.8 if p.damper_core_solver == "auto_fast" else 1.0
+    # L'avion complet pilote le temps via la boucle structure au pas fin dt = it ;
+    # le gear DOIT s'intégrer au même pas. On force donc fast_time_scale = 1.0 :
+    # le « coarsening » auto_fast (×1.8) n'a de sens que pour le train ISOLÉ, dont
+    # la boucle avance réellement it·1.8 par pas. Dans l'avion, où la structure
+    # avance de dt, intégrer le gear avec It = dt·1.8 sous-estimait la vitesse
+    # d'amortisseur d'un facteur ~1.8 (le mouvement support, accumulé sur dt, était
+    # divisé par dt·1.8 dans v = −Δ|C−A|/It). Le mode de solveur (euler/explicite en
+    # auto_fast) reste inchangé : seule l'échelle de temps est rendue cohérente.
+    fast_time_scale = 1.0
     integrator_mode = "euler" if p.damper_core_solver == "auto_fast" else p.integrator
 
     state = TrailingArmLocalState(
