@@ -2448,6 +2448,39 @@ $$
 
 avec export complet des composantes et moments de torseur.
 
+##### 15.7.1 Cohérence de la base de temps (gear ↔ structure)
+
+Le noyau local du train doit être intégré au **même pas de temps** que la boucle
+structure ($\Delta t = \texttt{it}$, cf. §15.1). La vitesse d'amortisseur est en
+effet reconstruite **géométriquement** à partir de la variation, sur un pas, de la
+distance entre les points d'interface $C$ (sur la structure) et $A$ (sur le
+balancier) :
+
+$$
+v = -\frac{\Delta\,\lVert \vec{C}-\vec{A}\rVert}{\Delta t}
+$$
+
+Le mécanisme d'accélération « pas rapide » du **train isolé** (facteur
+$\texttt{fast\_time\_scale}=1{,}8$ en mode `auto_fast`, qui fait avancer la boucle
+isolée de $1{,}8\,\texttt{it}$ par pas) **ne doit pas** être appliqué au gear dans
+l'avion : la boucle structure y avance déjà du pas fin $\texttt{it}$, donc le
+déplacement des points d'interface est accumulé sur $\texttt{it}$. Le diviser par
+$1{,}8\,\texttt{it}$ sous-estimerait la vitesse d'amortisseur — et intégrerait
+l'effort hydraulique sur un pas trop grand — d'un facteur $\sim 1{,}8$.
+
+> **Correction (2026).** Le slot TrailingArm de l'avion intégrait son noyau avec
+> $It=\Delta t\cdot\texttt{fast\_time\_scale}$. En `auto_fast`, la vitesse
+> d'amortisseur du MLG en avion complet était donc sous-estimée $\sim 1{,}8\times$
+> (la courbe MLG plafonnait là où le MLG isolé atteignait sa vraie vitesse, et
+> paraissait peu sensible aux paramètres par effet de saturation). Exemple SA62
+> config 03 : MLG avion $1{,}07 \to 1{,}59$ m·s⁻¹, désormais cohérent avec le MLG
+> isolé ($1{,}63$ m·s⁻¹). Corrigé en forçant $\texttt{fast\_time\_scale}=1{,}0$
+> côté avion (`_init_trailing_runtime`, `dropsim/engine_aircraft.py`) ; le mode de
+> solveur (euler/explicite en `auto_fast`) reste inchangé. Le garde-fou
+> `tests/test_aircraft_mlg_coupling.py` vérifie que le résultat MLG de l'avion est
+> **indépendant du mode de solveur** (`auto_fast` vs `auto_precise`) — l'écart
+> valait $\sim 48\,\%$ avant correction.
+
 #### 15.8 Schéma algorithmique d'un pas avion complet
 
 1. Calcul des stations de train depuis $(z_{cg},\theta)$.
