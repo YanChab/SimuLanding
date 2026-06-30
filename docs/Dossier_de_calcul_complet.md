@@ -51,6 +51,7 @@ efforts), le calcul des **amortisseurs hydrauliques**, des **frictions** et des
   - 6. Ressort gazeux à double chambre
   - 7. Amortissement hydraulique
   - 8. Effort de friction des joints
+  - 8b. Effort de friction des bagues de guidage (NLG — modèle DP4)
   - 9. Effort total de l'amortisseur
   - 10. Modèle de pneumatique
   - 11. Initialisation : stabilisation statique
@@ -1812,6 +1813,87 @@ contact effective du joint sur laquelle agit la pression.
 
 ---
 
+### 8b. Effort de friction des bagues de guidage (NLG — modèle DP4)
+
+Spécifique au train **StraitStrut** (NLG). La jambe coulisse dans deux bagues de
+guidage — **haute $G_t$** (portée sur la tige) et **basse $G_b$** (portée sur le
+fût/piston). Le décalage du centre roue $R$ par rapport à l'axe de coulisse
+$G_t\!-\!G_b$ crée un moment de flexion, repris par des **réactions transverses**
+$X_{Gt}$ et $X_{Gb}$ (perpendiculaires à l'axe), obtenues par l'équilibre 2D de la
+tige (cf. Partie A, *Appartenance des bagues*). Ces efforts normaux engendrent une
+friction de glissement.
+
+**Pressions de contact.** On rapporte chaque effort transverse à l'aire projetée de
+sa bague (diamètre de portée × longueur) :
+
+$$
+p_{guide} = \frac{|X_{Gt}|}{D_t\,L_{guide}}, \qquad
+p_{piston} = \frac{|X_{Gb}|}{D_{pis}\,L_{piston}}
+$$
+
+où $D_t$ est le diamètre de **tige** (portée de la bague haute), $D_{pis}$ le
+diamètre de **piston** (portée de la bague basse), et $L_{guide}$, $L_{piston}$ les
+longueurs de bague. Les pressions sont exprimées en **MPa** pour la loi de friction.
+
+**Coefficient de friction $\mu(p,v)$ — modèle DP4.** Les bagues sont des coussinets
+métal-polymère auto-lubrifiants type **GGB DP4**, en fonctionnement lubrifié. Le
+coefficient de friction est modélisé comme la **moyenne de deux lois** :
+
+$$
+\mu(p,v) = \tfrac{1}{2}\Big[\underbrace{\mu_{p\infty} + (\mu_{p0}-\mu_{p\infty})\,e^{-p/p_{ref}}}_{\mu_p(p)\ :\ \text{décroissance exponentielle en pression}}
+\;+\;
+\underbrace{\mu_{v,\min} + (\mu_{v,\max}-\mu_{v,\min})\big(1-e^{-\alpha|v|}\big)}_{\mu_v(v)\ :\ \text{montée asymptotique en vitesse}}\Big]
+$$
+
+- **Terme de pression** $\mu_p(p)$ : $\mu$ **décroît** quand la pression de contact
+  augmente — comportement bien établi des composites PTFE/métal-polymère (croissance
+  sous-linéaire de l'aire réelle de contact, extrusion d'un film de transfert à bas
+  cisaillement). La forme **exponentielle** reste valable au-delà de $\sim$21 MPa, là
+  où une droite $\mu = a - b\,p$ deviendrait non physique (μ négatif).
+- **Terme de vitesse** $\mu_v(v)$ : $\mu$ **croît** avec la vitesse de glissement puis
+  **sature** (branche montante type Stribeck, forme asymptotique de
+  Constantinou–Mokha pour les contacts polymère/acier lubrifiés).
+
+**Assemblage de l'effort.** Avec $\mu_{guide}=\mu(p_{guide},v)$ et
+$\mu_{piston}=\mu(p_{piston},v)$ :
+
+$$
+F_{bague} = \mathrm{sign}(v)\;c_{atte}(v)\,\big(\mu_{guide}\,|X_{Gb}| + \mu_{piston}\,|X_{Gt}|\big)
+$$
+
+où $c_{atte}(v)$ est le **même** facteur d'atténuation statique→dynamique que pour le
+joint (§8), qui régularise le passage par $v=0$ (point de rebroussement).
+
+**Calibration (GGB DP4 lubrifié).** Les six coefficients sont des **paramètres de
+configuration** saisis dans la page **Avion complet → configuration StraitStrut**
+(section *Friction de bague (DP4)*) ; ils voyagent avec le train via
+`StraitStrutGeomSI.bag_friction`. Valeurs **par défaut**, dans la plage publiée par
+GGB pour le DP4 lubrifié ($\mu \approx 0{,}04$–$0{,}12$) :
+
+| Paramètre | Symbole | Champ | Défaut | Rôle |
+|---|---|---|---|---|
+| μ à pression nulle | $\mu_{p0}$ | `bag_mu_p0` | 0,12 | μ_p quand $p\to 0$ |
+| μ à haute pression | $\mu_{p\infty}$ | `bag_mu_pinf` | 0,04 | asymptote de $\mu_p$ |
+| pression caractéristique | $p_{ref}$ | `bag_p_ref` | 20 MPa | échelle de décroissance |
+| μ à vitesse nulle | $\mu_{v,\min}$ | `bag_mu_vmin` | 0,05 | μ_v quand $v\to 0$ |
+| μ à haute vitesse | $\mu_{v,\max}$ | `bag_mu_vmax` | 0,12 | asymptote de $\mu_v$ |
+| raideur en vitesse | $\alpha$ | `bag_alpha` | 16 s·m⁻¹ | montée de $\mu_v$ |
+
+Le coefficient $\mu$ effectivement appliqué est restitué dans les résultats du train
+isolé (colonnes `StraitStrut.MuGt`, `StraitStrut.MuGb`).
+
+> **Historique.** Ce modèle **remplace** la formule linéaire d'origine du classeur
+> Excel (`ClNLG.FFriBag`, $\mu = \tfrac12(-0{,}0007\,p + 0{,}1248 + 0{,}0825|v| + 0{,}0898)$).
+> Cette dernière comportait deux incohérences (pression de contact piston calculée sur
+> $|X_{Gt}|$ au lieu de $|X_{Gb}|$ ; appariement μ/effort inversé), d'abord corrigées,
+> puis sa **dépendance linéaire en pression** s'est avérée hors domaine validé : les
+> pressions de contact simulées atteignent **30–42 MPa**, bien au-delà des $\sim$21 MPa
+> où la linéarité tient. Le modèle DP4 exponentiel/asymptotique, calé sur les données
+> constructeur et la littérature tribologique (PTFE/métal-polymère, modèle
+> Constantinou–Mokha), est physiquement plus défendable sur toute la plage.
+
+---
+
 ### 9. Effort total de l'amortisseur
 
 L'effort axial total transmis par l'amortisseur résulte de la somme des
@@ -1820,8 +1902,11 @@ contributions de pression (compression, détente, gaz) et de friction, avec une
 $[0, \text{course}]$) :
 
 $$
-F_{tot} = S_c\,P_c - S_d\,P_d + S_{bh}\,P_g + F_{joint} + F_{butée}(d)
+F_{tot} = S_c\,P_c - S_d\,P_d + S_{bh}\,P_g + F_{joint} + F_{bague} + F_{butée}(d)
 $$
+
+(le terme $F_{bague}$ — friction des bagues de guidage, §8b — n'est présent que pour
+le NLG StraitStrut ; il est nul pour le TrailingArm.)
 
 avec
 

@@ -17,6 +17,8 @@ import numpy as np
 
 from .engine import _endstop
 from .engine_strait_strut import (
+    BagFrictionDP4,
+    DEFAULT_BAG_FRICTION_DP4,
     _ffribag_nlg,
     _ffrijoi_nlg,
     _init_strait_strut_local_state,
@@ -38,6 +40,7 @@ def run_strait_strut_pfd(
     seal_precomp_pa: float = 110_649.0,
     bague_guide_m: float = 0.05,
     bague_piston_m: float = 0.05,
+    bag_friction=DEFAULT_BAG_FRICTION_DP4,
     alfap: float = 0.0,
     alfar: float = 0.0,
     h_pivot_z_m: float = 0.60,
@@ -47,6 +50,8 @@ def run_strait_strut_pfd(
     b_offset_m: tuple[float, float] = (0.0, 0.0),
 ) -> dict[str, np.ndarray]:
     """Drop test NLG, assemblage rigide strictement conforme au PFD (doc §2–§5)."""
+    _bag_coeffs = (bag_friction if isinstance(bag_friction, BagFrictionDP4)
+                   else BagFrictionDP4(*bag_friction))
     gas = GasSpring(p)
     tab_pos, tab_sec = build_section_table(p)
     tyre_defl_tbl, tyre_load_tbl = build_tyre_tables(p)
@@ -107,7 +112,7 @@ def run_strait_strut_pfd(
         # 1) Réactions de bague (indépendantes de F_tot) → friction de bague
         prelim = strait_strut_interface(f_tot=0.0, **geom)
         ffribag = _ffribag_nlg(state.v_damper, prelim.X_gt, prelim.X_gb,
-                               p.Dt, bague_guide_m, bague_piston_m)
+                               p.Dt, p.Dpis, bague_guide_m, bague_piston_m, _bag_coeffs)
 
         # 2) Effort d'amortisseur (frottements inclus) puis interface PFD complète
         ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + ffribag + fendstop

@@ -158,6 +158,13 @@ def run_leaf_spring(
     for k in _RAW_EXTRA_KEYS:
         out[k] = np.zeros(n_out)
 
+    # Positions géométriques (m, repère sol) pour l'animation. Points
+    # caractéristiques : encastrement B (structure) et centre roue R. La lame agit
+    # comme un ressort vertical entre B et R ; le bras BR_z varie avec la course d.
+    geom: dict[str, np.ndarray] = {
+        k: np.zeros(n_out) for k in ("bx", "bz", "rx", "rz", "ground_z", "wheel_radius")
+    }
+
     for i in range(n_out):
         t = i * dt
 
@@ -268,6 +275,17 @@ def run_leaf_spring(
         out["e_input"][i] = e_input_total
         out["e_residual"][i] = e_residual
 
+        # Positions géométriques (m, repère sol). Sol fixe à z=0, roue au contact à
+        # l'instant initial (R_z = unload_r). R suit la masse non suspendue (z_mns),
+        # B en est déduit par le bras BR courant (BR_z = br_z0 + d).
+        rz_world = unload_r + z_mns
+        geom["rx"][i] = br_x
+        geom["rz"][i] = rz_world
+        geom["bx"][i] = 0.0
+        geom["bz"][i] = rz_world - (br_z0 + d)
+        geom["ground_z"][i] = 0.0
+        geom["wheel_radius"][i] = float(unload_r)  # rayon constant (cf. moteur avion)
+
         if progress_callback is not None and (i % 10 == 0 or i == n_steps):
             progress_callback(i, n_steps)
 
@@ -288,7 +306,7 @@ def run_leaf_spring(
         tyre_vx = tyre_vx + acc_tyre_x * dt
         tyre_depx = tyre_depx + (tyre_vx - acc_tyre_x * dt) * dt  # dépl. avec vx du pas courant
 
-    return EngineOutput(data=out, n_steps=n_steps, warnings=list(c.warnings))
+    return EngineOutput(data=out, n_steps=n_steps, warnings=list(c.warnings), geometry=geom)
 
 
 __all__ = ["run_leaf_spring", "OUTPUT_COLUMNS_LS", "leaf_spring_step"]

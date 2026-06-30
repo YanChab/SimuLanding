@@ -1394,7 +1394,7 @@ def run_trailing_arm(
         geom["rx"][i] = R[0]
         geom["rz"][i] = R[2]
         geom["ground_z"][i] = ground_z
-        geom["wheel_radius"][i] = R[2] - ground_z
+        geom["wheel_radius"][i] = p.unload_radius  # rayon constant (cf. moteur avion / animation train isolé)
 
         # Arrêt anticipé (cf. VBA : remontée de l'amortisseur en fin de course)
         if v < 0.0 and i > 900000:

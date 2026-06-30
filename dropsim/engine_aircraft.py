@@ -20,6 +20,7 @@ from .engine_strait_strut import (
     _strait_strut_resolve_damper_step,
     _ffrijoi_nlg,
     _ffribag_nlg,
+    BagFrictionDP4,
     _bushing_loads,
     _drag_brace_step,
     StraitStrutLocalState,
@@ -492,6 +493,7 @@ class StraitStrutSlot:
         self.seal_precomp_pa = strut_geom.seal_precomp_pa
         self.bague_guide = strut_geom.bague_guide
         self.bague_piston = strut_geom.bague_piston
+        self.bag_friction = BagFrictionDP4(*strut_geom.bag_friction)
 
         self.gas = GasSpring(params)
         self.tab_pos, self.tab_sec = build_section_table(params)
@@ -592,7 +594,8 @@ class StraitStrutSlot:
         fspin = mu_v * tyre_ftyre * math.copysign(1.0, slip) if tyre_ftyre > 0 else 0.0
         tyre_alpha = (fspin * r_eff_v) / p.wheel_inertia if tyre_ftyre > 0 else 0.0
         xgt, xgb = _bushing_loads(tr_lg, st.ptR_lg, st.ptGt_lg, st.ptGb_lg)
-        ffribag = _ffribag_nlg(st.v_damper, xgt, xgb, p.Dt, self.bague_guide, self.bague_piston)
+        ffribag = _ffribag_nlg(st.v_damper, xgt, xgb, p.Dt, p.Dpis,
+                               self.bague_guide, self.bague_piston, self.bag_friction)
         fendstop = _endstop(st.d, p.course, smooth_len=p.endstop_smooth)
         ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + ffribag + fendstop
         st.ftot = ftot

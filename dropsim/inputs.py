@@ -785,6 +785,15 @@ class StraitStrutInputs(TrailingArmInputs):
     # --- Friction des bagues de guidage ------------------------------------- #
     bague_guide: float = 50.0       # mm longueur bague de guidage
     bague_piston: float = 50.0      # mm longueur bague piston
+    # Coefficient de friction de bague — modèle DP4 (exp en pression / asymptotique
+    # en vitesse), μ = ½[μ_p∞ + (μ_p0−μ_p∞)e^(−p/p_ref) + μ_v,min + (μ_v,max−μ_v,min)(1−e^(−α|v|))].
+    # Défauts calés sur GGB DP4 lubrifié.
+    bag_mu_p0: float = 0.12         # -    μ à pression de contact nulle
+    bag_mu_pinf: float = 0.04       # -    μ asymptotique à haute pression
+    bag_p_ref: float = 20.0         # MPa  pression caractéristique de décroissance
+    bag_mu_vmin: float = 0.05       # -    μ à vitesse nulle
+    bag_mu_vmax: float = 0.12       # -    μ asymptotique à haute vitesse
+    bag_alpha: float = 16.0         # s/m  raideur de la montée en vitesse
 
     # --- Joint : pré-compression fixe (formule NLG VBA ClNLG.FFriJoi) ------- #
     # La formule NLG inclut un terme de pression de pré-compression du joint
@@ -1186,6 +1195,9 @@ class StraitStrutGeomSI:
     bague_guide: float  # m
     bague_piston: float  # m
     seal_precomp_pa: float  # Pa
+    # Coefficients DP4 de friction de bague (μ_p0, μ_p∞, p_ref [MPa], μ_v,min,
+    # μ_v,max, α [s/m]) — saisis dans la config StraitStrut.
+    bag_friction: tuple = (0.12, 0.04, 20.0, 0.05, 0.12, 16.0)
     r_offset: tuple = (0.0, 0.0)  # m, décalage perpendiculaire (jambe-x,y) du centre roue R
     b_offset: tuple = (0.0, 0.0)  # m, décalage perpendiculaire (jambe-x,y) du pivot B
     # Ancrage drag brace (cf. PFD §5b) : positions repère JAMBE (m), relatives à Gb,
@@ -1271,6 +1283,11 @@ def _strut_geom_si(inputs: "TrailingArmInputs") -> StraitStrutGeomSI:
         bague_guide=inputs.bague_guide * U.MM_TO_M,
         bague_piston=inputs.bague_piston * U.MM_TO_M,
         seal_precomp_pa=inputs.seal_precomp_pa,
+        bag_friction=(
+            getattr(inputs, "bag_mu_p0", 0.12), getattr(inputs, "bag_mu_pinf", 0.04),
+            getattr(inputs, "bag_p_ref", 20.0), getattr(inputs, "bag_mu_vmin", 0.05),
+            getattr(inputs, "bag_mu_vmax", 0.12), getattr(inputs, "bag_alpha", 16.0),
+        ),
         r_offset=(g["r_offset_mm"][0] * U.MM_TO_M, g["r_offset_mm"][1] * U.MM_TO_M),
         b_offset=(g["b_offset_mm"][0] * U.MM_TO_M, g["b_offset_mm"][1] * U.MM_TO_M),
         drag_brace=_drag_brace_geom_si(inputs, g["strut_pitch"], g["strut_roll"]),
@@ -1499,6 +1516,14 @@ class AircraftInputs:
                     "le MLG droit en est le miroir, sinon gauche et droite se confondent.",
             field="mlg.R",
             hint="Saisir un Y non nul pour le point R du MLG.",
+        )
+        c.check(
+            abs(self.layout.mlg_left_station.y - self.layout.mlg_right_station.y) <= 1.0e-9,
+            code="MLG_STATIONS_LAT_CONFONDUES",
+            message="Les implantations MLG gauche et droite doivent être latéralement "
+                    "distinctes (Y gauche ≠ Y droit), sinon les deux trains se confondent.",
+            field="layout.mlg_left_station",
+            hint="Saisir des positions Y opposées (miroir) pour les MLG gauche et droite.",
         )
 
         self._compose_nlg_inputs().validate(c)

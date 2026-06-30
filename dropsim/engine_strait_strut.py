@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 import numpy as np
 
@@ -93,6 +94,13 @@ OUTPUT_COLUMNS_SS: dict[str, str] = {
     # Guidage NLG (spécifique StraitStrut)
     "xgt": "StraitStrut.XGt (N)",
     "xgb": "StraitStrut.XGb (N)",
+    # Pression de contact aux bagues (MPa) : alimente le coefficient de friction.
+    # Gt : |XGt|/(Dt·Lguide) ; Gb : |XGb|/(Dpis·Lpiston).
+    "p_bag_guide": "StraitStrut.PcontactGt (MPa)",
+    "p_bag_piston": "StraitStrut.PcontactGb (MPa)",
+    # Coefficient de friction de bague DP4 calculé (μ_Gt, μ_Gb).
+    "mu_bag_guide": "StraitStrut.MuGt (-)",
+    "mu_bag_piston": "StraitStrut.MuGb (-)",
     # Ancrage drag brace (cf. PFD §5b) : efforts STRUCTURE→CORPS, repère jambe.
     "db_brace_T": "DragBrace.Effort bielle (N)",
     "db_b1_fx": "DragBrace.B1 Fx (N)",
@@ -131,6 +139,19 @@ OUTPUT_COLUMNS_SS: dict[str, str] = {
     "e_input": "Énergie.Apport total (J)",
     "e_residual": "Énergie.Résidu de bilan (J)",
 }
+
+
+# Positions géométriques enregistrées pour l'animation (repère sol, en m). Points
+# caractéristiques de la jambe droite : attache B, bagues haute Gt / basse Gb,
+# centre roue R. ground_z = niveau du sol ; wheel_radius = rayon « effectif » de la
+# roue (= R_z − ground_z), qui se comprime visuellement avec la déflexion pneu.
+GEOMETRY_KEYS_SS: tuple[str, ...] = (
+    "bx", "bz", "gtx", "gtz", "gbx", "gbz", "rx", "rz", "ground_z", "wheel_radius",
+)
+# Points d'ancrage drag brace (§5b), ajoutés seulement si la config en comporte.
+GEOMETRY_KEYS_SS_DB: tuple[str, ...] = (
+    "b1x", "b1z", "b2x", "b2z", "cdbx", "cdbz", "ddbx", "ddbz",
+)
 
 
 @dataclass
@@ -533,32 +554,76 @@ def _ffrijoi_nlg(
 
 
 # --------------------------------------------------------------------------- #
-#  Friction des bagues de guidage (ClNLG.FFriBag)
+#  Friction des bagues de guidage — modèle DP4 (exp/log)
 # --------------------------------------------------------------------------- #
+# Coefficient de friction de bague μ(p, v), calé sur les bagues GGB DP4 (métal-
+# polymère auto-lubrifiantes, fonctionnement LUBRIFIÉ). Forme retenue d'après la
+# littérature tribologique (cf. docs/Dossier_de_calcul_complet.md, §friction de
+# bague) :
+#   - dépendance en PRESSION : décroissance exponentielle (μ baisse quand la
+#     pression de contact augmente — film de transfert, aire réelle sous-linéaire),
+#     plus défendable que la droite VBA hors du domaine ~<21 MPa ;
+#   - dépendance en VITESSE : montée asymptotique (saturante) type
+#     Constantinou/Mokha, μ croît avec |v| puis sature.
+# Coefficients DP4 (μ_p0, μ_p∞, p_ref [MPa], μ_v,min, μ_v,max, α [s/m]). Valeurs
+# par défaut calées sur GGB DP4 lubrifié — désormais exposées comme paramètres de
+# configuration StraitStrut (saisie) et transportés via ``StraitStrutGeomSI``.
+class BagFrictionDP4(NamedTuple):
+    mu_p0: float = 0.12     # μ à pression de contact nulle (-)
+    mu_pinf: float = 0.04   # μ asymptotique à haute pression (-)
+    p_ref: float = 20.0     # pression caractéristique de décroissance (MPa)
+    mu_vmin: float = 0.05   # μ à vitesse nulle (-)
+    mu_vmax: float = 0.12   # μ asymptotique à haute vitesse (-)
+    alpha: float = 16.0     # raideur de la montée en vitesse (s/m)
+
+
+DEFAULT_BAG_FRICTION_DP4 = BagFrictionDP4()
+
+
+def _mu_bague_dp4(p_contact_mpa: float, v_abs: float,
+                  c: BagFrictionDP4 = DEFAULT_BAG_FRICTION_DP4) -> float:
+    """Coefficient de friction de bague DP4 : μ = ½[μ_p(p) + μ_v(v)].
+
+    ``p_contact_mpa`` : pression de contact à la bague (MPa) ; ``v_abs`` : |vitesse
+    amortisseur| (m/s) ; ``c`` : coefficients DP4. Décroissance exponentielle en
+    pression + montée asymptotique en vitesse."""
+    mu_p = c.mu_pinf + (c.mu_p0 - c.mu_pinf) * math.exp(-p_contact_mpa / max(c.p_ref, 1.0e-9))
+    mu_v = c.mu_vmin + (c.mu_vmax - c.mu_vmin) * (1.0 - math.exp(-c.alpha * v_abs))
+    return 0.5 * (mu_p + mu_v)
+
 
 def _ffribag_nlg(
     v: float,
     xgt: float,
     xgb: float,
     Dt: float,
+    Dpis: float,
     bague_guide_m: float,
     bague_piston_m: float,
+    bag_coeffs: BagFrictionDP4 = DEFAULT_BAG_FRICTION_DP4,
 ) -> float:
-    """Friction des bagues de guidage (formule VBA ClNLG.FFriBag).
+    """Friction des bagues de guidage NLG — **modèle DP4 (exp/log)**.
+
+    Remplace la formule linéaire VBA d'origine (``ClNLG.FFriBag``) par un modèle
+    μ(p, v) calé sur les bagues GGB DP4 lubrifiées (cf. ``_mu_bague_dp4``). La
+    structure d'assemblage est conservée :
+    - pressions de contact : bague guide sur la **tige** (``Dt``), bague piston sur
+      le **piston** (``Dpis``) ;
+    - appariement effort : ``μ_guide·|XGb| + μ_piston·|XGt|`` ;
+    - facteur d'atténuation statique→dynamique ``coeff`` (régularise v→0).
 
     ``bague_guide_m``, ``bague_piston_m`` : longueurs des bagues en mètres.
     ``xgt``, ``xgb`` : efforts transverses aux bagues haute et basse (N).
-    """
+    ``bag_coeffs`` : coefficients DP4 (saisis dans la config StraitStrut)."""
     if v == 0.0:
         return 0.0
     coeff = 1.0 / math.sqrt(0.95 + 0.28 * math.sqrt(1.0 / (90.0 * abs(v))))
-    # Coefficient de friction bague guide (dépend de la pression de contact en MPa)
     eps = 1.0e-9  # évite la division par zéro
-    p_contact_guide = abs(xgt) / max(Dt * bague_guide_m * 1.0e6, eps)
-    p_contact_piston = abs(xgt) / max(Dt * bague_piston_m * 1.0e6, eps)
-    mu_guide = ((-0.0007 * p_contact_guide + 0.1248) + 0.0825 * abs(v) + 0.0898) / 2.0
-    mu_piston = ((-0.0007 * p_contact_piston + 0.1248) + 0.0825 * abs(v) + 0.0898) / 2.0
-    return _sign(v) * (mu_piston * abs(xgt) + mu_guide * abs(xgb)) * coeff
+    p_contact_guide = abs(xgt) / max(Dt * bague_guide_m * 1.0e6, eps)       # MPa
+    p_contact_piston = abs(xgb) / max(Dpis * bague_piston_m * 1.0e6, eps)   # MPa
+    mu_guide = _mu_bague_dp4(p_contact_guide, abs(v), bag_coeffs)
+    mu_piston = _mu_bague_dp4(p_contact_piston, abs(v), bag_coeffs)
+    return _sign(v) * (mu_guide * abs(xgb) + mu_piston * abs(xgt)) * coeff
 
 
 # --------------------------------------------------------------------------- #
@@ -573,6 +638,7 @@ def run_strait_strut(
     seal_precomp_pa: float = 110_649.0,
     bague_guide_m: float = 0.05,
     bague_piston_m: float = 0.05,
+    bag_friction: BagFrictionDP4 = DEFAULT_BAG_FRICTION_DP4,
     alfap: float = 0.0,
     alfar: float = 0.0,
     h_pivot_z_m: float = 0.60,
@@ -594,7 +660,10 @@ def run_strait_strut(
       bague_guide_m   : longueur bague de guidage (m).
       bague_piston_m  : longueur bague piston (m).
       seal_precomp_pa : pression de pré-compression du joint (Pa).
+      bag_friction    : coefficients DP4 de friction de bague (BagFrictionDP4 ou tuple).
     """
+    if not isinstance(bag_friction, BagFrictionDP4):
+        bag_friction = BagFrictionDP4(*bag_friction)
     c = collector or ErrorCollector()
 
     # --- Préparation ------------------------------------------------------ #
@@ -664,6 +733,8 @@ def run_strait_strut(
     # --- Tableaux de sortie ----------------------------------------------- #
     n_out = n_steps + 1
     out: dict[str, np.ndarray] = {k: np.zeros(n_out) for k in OUTPUT_COLUMNS_SS}
+    geom_keys = GEOMETRY_KEYS_SS + (GEOMETRY_KEYS_SS_DB if drag_brace is not None else ())
+    geom: dict[str, np.ndarray] = {k: np.zeros(n_out) for k in geom_keys}
 
     # --- Boucle d'intégration --------------------------------------------- #
     bottomed = None  # (i_fail, exc) si l'amortisseur atteint sa butée de compression
@@ -706,7 +777,8 @@ def run_strait_strut(
         # Réactions aux bagues de guidage (équilibre 2D de la tige, décalage R inclus)
         xgt, xgb = _bushing_loads(tr_lg, state.ptR_lg, state.ptGt_lg, state.ptGb_lg)
 
-        ffribag = _ffribag_nlg(state.v_damper, xgt, xgb, p.Dt, bague_guide_m, bague_piston_m)
+        ffribag = _ffribag_nlg(state.v_damper, xgt, xgb, p.Dt, p.Dpis,
+                               bague_guide_m, bague_piston_m, bag_friction)
 
         ftot = p.Sc * pc - p.Sd * pd + p.Sbh * pg + ffrijoi + ffribag + fendstop
         state.ftot = ftot
@@ -833,6 +905,14 @@ def run_strait_strut(
         out["reaction_h"][i] = tr_x
         out["xgt"][i] = xgt
         out["xgb"][i] = xgb
+        # Pressions de contact aux bagues (MPa), mêmes définitions que la friction.
+        _pcg = abs(xgt) / max(p.Dt * bague_guide_m * 1.0e6, 1.0e-9)
+        _pcp = abs(xgb) / max(p.Dpis * bague_piston_m * 1.0e6, 1.0e-9)
+        out["p_bag_guide"][i] = _pcg
+        out["p_bag_piston"][i] = _pcp
+        # Coefficient de friction DP4 effectivement appliqué à chaque bague.
+        out["mu_bag_guide"][i] = _mu_bague_dp4(_pcg, abs(state.v_damper), bag_friction)
+        out["mu_bag_piston"][i] = _mu_bague_dp4(_pcp, abs(state.v_damper), bag_friction)
         if drag_brace is not None:
             _db = _drag_brace_step(p.course, state, ftot, tr_lg, drag_brace)
             if _db is not None:
@@ -872,6 +952,26 @@ def run_strait_strut(
         out["e_input"][i] = e_input_total
         out["e_residual"][i] = e_residual
 
+        # Positions géométriques (m, repère sol) pour l'animation. Mêmes points et
+        # mêmes transformations que le moteur avion (cf. StraitStrutSlot).
+        b_sol = R_lg_to_sol @ state.ptB_lg
+        gt_sol = R_lg_to_sol @ state.ptGt_lg
+        gb_sol = R_lg_to_sol @ state.ptGb_lg
+        r_sol = R_lg_to_sol @ state.ptR_lg
+        geom["bx"][i] = b_sol[0]; geom["bz"][i] = b_sol[2]
+        geom["gtx"][i] = gt_sol[0]; geom["gtz"][i] = gt_sol[2]
+        geom["gbx"][i] = gb_sol[0]; geom["gbz"][i] = gb_sol[2]
+        geom["rx"][i] = r_sol[0]; geom["rz"][i] = r_sol[2]
+        geom["ground_z"][i] = 0.0  # sol fixe à z=0 (contact initial roue à unload_radius)
+        geom["wheel_radius"][i] = float(p.unload_radius)  # rayon constant (cf. moteur avion)
+        if drag_brace is not None:
+            # Points solidaires du corps, placés rigidement par rapport à Gb.
+            for key, rel in (("b1", drag_brace["B1"]), ("b2", drag_brace["B2"]),
+                             ("cdb", drag_brace["C"]), ("ddb", drag_brace["D"])):
+                disp = R_lg_to_sol @ np.asarray(rel, dtype=float)
+                geom[key + "x"][i] = gb_sol[0] + float(disp[0])
+                geom[key + "z"][i] = gb_sol[2] + float(disp[2])
+
         if progress_callback is not None and (i % 10 == 0 or i == n_steps):
             progress_callback(i, n_steps)
 
@@ -904,7 +1004,8 @@ def run_strait_strut(
             raise exc
         last_stroke = float(out["trailing_arm_d"][valid - 1])
         out = {k: v[:valid] for k, v in out.items()}
+        geom = {k: v[:valid] for k, v in geom.items()}
         n_steps = valid - 1
         warnings.append(make_overstroke_warning("le train (StraitStrut)", valid * dt, last_stroke, course, exc))
 
-    return EngineOutput(data=out, n_steps=n_steps, warnings=warnings)
+    return EngineOutput(data=out, n_steps=n_steps, warnings=warnings, geometry=geom)

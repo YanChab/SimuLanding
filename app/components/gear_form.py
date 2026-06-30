@@ -129,6 +129,16 @@ _STRUT_SCALAR_FIELDS = [
     ("Longueur bague piston (mm)", "bague_piston"),
     ("Précontrainte joint (Pa)", "seal_precomp_pa"),
 ]
+# Coefficients du modèle DP4 de friction de bague (NLG StraitStrut). μ = ½[μ_p(p) + μ_v(v)],
+# μ_p exp-décroissant en pression, μ_v asymptotique en vitesse. Défauts GGB DP4 lubrifié.
+_BAG_DP4_FIELDS = [
+    ("μ_p0 — μ à pression nulle (-)", "bag_mu_p0"),
+    ("μ_p∞ — μ haute pression (-)", "bag_mu_pinf"),
+    ("p_ref — pression caractéristique (MPa)", "bag_p_ref"),
+    ("μ_v,min — μ à vitesse nulle (-)", "bag_mu_vmin"),
+    ("μ_v,max — μ haute vitesse (-)", "bag_mu_vmax"),
+    ("α — raideur montée vitesse (s/m)", "bag_alpha"),
+]
 # Paramètres propres au Train à lame (leaf spring).
 _LEAF_FIELDS = [
     ("Raideur lame (N/mm)", "lame_raideur"),
@@ -158,8 +168,8 @@ def _num_table(specs, prefix, base, *, key):
     edited = st.data_editor(
         pd.DataFrame(rows),
         column_config={
-            "Paramètre": st.column_config.TextColumn("Paramètre", alignment="right"),
-            "Valeur": st.column_config.NumberColumn("Valeur", width="small", alignment="center", format="%.12g"),
+            "Paramètre": st.column_config.TextColumn("Paramètre"),
+            "Valeur": st.column_config.NumberColumn("Valeur", width="small", format="%.12g"),
         },
         disabled=["Paramètre"],
         hide_index=True,
@@ -319,6 +329,8 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 )
             st.markdown("**Bagues / joint**")
             _num_table(_STRUT_SCALAR_FIELDS, prefix, base_inputs, key=f"{prefix}_strut_tbl")
+            st.markdown("**Friction de bague (DP4)**")
+            _num_table(_BAG_DP4_FIELDS, prefix, base_inputs, key=f"{prefix}_bagdp4_tbl")
         else:
             st.markdown("**Balancier**")
             _num_table([("Inertie balancier Jyy (kg·m²)", "jyy")], prefix, base_inputs, key=f"{prefix}_jyy_tbl")
@@ -391,6 +403,7 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 st.session_state[rkey], hide_index=True, width="stretch",
                 num_rows="dynamic", key=f"{prefix}_rainures_ed",
             )
+            st.session_state[rkey] = rainures_df  # persiste les éditions au changement de page
             _render_bh_section_curve(prefix, base_inputs, rainures_df)
 
     with st.expander("Courbes pneu & adhérence", expanded=False):
@@ -404,6 +417,7 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 st.session_state[tkey], hide_index=True, width="stretch",
                 num_rows="dynamic", key=f"{prefix}_tyre_ed",
             )
+            st.session_state[tkey] = tyre_df  # persiste les éditions au changement de page
         with _c2:
             st.markdown("**Courbe adhérence** (slip → μ)")
             mkey = f"{prefix}_mu"
@@ -413,6 +427,7 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 st.session_state[mkey], hide_index=True, width="stretch",
                 num_rows="dynamic", key=f"{prefix}_mu_ed",
             )
+            st.session_state[mkey] = mu_df  # persiste les éditions au changement de page
 
     with st.expander(f"Conditions de chute (run isolé) — {position_label}", expanded=False):
         st.caption(
@@ -464,14 +479,14 @@ def _build_gear_inputs(prefix, kind, base, points_df, rainures_df, tyre_df, mu_d
                        B=pts["B"], R=pts["R"])
 
     if kind == "strait_strut_drag_brace":
-        strut_scalars = {f: g(f) for _, f in _STRUT_SCALAR_FIELDS}
+        strut_scalars = {f: g(f) for _, f in _STRUT_SCALAR_FIELDS + _BAG_DP4_FIELDS}
         base_db = base if isinstance(base, StraitStrutDragBraceInputs) else default_strait_strut_drag_brace_inputs()
         return replace(base_db, **common, **strut_scalars,
                        Gt=pts["Gt"], Gb=pts["Gb"], R=pts["R"],
                        B1=pts["B1"], B2=pts["B2"], Cdb=pts["C"], Ddb=pts["D"])
 
     if kind == "strait_strut":
-        strut_scalars = {f: g(f) for _, f in _STRUT_SCALAR_FIELDS}
+        strut_scalars = {f: g(f) for _, f in _STRUT_SCALAR_FIELDS + _BAG_DP4_FIELDS}
         # base StraitStrut "pur" (pas la sous-classe drag brace, gérée ci-dessus)
         base_ss = base if (isinstance(base, StraitStrutInputs)
                            and not isinstance(base, StraitStrutDragBraceInputs)) else default_strait_strut_inputs()
@@ -709,6 +724,189 @@ def render_interface_efforts(df, t, label, model_kind, *, naming="isolated", bas
             use_container_width=True, key=f"{kp}_iface_anchor_comp")
 
 
+def render_gear_animation(result, label: str) -> None:
+    """Animation 2D (vue de côté) d'un train isolé, ne traçant **que les points
+    caractéristiques de la configuration active**.
+
+    La configuration est auto-détectée depuis les colonnes de la géométrie
+    enregistrée par le moteur :
+
+    - StraitScrut (jambe droite) : B, Gt, Gb, R (+ B1/B2/C/D si drag brace) ;
+    - TrailingArm (balancier)    : A, B, C, R, S ;
+    - Train à lame               : B, R.
+
+    Toutes les positions sont en mètres dans le repère sol (×1000 → mm pour le
+    tracé). Le sol est fixe à z=0 ; la roue est dessinée avec un rayon « effectif »
+    (= R_z − sol) qui se comprime avec la déflexion du pneu.
+    """
+    import plotly.graph_objects as go
+
+    geom = getattr(result, "geometry", None)
+    if geom is None or getattr(geom, "empty", True) or "temps" not in getattr(geom, "columns", []):
+        st.info(
+            "Animation indisponible : ce résultat ne contient pas de géométrie. "
+            "Relancez la simulation du train (la géométrie est générée au calcul).",
+            icon="ℹ️",
+        )
+        return
+
+    cols = set(geom.columns)
+
+    def arr(name):
+        return geom[name].to_numpy(dtype=float) * 1000.0  # m → mm
+
+    time_s = geom["temps"].to_numpy(dtype=float)
+    n = len(time_s)
+    if n < 2:
+        st.info("Animation indisponible : géométrie trop courte.", icon="ℹ️")
+        return
+    stride = max(1, n // 70)
+    idx = list(range(0, n, stride))
+    if idx[-1] != n - 1:
+        idx.append(n - 1)
+
+    ground = arr("ground_z")
+    rx, rz, wheel_r = arr("rx"), arr("rz"), arr("wheel_radius")
+    bx, bz = arr("bx"), arr("bz")
+
+    is_ss = "gtx" in cols
+    is_ta = "ax" in cols
+    has_db = "b1x" in cols and bool(np.any(geom["b1x"].to_numpy(dtype=float) != 0.0))
+
+    if is_ss:
+        gtx, gtz, gbx, gbz = arr("gtx"), arr("gtz"), arr("gbx"), arr("gbz")
+        kind_label = "Jambe droite (StraitStrut)"
+    elif is_ta:
+        ax_, az_, cx_, cz_ = arr("ax"), arr("az"), arr("cx"), arr("cz")
+        kind_label = "Balancier (TrailingArm)"
+    else:
+        kind_label = "Train à lame (leaf spring)"
+
+    theta = np.linspace(0.0, 2.0 * np.pi, 48)
+    RED, GREY, DARK, ROSE, GREEN = "#8A1A1D", "#878786", "#4A4949", "#B97677", "#1F7A3D"
+
+    if has_db:
+        b1x, b1z, b2x, b2z = arr("b1x"), arr("b1z"), arr("b2x"), arr("b2z")
+        cdx, cdz, ddx, ddz = arr("cdbx"), arr("cdbz"), arr("ddbx"), arr("ddbz")
+
+    def _wheel(i):
+        return go.Scatter(
+            x=rx[i] + wheel_r[i] * np.sin(theta),
+            y=rz[i] + wheel_r[i] * np.cos(theta),
+            mode="lines", line=dict(color=RED, width=3),
+            fill="toself", fillcolor="rgba(138,26,29,0.08)", name="Roue",
+        )
+
+    def _frame_traces(i):
+        traces = []
+        if is_ss:
+            if has_db:
+                # Ancrage isostatique : pas d'encastrement B, mais B1 (rotule) + B2
+                # (linéaire annulaire) + drag brace C–D. Jambe tracée le long de Gt→Gb→R.
+                traces.append(go.Scatter(x=[gtx[i], gbx[i], rx[i]], y=[gtz[i], gbz[i], rz[i]],
+                                         mode="lines", line=dict(color=DARK, width=4), name="Jambe"))
+                traces.append(go.Scatter(
+                    x=[gtx[i], gbx[i], rx[i]], y=[gtz[i], gbz[i], rz[i]],
+                    mode="markers+text", text=["Gt", "Gb", "R"], textposition="top center",
+                    marker=dict(size=8, color=RED), name="Points"))
+                traces.append(go.Scatter(x=[cdx[i], ddx[i]], y=[cdz[i], ddz[i]], mode="lines",
+                                         line=dict(color=GREEN, width=4), name="Drag brace"))
+                traces.append(go.Scatter(x=[b1x[i], b2x[i]], y=[b1z[i], b2z[i]], mode="lines",
+                                         line=dict(color=GREEN, width=2, dash="dot"), name="Trunnion B1-B2"))
+                traces.append(go.Scatter(
+                    x=[b1x[i], b2x[i], cdx[i], ddx[i]], y=[b1z[i], b2z[i], cdz[i], ddz[i]],
+                    mode="markers+text", text=["B1", "B2", "C", "D"], textposition="bottom center",
+                    marker=dict(size=8, color=GREEN), name="Points drag brace"))
+            else:
+                traces.append(go.Scatter(x=[bx[i], rx[i]], y=[bz[i], rz[i]], mode="lines",
+                                         line=dict(color=DARK, width=4), name="Jambe"))
+                traces.append(go.Scatter(x=[gtx[i], gbx[i]], y=[gtz[i], gbz[i]], mode="lines",
+                                         line=dict(color=ROSE, width=3, dash="dot"), name="Guidage"))
+                traces.append(go.Scatter(
+                    x=[bx[i], gtx[i], gbx[i], rx[i]], y=[bz[i], gtz[i], gbz[i], rz[i]],
+                    mode="markers+text", text=["B", "Gt", "Gb", "R"], textposition="top center",
+                    marker=dict(size=8, color=RED), name="Points"))
+        elif is_ta:
+            traces.append(go.Scatter(x=[ax_[i], bx[i], rx[i]], y=[az_[i], bz[i], rz[i]], mode="lines",
+                                     line=dict(color=DARK, width=4), name="Balancier"))
+            traces.append(go.Scatter(x=[cx_[i], ax_[i]], y=[cz_[i], az_[i]], mode="lines",
+                                     line=dict(color=GREY, width=4), name="Amortisseur"))
+            traces.append(go.Scatter(
+                x=[ax_[i], bx[i], cx_[i], rx[i], rx[i]], y=[az_[i], bz[i], cz_[i], rz[i], ground[i]],
+                mode="markers+text", text=["A", "B", "C", "R", "S"], textposition="top center",
+                marker=dict(size=8, color=RED), name="Points"))
+        else:
+            traces.append(go.Scatter(x=[bx[i], rx[i]], y=[bz[i], rz[i]], mode="lines",
+                                     line=dict(color=DARK, width=4), name="Lame"))
+            traces.append(go.Scatter(x=[bx[i], rx[i]], y=[bz[i], rz[i]],
+                                     mode="markers+text", text=["B", "R"], textposition="top center",
+                                     marker=dict(size=8, color=RED), name="Points"))
+        traces.append(_wheel(i))
+        return traces
+
+    xs = [rx - wheel_r, rx + wheel_r]
+    zs = [rz + wheel_r, ground]
+    if not (is_ss and has_db):  # B n'est pas tracé en config drag brace
+        xs.append(bx)
+        zs.append(bz)
+    if is_ss:
+        xs += [gtx, gbx]
+        zs += [gtz, gbz]
+        if has_db:
+            xs += [b1x, b2x, cdx, ddx]
+            zs += [b1z, b2z, cdz, ddz]
+    elif is_ta:
+        xs += [ax_, cx_]
+        zs += [az_, cz_]
+    allx = np.concatenate(xs)
+    allz = np.concatenate(zs)
+    xmin, xmax = float(allx.min()) - 120.0, float(allx.max()) + 120.0
+    zmin = float(min(float(allz.min()), float(ground.min()))) - 60.0
+    zmax = float(allz.max()) + 120.0
+
+    ground_line = go.Scatter(x=[xmin, xmax], y=[float(ground[0]), float(ground[0])],
+                             mode="lines", line=dict(color="#929292", width=2), name="Sol")
+
+    frame_ms = max(1, int(round(float(np.mean(np.diff(time_s[idx])) * 1000.0))))
+
+    def _anim_args(speed):
+        return [None, dict(frame=dict(duration=max(1, int(round(frame_ms / speed))), redraw=True),
+                           fromcurrent=True, transition=dict(duration=0))]
+
+    fig = go.Figure(
+        data=[ground_line] + _frame_traces(0),
+        frames=[go.Frame(data=[ground_line] + _frame_traces(i), name=f"{time_s[i]*1000:.0f}") for i in idx],
+    )
+    fig.update_layout(
+        height=560,
+        xaxis=dict(title="X (mm)", range=[xmin, xmax], constrain="domain", showgrid=True, gridcolor="#E6E6E6"),
+        yaxis=dict(title="Z (mm)", range=[zmin, zmax], scaleanchor="x", scaleratio=1.0, showgrid=True, gridcolor="#E6E6E6"),
+        margin=dict(l=8, r=8, t=30, b=140),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        updatemenus=[dict(
+            type="buttons", showactive=False, x=0.0, y=0.02, xanchor="left", direction="left",
+            buttons=[
+                dict(label="▶ 1x", method="animate", args=_anim_args(1.0)),
+                dict(label="▶ 0.5x", method="animate", args=_anim_args(0.5)),
+                dict(label="▶ 0.25x", method="animate", args=_anim_args(0.25)),
+                dict(label="⏸ Pause", method="animate", args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")]),
+            ],
+        )],
+        sliders=[dict(
+            active=0, x=0.0, len=1.0, y=-0.08, currentvalue=dict(prefix="t = ", suffix=" ms"),
+            steps=[dict(
+                method="animate", label=f"{time_s[i]*1000:.0f}",
+                args=[[f"{time_s[i]*1000:.0f}"], dict(mode="immediate", frame=dict(duration=0, redraw=True), transition=dict(duration=0))],
+            ) for i in idx],
+        )],
+    )
+    st.caption(
+        f"Vue de côté — **{kind_label}**. Seuls les points caractéristiques de la "
+        "configuration active sont tracés. Le sol est fixe ; la roue se comprime avec la déflexion."
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"{label}_gear_anim")
+
+
 def render_full_gear_result(result, label: str) -> None:
     """Affiche le jeu complet de courbes d'un train isolé — mêmes onglets que les
     sections NLG/MLG de la page Résultats avion (efforts, pressions, hydraulique,
@@ -747,12 +945,16 @@ def render_full_gear_result(result, label: str) -> None:
     else:
         _model_kind = "strait_strut_drag_brace" if _has_db else "strait_strut"
     _labels = [
-        "Efforts (temps)", "Effort / course", "Pressions", "Conv. hydraulique",
-        "Course & déflexion", "Accél. & vitesse", "Efforts aux interfaces", "Bilan énergétique",
+        "Animation", "Efforts (temps)", "Effort / course", "Pressions", "Conv. hydraulique",
+        "Course & déflexion", "Ratio cinématique", "Accél. & vitesse", "Efforts aux interfaces",
+        "Bilan énergétique", "Décomposition amortisseur",
     ]
     tabs = st.tabs(_labels)
 
     with tabs[0]:
+        render_gear_animation(result, label)
+
+    with tabs[1]:
         if _req(df, ["Tyre.FTyre (N)", "Reaction sol horizontale (N)", f"{p}.Ftot (N)"], f"{label} - Efforts"):
             st.plotly_chart(_gline(t, [
                 ("Fz (pneu/sol)", df["Tyre.FTyre (N)"]),
@@ -760,14 +962,14 @@ def render_full_gear_result(result, label: str) -> None:
                 ("Effort amortisseur", df[f"{p}.Ftot (N)"]),
             ], f"{label} - Efforts en fonction du temps", "Temps (s)", "Effort (N)"), use_container_width=True)
 
-    with tabs[1]:
+    with tabs[2]:
         if _req(df, [f"{p}.d (m)", "Tyre.FTyre (N)", "Reaction sol horizontale (N)"], f"{label} - Effort/course"):
             st.plotly_chart(_gline(df[f"{p}.d (m)"] * 1000.0, [
                 ("Fz (pneu/sol)", df["Tyre.FTyre (N)"]),
                 ("Fx (horizontal)", df["Reaction sol horizontale (N)"]),
             ], f"{label} - Effort en fonction de la course", "Course amortisseur (mm)", "Effort (N)"), use_container_width=True)
 
-    with tabs[2]:
+    with tabs[3]:
         if _is_leaf:
             st.info("Modèle Train à lame : pas d'hydraulique ni de gaz, donc pas de pressions.", icon="ℹ️")
         else:
@@ -778,7 +980,7 @@ def render_full_gear_result(result, label: str) -> None:
                     ("DeltaPc", df[f"{p}.DeltaPc (bar)"]), ("DeltaPd", df[f"{p}.DeltaPd (bar)"]),
                 ], f"{label} - Pressions en fonction du temps", "Temps (s)", "Pression (bar)"), use_container_width=True)
 
-    with tabs[3]:
+    with tabs[4]:
         if _is_leaf:
             st.info("Modèle Train à lame : pas de boucle hydraulique à converger.", icon="ℹ️")
         elif _req(df, ["Hydrau.Erreur convergence (-)", "Hydrau.Itérations convergence (-)"], f"{label} - Conv. hydraulique"):
@@ -790,14 +992,57 @@ def render_full_gear_result(result, label: str) -> None:
                 "Temps (s)", "Erreur convergence (-)", "Itérations (-)",
             ), use_container_width=True)
 
-    with tabs[4]:
+    with tabs[5]:
         if _req(df, [f"{p}.d (m)", "Tyre.Defl (m)"], f"{label} - Course/déflexion"):
             st.plotly_chart(_gline(t, [
                 ("Course amortisseur (mm)", df[f"{p}.d (m)"] * 1000.0),
                 ("Déflexion pneu (mm)", df["Tyre.Defl (m)"] * 1000.0),
             ], f"{label} - Course et déflexion", "Temps (s)", "Déplacement (mm)"), use_container_width=True)
 
-    with tabs[5]:
+    with tabs[6]:
+        # Ratio cinématique cumulé = course amortisseur / variation de la position
+        # verticale du centre roue (R) par rapport au pivot de la masse suspendue (B).
+        _geom = getattr(result, "geometry", None)
+        if _is_leaf:
+            st.info("Modèle Train à lame : pas d'amortisseur, ratio cinématique non défini.", icon="ℹ️")
+        elif (_geom is None or getattr(_geom, "empty", True)
+              or not {"rz", "bz", "temps"}.issubset(set(getattr(_geom, "columns", [])))):
+            st.info(
+                f"{label} - Ratio cinématique : géométrie (centre roue/pivot) indisponible. "
+                "Relancez la simulation du train (la géométrie est générée au calcul).",
+                icon="ℹ️",
+            )
+        elif _req(df, [f"{p}.d (m)"], f"{label} - Ratio cinématique"):
+            course_mm = (df[f"{p}.d (m)"] * 1000.0).to_numpy(dtype=float)
+            # Centre roue R relatif au pivot masse suspendue B (composante verticale), en mm.
+            wheel_rel = (_geom["rz"].to_numpy(dtype=float) - _geom["bz"].to_numpy(dtype=float)) * 1000.0
+            if len(wheel_rel) != len(course_mm):  # ré-échantillonnage éventuel : aligner sur la base temps
+                wheel_rel = np.interp(
+                    t.to_numpy(dtype=float), _geom["temps"].to_numpy(dtype=float), wheel_rel)
+            delta_wheel = wheel_rel - wheel_rel[0]  # mm : débattement vertical roue / masse susp.
+            # Masque l'origine (course ≈ 0 et Δ ≈ 0 → ratio 0/0) pour éviter les pics.
+            eps = max(0.2, 0.02 * float(np.max(np.abs(delta_wheel)))) if delta_wheel.size else 0.2
+            mask = np.abs(delta_wheel) >= eps
+            if not np.any(mask):
+                st.info(
+                    f"{label} - Ratio cinématique : débattement trop faible pour un ratio significatif.",
+                    icon="ℹ️",
+                )
+            else:
+                ratio = course_mm[mask] / delta_wheel[mask]
+                st.plotly_chart(_gline(
+                    course_mm[mask],
+                    [("Ratio cinématique (course / débattement)", ratio)],
+                    f"{label} - Ratio cinématique",
+                    "Course amortisseur (mm)", "Ratio course / débattement roue (-)",
+                ), use_container_width=True)
+                st.caption(
+                    "Ratio **cumulé** = course amortisseur ÷ variation de la position verticale du "
+                    "centre roue (R) par rapport au pivot de la masse suspendue (B), depuis l'instant "
+                    "initial. Abscisse : course amortisseur."
+                )
+
+    with tabs[7]:
         ys = []
         if "AccMs.RsolZ (m/s²)" in cols:
             ys.append(("Accélération masse susp. (g)", df["AccMs.RsolZ (m/s²)"] / 9.81))
@@ -811,11 +1056,92 @@ def render_full_gear_result(result, label: str) -> None:
         else:
             st.info(f"{label} - Accél./vitesse : colonnes indisponibles.", icon="ℹ️")
 
-    with tabs[6]:
+    with tabs[8]:
         render_interface_efforts(df, t, label, _model_kind, naming="isolated", key_prefix=label)
 
-    with tabs[7]:
+    with tabs[9]:
         _render_energy_balance(df, label)
+
+    with tabs[10]:
+        # Décompose l'effort total amortisseur : hydraulique + pneumatique (ressort
+        # gazeux) + friction(s). Le Train à lame n'a pas de telle décomposition.
+        if _is_leaf:
+            st.info(
+                "Modèle Train à lame : effort de lame (ressort + amortissement), "
+                "sans décomposition hydraulique / pneumatique / friction.",
+                icon="ℹ️",
+            )
+        elif _req(df, [f"{p}.Ftot (N)", f"{p}.Fhyd (N)", f"{p}.FGas (N)", f"{p}.FFriJoi (N)"],
+                  f"{label} - Décomposition amortisseur"):
+            series = [
+                ("Effort total (Ftot)", df[f"{p}.Ftot (N)"]),
+                ("Hydraulique (Fhyd)", df[f"{p}.Fhyd (N)"]),
+                ("Pneumatique / ressort gaz (FGas)", df[f"{p}.FGas (N)"]),
+                ("Friction joints (FFriJoi)", df[f"{p}.FFriJoi (N)"]),
+            ]
+            _bague = f"{p}.FFriBag (N)"  # friction de bague (StraitStrut uniquement)
+            if _bague in cols:
+                series.append(("Friction bague (FFriBag)", df[_bague]))
+            st.plotly_chart(_gline(
+                t, series,
+                f"{label} - Décomposition de l'effort amortisseur",
+                "Temps (s)", "Effort (N)",
+            ), use_container_width=True)
+            st.caption(
+                "Effort total amortisseur = effort **hydraulique** + effort **pneumatique** "
+                "(ressort gazeux) + efforts de **friction** (joints"
+                + (" + bague" if _bague in cols else "") + ")."
+            )
+
+        # Efforts transverses aux bagues de guidage (StraitStrut uniquement) :
+        # ce sont eux qui pilotent la friction de bague FFriBag.
+        _xgt, _xgb = f"{p}.XGt (N)", f"{p}.XGb (N)"
+        if not _is_leaf and _xgt in cols and _xgb in cols:
+            st.markdown("**Efforts transverses aux bagues de guidage**")
+            st.plotly_chart(_gline(
+                t, [
+                    ("Bague haute Gt (XGt)", df[_xgt]),
+                    ("Bague basse Gb (XGb)", df[_xgb]),
+                ],
+                f"{label} - Efforts transverses aux bagues (Gt, Gb)",
+                "Temps (s)", "Effort transverse (N)",
+            ), use_container_width=True)
+            st.caption(
+                "XGt / XGb : réactions transverses (⊥ à l'axe de coulisse Gt-Gb) aux bagues "
+                "haute (Gt, sur la tige) et basse (Gb, sur le fût), équilibre 2D de la tige "
+                "avec décalage du centre roue R. Ces efforts pilotent la friction de bague FFriBag."
+            )
+
+        # Pressions de contact et coefficient de friction de bague (modèle DP4).
+        _pgt, _pgb = f"{p}.PcontactGt (MPa)", f"{p}.PcontactGb (MPa)"
+        _mugt, _mugb = f"{p}.MuGt (-)", f"{p}.MuGb (-)"
+        if not _is_leaf and _pgt in cols and _pgb in cols:
+            st.markdown("**Pressions de contact aux bagues**")
+            st.plotly_chart(_gline(
+                t, [
+                    ("Bague haute Gt (MPa)", df[_pgt]),
+                    ("Bague basse Gb (MPa)", df[_pgb]),
+                ],
+                f"{label} - Pression de contact aux bagues",
+                "Temps (s)", "Pression de contact (MPa)",
+            ), use_container_width=True)
+
+        if not _is_leaf and _mugt in cols and _mugb in cols:
+            st.markdown("**Coefficient de friction de bague — modèle DP4**")
+            st.caption(
+                "μ effectivement appliqué par la simulation (modèle DP4 : décroissance "
+                "exponentielle en pression + montée asymptotique en vitesse). Les "
+                "coefficients DP4 se règlent dans la **page de saisie** de la configuration "
+                "(section « Friction de bague (DP4) »)."
+            )
+            st.plotly_chart(_gline(
+                t, [
+                    ("μ bague haute Gt", df[_mugt]),
+                    ("μ bague basse Gb", df[_mugb]),
+                ],
+                f"{label} - Coefficient de friction de bague (DP4)",
+                "Temps (s)", "Coefficient de friction μ (-)",
+            ), use_container_width=True)
 
     if getattr(result, "warnings", None):
         with st.expander(f"⚠️ {len(result.warnings)} avertissement(s) — {label}"):

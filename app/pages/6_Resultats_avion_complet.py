@@ -346,7 +346,7 @@ def _render_aircraft_animation() -> None:
     mlg_r_has_jb = False  # ancrage jambe/bielle MLG droite
 
     st.caption(
-        "Vue de côté du fuselage, du centre de gravité et des trains. "
+        "Vue de côté du centre de gravité et des trains. "
         "Les points caractéristiques NLG/MLG sont animés à partir du modèle avion quand ils sont disponibles."
     )
 
@@ -370,20 +370,7 @@ def _render_aircraft_animation() -> None:
     mlg_r_x_local = float(aircraft_inputs.layout.mlg_right_station.x) - cg_x0
     mlg_r_z_local = float(aircraft_inputs.layout.mlg_right_station.z) - cg_z0
 
-    x_min_local = min(nlg_x_local, mlg_l_x_local, mlg_r_x_local)
-    x_max_local = max(nlg_x_local, mlg_l_x_local, mlg_r_x_local)
-    body_x_local = np.array([
-        x_min_local - 1100.0,
-        x_min_local - 350.0,
-        x_max_local + 1500.0,
-    ])
-    body_z_local = np.array([80.0, 0.0, -40.0])
-
     cg_z_plot = cg_z_mm.copy()
-
-    body_x_world, body_z_world = _rotate_xz(body_x_local[:, None], body_z_local[:, None], pitch[None, :])
-    body_x_world = body_x_world + cg_x0
-    body_z_world = body_z_world + cg_z_plot
 
     nlg_mount_x, nlg_mount_z = _rotate_xz(np.full(n, nlg_x_local), np.full(n, nlg_z_local), pitch)
     mlg_l_mount_x, mlg_l_mount_z = _rotate_xz(np.full(n, mlg_l_x_local), np.full(n, mlg_l_z_local), pitch)
@@ -473,10 +460,6 @@ def _render_aircraft_animation() -> None:
             mlg_l_has_jb = mlg_l_jb is not None
             mlg_r_has_jb = mlg_r_jb is not None
 
-            body_x_world, body_z_world = _rotate_xz(body_x_local[:, None], body_z_local[:, None], pitch[None, :])
-            body_x_world = body_x_world + cg_x0
-            body_z_world = body_z_world + cg_z_plot
-
             nlg_mount_x, nlg_mount_z = _rotate_xz(np.full(n, nlg_x_local), np.full(n, nlg_z_local), pitch)
             mlg_l_mount_x, mlg_l_mount_z = _rotate_xz(np.full(n, mlg_l_x_local), np.full(n, mlg_l_z_local), pitch)
             mlg_r_mount_x, mlg_r_mount_z = _rotate_xz(np.full(n, mlg_r_x_local), np.full(n, mlg_r_z_local), pitch)
@@ -503,13 +486,6 @@ def _render_aircraft_animation() -> None:
         )
 
     def _frame_traces(i: int) -> list[go.Scatter]:
-        fuselage = go.Scatter(
-            x=body_x_world[:, i],
-            y=body_z_world[:, i],
-            mode="lines",
-            line=dict(color="#8A1A1D", width=8, shape="spline", smoothing=0.7),
-            name="Fuselage",
-        )
         cg_marker = go.Scatter(
             x=[cg_x0],
             y=[cg_z_plot[i]],
@@ -549,7 +525,6 @@ def _render_aircraft_animation() -> None:
                 name="Attaches trains",
             )
             return [
-                fuselage,
                 cg_marker,
                 nlg_leg,
                 mlg_l_leg,
@@ -560,9 +535,17 @@ def _render_aircraft_animation() -> None:
                 mount_points,
             ]
 
+        # En config drag brace, la jambe part du milieu du trunnion B' = (B1+B2)/2
+        # (le point B seul n'est plus représenté). Sinon, du point B.
+        if nlg_has_db:
+            _nlg_leg_top_x = 0.5 * (nlg_b1x[i] + nlg_b2x[i])
+            _nlg_leg_top_z = 0.5 * (nlg_b1z[i] + nlg_b2z[i])
+        else:
+            _nlg_leg_top_x = nlg_bx[i]
+            _nlg_leg_top_z = nlg_bz[i]
         nlg_leg = go.Scatter(
-            x=[nlg_bx[i], nlg_rx[i]],
-            y=[nlg_bz[i], nlg_rz[i]],
+            x=[_nlg_leg_top_x, nlg_rx[i]],
+            y=[_nlg_leg_top_z, nlg_rz[i]],
             mode="lines",
             line=dict(color="#4A4949", width=4),
             name="NLG",
@@ -574,11 +557,21 @@ def _render_aircraft_animation() -> None:
             line=dict(color="#B97677", width=3, dash="dot"),
             name="Guidage NLG",
         )
+        # En config drag brace, le point B coïncide avec le trunnion B1/B2 : on
+        # ne le redessine pas dans les points NLG (sinon doublon avec le drag brace).
+        if nlg_has_db:
+            _nlg_pts_x = [_nlg_leg_top_x, nlg_gtx[i], nlg_gbx[i], nlg_rx[i]]
+            _nlg_pts_z = [_nlg_leg_top_z, nlg_gtz[i], nlg_gbz[i], nlg_rz[i]]
+            _nlg_pts_txt = ["B'", "Gt", "Gb", "R"]
+        else:
+            _nlg_pts_x = [nlg_bx[i], nlg_gtx[i], nlg_gbx[i], nlg_rx[i]]
+            _nlg_pts_z = [nlg_bz[i], nlg_gtz[i], nlg_gbz[i], nlg_rz[i]]
+            _nlg_pts_txt = ["B", "Gt", "Gb", "R"]
         nlg_points = go.Scatter(
-            x=[nlg_bx[i], nlg_gtx[i], nlg_gbx[i], nlg_rx[i]],
-            y=[nlg_bz[i], nlg_gtz[i], nlg_gbz[i], nlg_rz[i]],
+            x=_nlg_pts_x,
+            y=_nlg_pts_z,
             mode="markers+text",
-            text=["B", "Gt", "Gb", "R"],
+            text=_nlg_pts_txt,
             textposition="top center",
             marker=dict(size=8, color="#8A1A1D"),
             name="Points NLG",
@@ -621,7 +614,6 @@ def _render_aircraft_animation() -> None:
             name="Amortisseur MLG droite",
         )
         traces = [
-            fuselage,
             cg_marker,
             nlg_leg,
             nlg_guides,
@@ -671,9 +663,9 @@ def _render_aircraft_animation() -> None:
         return traces
 
     if use_geom:
-        xmin = float(min(body_x_world.min(), nlg_bx.min(), nlg_gtx.min(), nlg_gbx.min(), nlg_rx.min() - nlg_radius_anim.max(), mlg_l_ax.min(), mlg_l_bx.min(), mlg_l_cx.min(), mlg_l_rx.min() - mlg_l_radius_anim.max(), mlg_r_ax.min(), mlg_r_bx.min(), mlg_r_cx.min(), mlg_r_rx.min() - mlg_r_radius_anim.max()) - 120.0)
-        xmax = float(max(body_x_world.max(), nlg_bx.max(), nlg_gtx.max(), nlg_gbx.max(), nlg_rx.max() + nlg_radius_anim.max(), mlg_l_ax.max(), mlg_l_bx.max(), mlg_l_cx.max(), mlg_l_rx.max() + mlg_l_radius_anim.max(), mlg_r_ax.max(), mlg_r_bx.max(), mlg_r_cx.max(), mlg_r_rx.max() + mlg_r_radius_anim.max()) + 120.0)
-        zmax = float(max(body_z_world.max(), cg_z_anim.max(), nlg_bz.max(), nlg_gtz.max(), nlg_gbz.max(), nlg_rz.max() + nlg_radius_anim.max(), mlg_l_az.max(), mlg_l_bz.max(), mlg_l_cz.max(), mlg_l_rz.max() + mlg_l_radius_anim.max(), mlg_r_az.max(), mlg_r_bz.max(), mlg_r_cz.max(), mlg_r_rz.max() + mlg_r_radius_anim.max()) + 180.0)
+        xmin = float(min(nlg_bx.min(), nlg_gtx.min(), nlg_gbx.min(), nlg_rx.min() - nlg_radius_anim.max(), mlg_l_ax.min(), mlg_l_bx.min(), mlg_l_cx.min(), mlg_l_rx.min() - mlg_l_radius_anim.max(), mlg_r_ax.min(), mlg_r_bx.min(), mlg_r_cx.min(), mlg_r_rx.min() - mlg_r_radius_anim.max()) - 120.0)
+        xmax = float(max(nlg_bx.max(), nlg_gtx.max(), nlg_gbx.max(), nlg_rx.max() + nlg_radius_anim.max(), mlg_l_ax.max(), mlg_l_bx.max(), mlg_l_cx.max(), mlg_l_rx.max() + mlg_l_radius_anim.max(), mlg_r_ax.max(), mlg_r_bx.max(), mlg_r_cx.max(), mlg_r_rx.max() + mlg_r_radius_anim.max()) + 120.0)
+        zmax = float(max(cg_z_anim.max(), nlg_bz.max(), nlg_gtz.max(), nlg_gbz.max(), nlg_rz.max() + nlg_radius_anim.max(), mlg_l_az.max(), mlg_l_bz.max(), mlg_l_cz.max(), mlg_l_rz.max() + mlg_l_radius_anim.max(), mlg_r_az.max(), mlg_r_bz.max(), mlg_r_cz.max(), mlg_r_rz.max() + mlg_r_radius_anim.max()) + 180.0)
         zmin = float(min(ground_anim.min() - 60.0, nlg_rz.min() - nlg_radius_anim.max() - 60.0, mlg_l_rz.min() - mlg_l_radius_anim.max() - 60.0, mlg_r_rz.min() - mlg_r_radius_anim.max() - 60.0))
         if nlg_has_db:
             _dbx = np.concatenate([nlg_b1x, nlg_b2x, nlg_cdx, nlg_ddx])
@@ -689,9 +681,9 @@ def _render_aircraft_animation() -> None:
                 xmax = max(xmax, float(_jx.max()) + 120.0)
                 zmax = max(zmax, float(_jz.max()) + 120.0)
     else:
-        xmin = float(min(body_x_world.min(), nlg_wheel_x.min() - nlg_radius, mlg_l_wheel_x.min() - mlg_radius, mlg_r_wheel_x.min() - mlg_radius) - 120.0)
-        xmax = float(max(body_x_world.max(), nlg_wheel_x.max() + nlg_radius, mlg_l_wheel_x.max() + mlg_radius, mlg_r_wheel_x.max() + mlg_radius) + 120.0)
-        zmax = float(max(body_z_world.max(), cg_z_mm.max()) + 180.0)
+        xmin = float(min(nlg_wheel_x.min() - nlg_radius, mlg_l_wheel_x.min() - mlg_radius, mlg_r_wheel_x.min() - mlg_radius) - 120.0)
+        xmax = float(max(nlg_wheel_x.max() + nlg_radius, mlg_l_wheel_x.max() + mlg_radius, mlg_r_wheel_x.max() + mlg_radius) + 120.0)
+        zmax = float(cg_z_mm.max() + 180.0)
         zmin = float(min(ground_mm - 60.0, nlg_wheel_z.min() - nlg_radius - 60.0, mlg_l_wheel_z.min() - mlg_radius - 60.0, mlg_r_wheel_z.min() - mlg_radius - 60.0))
 
     ground_line = go.Scatter(
