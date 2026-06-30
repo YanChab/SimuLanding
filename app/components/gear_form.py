@@ -994,10 +994,27 @@ def render_full_gear_result(result, label: str) -> None:
 
     with tabs[5]:
         if _req(df, [f"{p}.d (m)", "Tyre.Defl (m)"], f"{label} - Course/déflexion"):
-            st.plotly_chart(_gline(t, [
+            _cd_series = [
                 ("Course amortisseur (mm)", df[f"{p}.d (m)"] * 1000.0),
                 ("Déflexion pneu (mm)", df["Tyre.Defl (m)"] * 1000.0),
-            ], f"{label} - Course et déflexion", "Temps (s)", "Déplacement (mm)"), use_container_width=True)
+            ]
+            # Déplacement vertical du centre roue (TrailingArm) : variation de la
+            # position verticale de R par rapport au pivot B (masse suspendue).
+            _croue = "Course centre roue (m)"
+            if is_ta and _croue in cols:
+                _cr = df[_croue]
+                _cd_series.append(
+                    ("Déplacement vertical centre roue (mm)", (_cr - _cr.iloc[0]) * 1000.0)
+                )
+            st.plotly_chart(_gline(
+                t, _cd_series,
+                f"{label} - Course et déflexion", "Temps (s)", "Déplacement (mm)",
+            ), use_container_width=True)
+            if is_ta and _croue in cols:
+                st.caption(
+                    "Déplacement vertical centre roue = variation de la hauteur du centre "
+                    "roue (R) par rapport au pivot B (masse suspendue), depuis l'instant initial."
+                )
 
     with tabs[6]:
         # Ratio cinématique cumulé = course amortisseur / variation de la position
