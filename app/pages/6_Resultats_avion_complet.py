@@ -778,6 +778,29 @@ s5.metric(contact_label, contact_metric)
 t = df["Temps (s)"]
 
 
+def _wheel_center_disp_mm(geo_prefix: str):
+    """Déplacement vertical du centre roue dans le **repère avion**, aligné sur la
+    base de temps ``t`` (mm). On prend ``rz − bz`` (centre roue R relatif au pivot B,
+    tous deux solidaires de la jambe) : la différence **annule le mouvement du
+    fuselage** (heave), contrairement à ``rz`` seul qui est en repère sol. Retourne
+    ``None`` si la géométrie n'est pas disponible."""
+    g = getattr(result, "geometry", None)
+    if g is None or getattr(g, "empty", True):
+        return None
+    rzc, bzc = f"{geo_prefix}_rz", f"{geo_prefix}_bz"
+    if not all(c in g.columns for c in (rzc, bzc, "temps")):
+        return None
+    rdz = g[rzc].to_numpy(dtype=float) - g[bzc].to_numpy(dtype=float)  # m, repère avion
+    disp_mm = (rdz - rdz[0]) * 1000.0
+    return np.interp(t.to_numpy(dtype=float), g["temps"].to_numpy(dtype=float), disp_mm)
+
+
+_mlg_is_ta = (
+    aircraft_inputs is not None
+    and getattr(aircraft_inputs.mlg, "model_kind", "") in ("trailing_arm", "trailing_arm_drag_brace")
+)
+
+
 def _train_kind(train_inputs, base: str) -> str:
     """Configuration du train (parmi les 4 types). On lit ``model_kind`` des
     entrées si disponibles, sinon on retombe sur une détection par colonnes
@@ -1005,10 +1028,15 @@ with tab_mlg:
         if _require_columns([
             "MLG left.d (m)", "MLG left.TyreDefl (m)"
         ], "MLG gauche - Course/déflexion"):
-            st.plotly_chart(_line(t, [
+            _cd_l = [
                 ("Course amortisseur (mm)", df["MLG left.d (m)"] * 1000.0),
                 ("Déflexion pneu (mm)", df["MLG left.TyreDefl (m)"] * 1000.0),
-            ], "MLG gauche - Course et déflexion", "Temps (s)", "Déplacement (mm)"), use_container_width=True)
+            ]
+            _wc_l = _wheel_center_disp_mm("mlg_left") if _mlg_is_ta else None
+            if _wc_l is not None:
+                _cd_l.append(("Déplacement vertical centre roue (mm)", _wc_l))
+            st.plotly_chart(_line(t, _cd_l,
+                "MLG gauche - Course et déflexion", "Temps (s)", "Déplacement (mm)"), use_container_width=True)
 
     with mlg_l_tabs[5]:
         if _require_columns([
@@ -1082,10 +1110,15 @@ with tab_mlg:
         if _require_columns([
             "MLG right.d (m)", "MLG right.TyreDefl (m)"
         ], "MLG droite - Course/déflexion"):
-            st.plotly_chart(_line(t, [
+            _cd_r = [
                 ("Course amortisseur (mm)", df["MLG right.d (m)"] * 1000.0),
                 ("Déflexion pneu (mm)", df["MLG right.TyreDefl (m)"] * 1000.0),
-            ], "MLG droite - Course et déflexion", "Temps (s)", "Déplacement (mm)"), use_container_width=True)
+            ]
+            _wc_r = _wheel_center_disp_mm("mlg_right") if _mlg_is_ta else None
+            if _wc_r is not None:
+                _cd_r.append(("Déplacement vertical centre roue (mm)", _wc_r))
+            st.plotly_chart(_line(t, _cd_r,
+                "MLG droite - Course et déflexion", "Temps (s)", "Déplacement (mm)"), use_container_width=True)
 
     with mlg_r_tabs[5]:
         if _require_columns([
