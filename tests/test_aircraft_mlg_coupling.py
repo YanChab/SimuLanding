@@ -56,3 +56,21 @@ def test_aircraft_mlg_velocity_independent_of_solver_speed_mode():
     )
     # Sanity : le MLG travaille réellement (test non vide).
     assert v_prec > 0.1
+
+
+@pytest.mark.regression
+def test_aircraft_trailing_arm_starts_at_equilibrium():
+    """Le gear TrailingArm de l'avion doit démarrer à son équilibre statique (effort
+    amortisseur ≈ 0), sans pic de butée parasite au premier pas.
+
+    Avant correction, la boucle de stabilisation statique de l'avion omettait le
+    terme de butée : ne convergeant jamais (St·Pg > 0), elle s'arrêtait à d = −1 mm
+    (extension au-delà de la butée) et injectait ~ −38 kN de traction à t = 0.
+    """
+    r = run_simulation(default_aircraft_inputs())  # auto_fast par défaut
+    df = r.full_df if r.full_df is not None else r.df
+    f0 = float(df["MLG left.Ftot (N)"].iloc[0])
+    assert abs(f0) < 1000.0, (
+        f"Effort amortisseur MLG initial anormal : {f0:.0f} N "
+        f"(transitoire d'initialisation / butée parasite ?)."
+    )

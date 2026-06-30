@@ -323,7 +323,12 @@ def _init_trailing_runtime(p: TrailingArmParamsSI) -> _TrailingRuntime:
     for _ in range(100000):
         d -= 1.0e-8
         pg = gas.pressure(d, pgtamp)
-        ftot = p.St * pg
+        # Inclure la butée de fin de course (comme le train isolé, engine.py) :
+        # l'effort gaz seul ne s'annule jamais (St·Pg > 0), donc sans ce terme la
+        # boucle ne converge pas et s'arrête au bout des 100000 itérations à
+        # d = −1.0 mm — une extension au-delà de la butée qui injecte un effort
+        # d'amortisseur parasite (~−39 kN en traction) au tout premier pas.
+        ftot = p.St * pg + _endstop(d, p.course, smooth_len=p.endstop_smooth)
         if abs(ftot) < 1.0:
             break
 

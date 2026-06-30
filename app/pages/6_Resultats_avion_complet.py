@@ -812,6 +812,11 @@ if mlg_seul is not None:
     _tab_labels.append("MLG seul")
 if nlg_seul is not None:
     _tab_labels.append("NLG seul")
+# Onglet de comparaison train isolé ↔ même train dans l'avion complet : présent dès
+# qu'au moins un résultat isolé est disponible en plus du résultat avion.
+_show_cmp = (mlg_seul is not None) or (nlg_seul is not None)
+if _show_cmp:
+    _tab_labels.append("Comparaison")
 _tabs = st.tabs(_tab_labels)
 tab_aircraft, tab_mlg, tab_nlg = _tabs[0], _tabs[1], _tabs[2]
 _seul_idx = 3
@@ -820,6 +825,9 @@ if mlg_seul is not None:
     _seul_idx += 1
 if nlg_seul is not None:
     tab_nlg_seul = _tabs[_seul_idx]
+    _seul_idx += 1
+if _show_cmp:
+    tab_cmp = _tabs[_seul_idx]
 
 with tab_aircraft:
     ac_tabs = st.tabs([
@@ -1183,6 +1191,70 @@ if mlg_seul is not None:
 if nlg_seul is not None:
     with tab_nlg_seul:
         render_full_gear_result(nlg_seul, "NLG seul")
+
+# --- Onglet Comparaison : train isolé ↔ même train dans l'avion complet ---------
+if _show_cmp:
+    with tab_cmp:
+        st.caption(
+            "Superposition du train **isolé** (NLG seul / MLG seul) et du **même train "
+            "dans l'avion complet**, en fonction de la course de l'amortisseur. "
+            "Permet de vérifier la cohérence isolé ↔ couplé (effort sol et effort amortisseur)."
+        )
+
+        def _cmp_chart(title, ac_x, ac_y, seul_x, seul_y, ylab, ac_name, seul_name):
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=seul_x, y=seul_y, mode="lines", name=seul_name))
+            fig.add_trace(go.Scatter(x=ac_x, y=ac_y, mode="lines", name=ac_name))
+            fig.update_layout(
+                title=dict(text=title, y=0.98, yanchor="top"),
+                xaxis_title="Course amortisseur (mm)", yaxis_title=ylab,
+                height=480, margin=dict(l=8, r=8, t=48, b=90),
+                legend=dict(orientation="h", yanchor="top", y=-0.16, xanchor="left", x=0),
+            )
+            return graph_paper(fig)
+
+        def _seul_triplet(sdf):
+            # (course, effort sol, effort amortisseur) selon le type de train isolé.
+            for pre in ("TrailingArm", "StraitStrut", "LeafSpring"):
+                if f"{pre}.d (m)" in sdf.columns and f"{pre}.Ftot (N)" in sdf.columns:
+                    return f"{pre}.d (m)", "Tyre.FTyre (N)", f"{pre}.Ftot (N)"
+            return None
+
+        # L'effort sol (Tyre.FTyre) n'est présent que dans le jeu complet ``full_df``
+        # de l'avion (le ``df`` réduit ne porte pas cette colonne).
+        acdf = result.full_df if getattr(result, "full_df", None) is not None else df
+
+        def _cmp_train(name_pos, ac_prefix, seul_res):
+            ac_d_c = f"{ac_prefix}.d (m)"
+            ac_fz_c = f"{ac_prefix}.Tyre.FTyre (N)"
+            ac_ft_c = f"{ac_prefix}.Ftot (N)"
+            trip = _seul_triplet(seul_res.df)
+            if trip is None or not all(c in acdf.columns for c in (ac_d_c, ac_fz_c, ac_ft_c)):
+                st.info(f"Comparaison {name_pos} indisponible (colonnes manquantes).", icon="ℹ️")
+                return
+            s_d_c, s_fz_c, s_ft_c = trip
+            sdf = seul_res.df
+            ac_d = acdf[ac_d_c] * 1000.0
+            s_d = sdf[s_d_c] * 1000.0
+            st.markdown(f"**{name_pos} — isolé vs avion complet**")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.plotly_chart(_cmp_chart(
+                    f"{name_pos} — Effort sol en fonction de la course",
+                    ac_d, acdf[ac_fz_c], s_d, sdf[s_fz_c],
+                    "Effort sol Fz (N)", f"{name_pos} (avion)", f"{name_pos} seul"),
+                    use_container_width=True)
+            with c2:
+                st.plotly_chart(_cmp_chart(
+                    f"{name_pos} — Effort amortisseur en fonction de la course",
+                    ac_d, acdf[ac_ft_c], s_d, sdf[s_ft_c],
+                    "Effort amortisseur Ftot (N)", f"{name_pos} (avion)", f"{name_pos} seul"),
+                    use_container_width=True)
+
+        if mlg_seul is not None:
+            _cmp_train("MLG", "MLG left", mlg_seul)
+        if nlg_seul is not None:
+            _cmp_train("NLG", "NLG", nlg_seul)
 
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button(
