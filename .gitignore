@@ -17,3 +17,6 @@ _extract/*_out.txt
 
 # Simulations sauvegardées par l'utilisateur
 saved_simulations/
+
+# Claude Code — réglages locaux de session
+.claude/settings.local.json
