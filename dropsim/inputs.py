@@ -1294,6 +1294,47 @@ def _strut_geom_si(inputs: "TrailingArmInputs") -> StraitStrutGeomSI:
     )
 
 
+def strut_inputs_at_attitude(inputs: "StraitStrutInputs", pitch_rad: float, roll_rad: float):
+    """Applique l'assiette de chute (pitch/roll) au StraitStrut **isolé** par
+    ROTATION RIGIDE des points (Gt, Gb, R, B [+ drag brace B1/B2/C/D]) autour du
+    point de contact au sol S, exactement comme le TrailingArm (cf.
+    :func:`dropsim.geometry.rotate_about`, [engine.py] rotation du balancier
+    autour de S).
+
+    L'attitude est ainsi « cuite » dans les points : la géométrie re-dérivée
+    (``_strut_geom_si``) porte le rake correct (signe cohérent avec le moteur
+    avion), et il ne faut **plus** rajouter le pitch/roll à l'exécution.
+
+    Historique : le chemin isolé faisait ``alfap = strut_pitch + pitch`` — pitch
+    appliqué à l'envers (la rotation rigide donne ``strut_pitch − pitch``, cf.
+    moteur avion). Cette rotation des points supprime le problème par
+    construction et généralise proprement au roll.
+
+    À ``pitch = roll = 0`` : rotation identité → ``inputs`` inchangé (cas de
+    référence StraitStrut préservé au bit près).
+    """
+    import numpy as np
+    from .geometry import rotate_about  # local : évite un cycle d'import au chargement
+
+    if abs(pitch_rad) < 1.0e-12 and abs(roll_rad) < 1.0e-12:
+        return inputs
+
+    R = np.array([inputs.R.x, inputs.R.y, inputs.R.z], dtype=float)
+    S = R.copy()
+    S[2] = R[2] - inputs.unload_radius            # contact initial sous la roue (mm)
+
+    def _rot(pt: Point3) -> Point3:
+        v = rotate_about(np.array([pt.x, pt.y, pt.z], dtype=float), S, pitch_rad, roll_rad)
+        return Point3(float(v[0]), float(v[1]), float(v[2]))
+
+    rotated = dict(Gt=_rot(inputs.Gt), Gb=_rot(inputs.Gb), R=_rot(inputs.R), B=_rot(inputs.B))
+    if getattr(inputs, "model_kind", "") == "strait_strut_drag_brace":
+        rotated.update(B1=_rot(inputs.B1), B2=_rot(inputs.B2),
+                       Cdb=_rot(inputs.Cdb), Ddb=_rot(inputs.Ddb))
+    # pitch/roll remis à zéro : l'attitude est désormais portée par les points.
+    return replace(inputs, pitch=0.0, roll=0.0, **rotated)
+
+
 @dataclass
 class AircraftParamsSI:
     """Paramètres avion complet convertis en SI pour le futur moteur global."""

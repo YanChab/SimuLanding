@@ -24,6 +24,7 @@ from .inputs import (
     StraitStrutInputs,
     _leaf_geom_si,
     _strut_geom_si,
+    strut_inputs_at_attitude,
 )
 from .integration_pfd_aircraft import run_aircraft_pfd
 from .integration_pfd_strait import run_strait_strut_pfd
@@ -289,11 +290,14 @@ def run_simulation(
         col_map = OUTPUT_COLUMNS_LS
     elif is_strait_strut:
         ss = inputs  # type: ignore[assignment]
-        # Géométrie de jambe dérivée des POINTS (B, Gt, Gb, R), en SI.
-        geom = _strut_geom_si(ss)
-        # Angles totaux jambe (rad) = structural + avion (déjà en rad via to_si)
-        alfap_rad = geom.strut_pitch + params.pitch
-        alfar_rad = geom.strut_roll + params.roll
+        # Assiette de chute appliquée par ROTATION RIGIDE des points (méthodo
+        # TrailingArm), puis géométrie de jambe re-dérivée des POINTS rotés. Le
+        # rake porte ainsi la bonne assiette (cohérent avec le moteur avion) ;
+        # plus besoin d'ajouter le pitch/roll ici (l'ancien `+ params.pitch`
+        # appliquait l'assiette à l'envers).
+        geom = _strut_geom_si(strut_inputs_at_attitude(ss, params.pitch, params.roll))
+        alfap_rad = geom.strut_pitch
+        alfar_rad = geom.strut_roll
         engine_out = run_strait_strut(
             params,
             progress_callback=progress_callback,
@@ -457,9 +461,10 @@ def run_pfd_simulation(
         return run_aircraft_pfd(inputs, m_arm=m_arm)
     if model_kind == "strait_strut":
         ss = inputs  # type: ignore[assignment]
-        geom = _strut_geom_si(ss)
-        alfap_rad = geom.strut_pitch + params.pitch
-        alfar_rad = geom.strut_roll + params.roll
+        # Assiette par rotation rigide des points (cf. run_simulation).
+        geom = _strut_geom_si(strut_inputs_at_attitude(ss, params.pitch, params.roll))
+        alfap_rad = geom.strut_pitch
+        alfar_rad = geom.strut_roll
         return run_strait_strut_pfd(
             params,
             seal_precomp_pa=geom.seal_precomp_pa,
