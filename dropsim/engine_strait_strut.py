@@ -176,6 +176,13 @@ class StraitStrutLocalState:
     tyre_vx: float
     tyre_depx: float
     tyre_defl_val: float
+    # Hauteur (repère sol) du centre roue au contact initial (déflexion nulle).
+    # Sert de référence pour la déflexion pneu : defl = max(0, ref - R_z). Rend le
+    # départ cohérent avec le moteur avion (contact net à t=0), sans le transitoire
+    # parasite dû au rake/déport de la roue quand on prend `unload_radius` comme
+    # référence brute. Colinéaire sans rake : ref == unload_radius (comportement
+    # inchangé).
+    tyre_defl_ref: float
 
 
 def _bushing_reaction_vectors(tr_lg, ptR_lg, ptGt_lg, ptGb_lg):
@@ -318,7 +325,12 @@ def _init_strait_strut_local_state(
     v_ms_sol = np.array([0.0, 0.0, vz_ms])
     v_ms_lg = R_sol_to_lg @ v_ms_sol
     vz_mns_lg = float(v_ms_lg[2])
-    tyre_defl_val = max(0.0, unload_r - float(ptR_sol[2]))
+    # Le contact initial définit la déflexion nulle : on référence la déflexion sur
+    # la hauteur réelle du centre roue à t=0 (au lieu de `unload_radius` brut), ce
+    # qui annule le transitoire parasite dû au rake/déport de la roue et aligne le
+    # départ sur le moteur avion. Cas colinéaire : ptR_sol[2] == unload_r (inchangé).
+    tyre_defl_ref = float(ptR_sol[2])
+    tyre_defl_val = max(0.0, tyre_defl_ref - float(ptR_sol[2]))
 
     return StraitStrutLocalState(
         ptR_lg=ptR_lg,
@@ -339,6 +351,7 @@ def _init_strait_strut_local_state(
         tyre_vx=0.0,
         tyre_depx=0.0,
         tyre_defl_val=tyre_defl_val,
+        tyre_defl_ref=tyre_defl_ref,
     )
 
 
@@ -452,7 +465,8 @@ def _strait_strut_advance_local_state(
     ptGt_lg = state.ptGt_lg + ms_disp + slide            # bague haute : sur la TIGE
 
     ptR_sol = R_lg_to_sol @ ptR_lg
-    tyre_defl_val = max(0.0, p.unload_radius - float(ptR_sol[2]))
+    # Déflexion référencée sur le contact initial (cf. _init_strait_strut_local_state).
+    tyre_defl_val = max(0.0, state.tyre_defl_ref - float(ptR_sol[2]))
 
     r_eff_val = r_eff(p.unload_radius, state.tyre_defl_val)
     slip = 0.0
@@ -487,6 +501,7 @@ def _strait_strut_advance_local_state(
         tyre_vx=tyre_vx,
         tyre_depx=tyre_depx,
         tyre_defl_val=tyre_defl_val,
+        tyre_defl_ref=state.tyre_defl_ref,
     )
 
 
