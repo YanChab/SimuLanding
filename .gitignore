@@ -20,3 +20,7 @@ saved_simulations/
 
 # Claude Code — réglages locaux de session
 .claude/settings.local.json
+
+# Artefacts d'exécution locale de l'app Streamlit (logs, PID)
+streamlit*.log
+.streamlit_pid

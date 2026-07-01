@@ -158,6 +158,59 @@ def _default_for(kind: str):
     return default_trailing_arm_inputs()
 
 
+def _apply_editor_state(df: pd.DataFrame, state: dict) -> pd.DataFrame:
+    """Replie l'état d'édition d'un ``st.data_editor`` (dict ``edited_rows`` /
+    ``added_rows`` / ``deleted_rows``, indices **positionnels**) dans ``df`` et
+    renvoie la DataFrame résultante (index réinitialisé).
+
+    Fonction **pure** (sans Streamlit) pour être testable unitairement ; c'est le
+    cœur du correctif du bug « saisie prise en compte une fois sur deux »
+    (streamlit#7749) : on applique les éditions à la source *avant* le re-rendu
+    de l'éditeur, au lieu de réinjecter sa sortie au cycle suivant.
+    """
+    out = df.reset_index(drop=True).copy()
+    # 1) Éditions de cellules (positions valides dans la source courante).
+    for ridx, changes in (state.get("edited_rows") or {}).items():
+        pos = int(ridx)
+        if 0 <= pos < len(out):
+            for col, val in changes.items():
+                if col in out.columns:
+                    out.iat[pos, out.columns.get_loc(col)] = val
+    # 2) Suppressions (positions décroissantes pour rester valides).
+    deleted = sorted({int(i) for i in (state.get("deleted_rows") or [])}, reverse=True)
+    if deleted:
+        out = out.drop(index=[p for p in deleted if 0 <= p < len(out)]).reset_index(drop=True)
+    # 3) Ajouts de lignes (colonnes manquantes → NaN, filtrées en aval par dropna).
+    for row in (state.get("added_rows") or []):
+        out.loc[len(out)] = {c: row.get(c) for c in out.columns}
+    return out.reset_index(drop=True)
+
+
+def _fold_editor_edits(skey: str, wkey: str) -> None:
+    """Callback ``on_change`` d'un ``st.data_editor`` : replie les éditions
+    (état sous ``wkey``) dans la DataFrame source (``skey``). Exécuté *avant* le
+    re-rendu, ce qui évite le décalage d'un cycle de streamlit#7749."""
+    state = st.session_state.get(wkey)
+    if not state:
+        return
+    st.session_state[skey] = _apply_editor_state(st.session_state[skey], state)
+
+
+def _editable_df(skey: str, wkey: str, initial_df: pd.DataFrame, **editor_kwargs) -> pd.DataFrame:
+    """``st.data_editor`` robuste dont la **source de vérité** est
+    ``st.session_state[skey]`` (jamais écrasée par la sortie de l'éditeur dans le
+    corps du script). Les éditions sont repliées dans la source par le callback
+    :func:`_fold_editor_edits`. Renvoie la DataFrame courante (= la source)."""
+    if skey not in st.session_state:
+        st.session_state[skey] = initial_df.copy()
+    st.data_editor(
+        st.session_state[skey], key=wkey,
+        on_change=_fold_editor_edits, args=(skey, wkey),
+        **editor_kwargs,
+    )
+    return st.session_state[skey]
+
+
 def _num_table(specs, prefix, base, *, key):
     """Tableau Paramètre/Valeur éditable, écrit dans st.session_state[f'{prefix}_{field}']."""
     rows = []
@@ -184,30 +237,43 @@ def _num_table(specs, prefix, base, *, key):
             st.session_state[f"{prefix}_{field}"] = float(getattr(base, field))
 
 
+@st.cache_data(show_spinner=False)
+def _cached_section_table(dbh_mm: float, diametre_rainure: float, course_mm: float,
+                          rainures: tuple) -> np.ndarray:
+    """Table de section BH (mm²) mise en cache sur ses **entrées primitives**
+    (hashables), pour ne pas recalculer :func:`build_section_table` à chaque
+    rerun tant que la géométrie ne change pas."""
+    import types
+
+    arr = np.array(rainures, dtype=float).reshape(-1, 3) if rainures else np.empty((0, 3))
+    shim = types.SimpleNamespace(
+        Dbh=dbh_mm / 1000.0,                  # m
+        diametre_rainure=diametre_rainure,    # mm (convention metering)
+        course=course_mm / 1000.0,            # m
+        rainures_debut=arr[:, 0],
+        rainures_fin=arr[:, 1],
+        rainures_profondeur=arr[:, 2],
+    )
+    _, tab_sec = build_section_table(shim)
+    return tab_sec * 1.0e6                     # m² → mm²
+
+
 def _render_bh_section_curve(prefix, base_inputs, rainures_df) -> None:
     """Trace la **section cumulée de la butée hydraulique** en fonction de la
     course, recalculée en direct (mêmes formules que le moteur,
-    :func:`build_section_table`) à partir des valeurs courantes des widgets et du
-    tableau des rainures. Se met donc à jour à chaque édition du tableau."""
-    import types
-
+    :func:`build_section_table`, mise en cache) à partir des valeurs courantes
+    des widgets et du tableau des rainures."""
     def _live(field):
         return float(st.session_state.get(f"{prefix}_{field}", getattr(base_inputs, field)))
 
     try:
         cols = ["Début (mm)", "Fin (mm)", "Profondeur (mm)"]
         rdf = rainures_df[cols].apply(pd.to_numeric, errors="coerce").dropna()
-        shim = types.SimpleNamespace(
-            Dbh=_live("Dbh") / 1000.0,            # m
-            diametre_rainure=_live("diametre_rainure"),   # mm (convention metering)
-            course=_live("course") / 1000.0,      # m
-            rainures_debut=rdf["Début (mm)"].to_numpy(dtype=float),
-            rainures_fin=rdf["Fin (mm)"].to_numpy(dtype=float),
-            rainures_profondeur=rdf["Profondeur (mm)"].to_numpy(dtype=float),
+        section_mm2 = _cached_section_table(
+            _live("Dbh"), _live("diametre_rainure"), _live("course"),
+            tuple(map(tuple, rdf.to_numpy(dtype=float).tolist())),
         )
-        _, tab_sec = build_section_table(shim)
-        course_axis_mm = np.arange(len(tab_sec), dtype=float)
-        section_mm2 = tab_sec * 1.0e6
+        course_axis_mm = np.arange(len(section_mm2), dtype=float)
     except Exception as exc:  # géométrie incohérente (Ø rainure nul, etc.)
         st.info(f"Section BH non calculable avec ces valeurs ({exc}).", icon="ℹ️")
         return
@@ -239,9 +305,16 @@ def gear_type_selectbox(position_label: str, prefix: str, current_kind: str) -> 
     return selected
 
 
+@st.fragment
 def render_gear_form(position_label: str, prefix: str, base_inputs):
     """Affiche le sélecteur de type + le formulaire complet et renvoie un objet
-    d'entrées train (StraitStrutInputs|TrailingArmInputs) du type sélectionné."""
+    d'entrées train (StraitStrutInputs|TrailingArmInputs) du type sélectionné.
+
+    Isolé dans un ``st.fragment`` : éditer un champ ne re-exécute que **ce**
+    formulaire (pas toute la page ni l'autre train). L'objet d'entrées construit
+    est aussi publié dans ``st.session_state[f'{prefix}_built']`` afin que le
+    code de lancement (hors fragment) puisse le lire quel que soit le type de
+    rerun (fragment isolé ou rerun complet)."""
     kind = gear_type_selectbox(position_label, prefix, getattr(base_inputs, "model_kind", "trailing_arm"))
 
     # Si le type a changé (ou ne correspond pas), repartir du défaut du type voulu.
@@ -273,19 +346,16 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
         if _is_leaf:
             st.markdown("**Points lame (mm, repère avion, pitch 0°)**")
             _ls_spec = [("B", "B"), ("R", "R")]
-            pkey = f"{prefix}_points"
-            if pkey not in st.session_state:
-                st.session_state[pkey] = pd.DataFrame({
-                    "Point": [lbl for lbl, _ in _ls_spec],
-                    "X": [getattr(base_inputs, a).x for _, a in _ls_spec],
-                    "Y": [getattr(base_inputs, a).y for _, a in _ls_spec],
-                    "Z": [getattr(base_inputs, a).z for _, a in _ls_spec],
-                })
-            points_df = st.data_editor(
-                st.session_state[pkey], hide_index=True, disabled=["Point"],
-                width="stretch", key=f"{prefix}_points_ed",
+            _ls_df = pd.DataFrame({
+                "Point": [lbl for lbl, _ in _ls_spec],
+                "X": [getattr(base_inputs, a).x for _, a in _ls_spec],
+                "Y": [getattr(base_inputs, a).y for _, a in _ls_spec],
+                "Z": [getattr(base_inputs, a).z for _, a in _ls_spec],
+            })
+            points_df = _editable_df(
+                f"{prefix}_points", f"{prefix}_points_ed", _ls_df,
+                hide_index=True, disabled=["Point"], width="stretch",
             )
-            st.session_state[pkey] = points_df
             st.caption(
                 "B = encastrement structure, R = centre roue. La lame agit comme un "
                 "ressort vertical (k) + amortisseur (c) entre B et R. Cf. PFD §6c."
@@ -302,19 +372,16 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 ]
             else:
                 _pt_spec = [("B", "B"), ("Gt", "Gt"), ("Gb", "Gb"), ("R", "R")]
-            pkey = f"{prefix}_points"
-            if pkey not in st.session_state:
-                st.session_state[pkey] = pd.DataFrame({
-                    "Point": [lbl for lbl, _ in _pt_spec],
-                    "X": [getattr(base_inputs, a).x for _, a in _pt_spec],
-                    "Y": [getattr(base_inputs, a).y for _, a in _pt_spec],
-                    "Z": [getattr(base_inputs, a).z for _, a in _pt_spec],
-                })
-            points_df = st.data_editor(
-                st.session_state[pkey], hide_index=True, disabled=["Point"],
-                width="stretch", key=f"{prefix}_points_ed",
+            _pt_df = pd.DataFrame({
+                "Point": [lbl for lbl, _ in _pt_spec],
+                "X": [getattr(base_inputs, a).x for _, a in _pt_spec],
+                "Y": [getattr(base_inputs, a).y for _, a in _pt_spec],
+                "Z": [getattr(base_inputs, a).z for _, a in _pt_spec],
+            })
+            points_df = _editable_df(
+                f"{prefix}_points", f"{prefix}_points_ed", _pt_df,
+                hide_index=True, disabled=["Point"], width="stretch",
             )
-            st.session_state[pkey] = points_df  # persiste les éditions au rerun (lancement)
             if kind == "strait_strut_drag_brace":
                 st.caption(
                     "Gt/Gb = bagues (axe de coulisse), R = centre roue. Ancrage du corps : "
@@ -344,19 +411,16 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
                 ]
             else:
                 _ta_spec = [("B", "B"), ("A", "A"), ("C", "C"), ("R", "R"), ("S", "S")]
-            pkey = f"{prefix}_points"
-            if pkey not in st.session_state:
-                st.session_state[pkey] = pd.DataFrame({
-                    "Point": [lbl for lbl, _ in _ta_spec],
-                    "X": [getattr(base_inputs, a).x for _, a in _ta_spec],
-                    "Y": [getattr(base_inputs, a).y for _, a in _ta_spec],
-                    "Z": [getattr(base_inputs, a).z for _, a in _ta_spec],
-                })
-            points_df = st.data_editor(
-                st.session_state[pkey], hide_index=True, disabled=["Point"],
-                width="stretch", key=f"{prefix}_points_ed",
+            _ta_df = pd.DataFrame({
+                "Point": [lbl for lbl, _ in _ta_spec],
+                "X": [getattr(base_inputs, a).x for _, a in _ta_spec],
+                "Y": [getattr(base_inputs, a).y for _, a in _ta_spec],
+                "Z": [getattr(base_inputs, a).z for _, a in _ta_spec],
+            })
+            points_df = _editable_df(
+                f"{prefix}_points", f"{prefix}_points_ed", _ta_df,
+                hide_index=True, disabled=["Point"], width="stretch",
             )
-            st.session_state[pkey] = points_df  # persiste les éditions au rerun (lancement)
             if kind == "trailing_arm_drag_brace":
                 st.caption(
                     "B/A/C/R/S = balancier+amortisseur (inchangé). Ancrage de la jambe : "
@@ -393,41 +457,32 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
     if not _is_leaf:
         with st.expander("Rainures butée hydraulique", expanded=False):
             _num_table([("Ø rainure (mm)", "diametre_rainure")], prefix, base_inputs, key=f"{prefix}_drain_tbl")
-            rkey = f"{prefix}_rainures"
-            if rkey not in st.session_state:
-                st.session_state[rkey] = pd.DataFrame(
-                    [(r.debut, r.fin, r.profondeur) for r in base_inputs.rainures],
-                    columns=["Début (mm)", "Fin (mm)", "Profondeur (mm)"],
-                )
-            rainures_df = st.data_editor(
-                st.session_state[rkey], hide_index=True, width="stretch",
-                num_rows="dynamic", key=f"{prefix}_rainures_ed",
+            _rain_df = pd.DataFrame(
+                [(r.debut, r.fin, r.profondeur) for r in base_inputs.rainures],
+                columns=["Début (mm)", "Fin (mm)", "Profondeur (mm)"],
             )
-            st.session_state[rkey] = rainures_df  # persiste les éditions au changement de page
+            rainures_df = _editable_df(
+                f"{prefix}_rainures", f"{prefix}_rainures_ed", _rain_df,
+                hide_index=True, width="stretch", num_rows="dynamic",
+            )
             _render_bh_section_curve(prefix, base_inputs, rainures_df)
 
     with st.expander("Courbes pneu & adhérence", expanded=False):
         _c1, _c2 = st.columns(2)
         with _c1:
             st.markdown("**Courbe pneu** (déflexion mm → charge kN)")
-            tkey = f"{prefix}_tyre"
-            if tkey not in st.session_state:
-                st.session_state[tkey] = pd.DataFrame(base_inputs.tyre_curve, columns=["Déflexion (mm)", "Charge (kN)"])
-            tyre_df = st.data_editor(
-                st.session_state[tkey], hide_index=True, width="stretch",
-                num_rows="dynamic", key=f"{prefix}_tyre_ed",
+            tyre_df = _editable_df(
+                f"{prefix}_tyre", f"{prefix}_tyre_ed",
+                pd.DataFrame(base_inputs.tyre_curve, columns=["Déflexion (mm)", "Charge (kN)"]),
+                hide_index=True, width="stretch", num_rows="dynamic",
             )
-            st.session_state[tkey] = tyre_df  # persiste les éditions au changement de page
         with _c2:
             st.markdown("**Courbe adhérence** (slip → μ)")
-            mkey = f"{prefix}_mu"
-            if mkey not in st.session_state:
-                st.session_state[mkey] = pd.DataFrame(base_inputs.mu_curve, columns=["Slip", "μ"])
-            mu_df = st.data_editor(
-                st.session_state[mkey], hide_index=True, width="stretch",
-                num_rows="dynamic", key=f"{prefix}_mu_ed",
+            mu_df = _editable_df(
+                f"{prefix}_mu", f"{prefix}_mu_ed",
+                pd.DataFrame(base_inputs.mu_curve, columns=["Slip", "μ"]),
+                hide_index=True, width="stretch", num_rows="dynamic",
             )
-            st.session_state[mkey] = mu_df  # persiste les éditions au changement de page
 
     with st.expander(f"Conditions de chute (run isolé) — {position_label}", expanded=False):
         st.caption(
@@ -436,7 +491,9 @@ def render_gear_form(position_label: str, prefix: str, base_inputs):
         )
         _num_table(_DROP_FIELDS, prefix, base_inputs, key=f"{prefix}_drop_tbl")
 
-    return _build_gear_inputs(prefix, kind, base_inputs, points_df, rainures_df, tyre_df, mu_df)
+    built = _build_gear_inputs(prefix, kind, base_inputs, points_df, rainures_df, tyre_df, mu_df)
+    st.session_state[f"{prefix}_built"] = built
+    return built
 
 
 def _build_gear_inputs(prefix, kind, base, points_df, rainures_df, tyre_df, mu_df):
@@ -555,20 +612,20 @@ def _render_energy_balance(df, label: str) -> None:
 
     fig = go.Figure()
     if apport is not None:
-        fig.add_trace(go.Scatter(x=t, y=df[apport], mode="lines", name="Apport (à absorber)"))
-    fig.add_trace(go.Scatter(x=t, y=e_diss_tot, mode="lines", name="Dissipée (absorbée déf.)"))
-    fig.add_trace(go.Scatter(x=t, y=e_stock_tot, mode="lines", name="Stockée (ressorts)"))
-    fig.add_trace(go.Scatter(x=t, y=e_kin_tot, mode="lines", name="Cinétique (pièces en mvt)"))
-    fig.add_trace(go.Scatter(x=t, y=somme, mode="lines", name="Somme cin+stock+diss", line=dict(dash="dot")))
+        fig.add_trace(go.Scattergl(x=t, y=df[apport], mode="lines", name="Apport (à absorber)"))
+    fig.add_trace(go.Scattergl(x=t, y=e_diss_tot, mode="lines", name="Dissipée (absorbée déf.)"))
+    fig.add_trace(go.Scattergl(x=t, y=e_stock_tot, mode="lines", name="Stockée (ressorts)"))
+    fig.add_trace(go.Scattergl(x=t, y=e_kin_tot, mode="lines", name="Cinétique (pièces en mvt)"))
+    fig.add_trace(go.Scattergl(x=t, y=somme, mode="lines", name="Somme cin+stock+diss", line=dict(dash="dot")))
     if residual is not None:
-        fig.add_trace(go.Scatter(x=t, y=df[residual], mode="lines", name="Résidu"))
+        fig.add_trace(go.Scattergl(x=t, y=df[residual], mode="lines", name="Résidu"))
     st.plotly_chart(_energy_layout(fig, f"Bilan énergétique — {label}"), use_container_width=True)
 
     with st.expander(f"Détail des réservoirs / dissipations — {label}"):
         fig2 = go.Figure()
         for c in e_cols:
             if c not in (apport, residual):
-                fig2.add_trace(go.Scatter(
+                fig2.add_trace(go.Scattergl(
                     x=t, y=df[c], mode="lines",
                     name=c.replace("Énergie.", "").replace(" (J)", ""),
                 ))
@@ -584,7 +641,9 @@ def _gline(x, ys, title, xlab, ylab, dashes=None):
         # ``dashes`` (optionnel) rend distinguables des courbes qui se superposent
         # (ex. composantes proportionnelles selon la géométrie de la bielle).
         line = dict(dash=dashes[i], width=2.4) if dashes else None
-        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name, line=line))
+        # Scattergl (WebGL) : rendu bien plus rapide côté navigateur pour ces
+        # tracés à nombreux points / nombreuses courbes.
+        fig.add_trace(go.Scattergl(x=x, y=y, mode="lines", name=name, line=line))
     fig.update_layout(
         title=dict(text=title, y=0.98, yanchor="top"),
         xaxis_title=xlab, yaxis_title=ylab, height=520,
@@ -599,9 +658,9 @@ def _gline_dual(x, left, right, title, xlab, left_lab, right_lab):
 
     fig = go.Figure()
     for name, y in left:
-        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name))
+        fig.add_trace(go.Scattergl(x=x, y=y, mode="lines", name=name))
     for name, y in right:
-        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", name=name, yaxis="y2", line=dict(dash="dot")))
+        fig.add_trace(go.Scattergl(x=x, y=y, mode="lines", name=name, yaxis="y2", line=dict(dash="dot")))
     fig.update_layout(
         title=dict(text=title, y=0.98, yanchor="top"),
         xaxis_title=xlab, yaxis=dict(title=left_lab),

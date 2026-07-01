@@ -486,11 +486,18 @@ with _tab_av:
         )
 
 # --- Onglets 3 & 4 : trains (type + jeu complet de paramètres) ------------ #
+# Les formulaires de train sont des ``st.fragment`` (édition isolée, sans rerun
+# global). Ils publient l'objet d'entrées construit dans st.session_state
+# (``ac_nlg_built`` / ``ac_mlg_built``) ; on le lit ensuite pour le lancement, de
+# sorte que la valeur soit disponible même lors d'un rerun de fragment.
 with _tab_nlg:
-    nlg_inputs = render_gear_form("NLG", "ac_nlg", inp.nlg)
+    render_gear_form("NLG", "ac_nlg", inp.nlg)
 
 with _tab_mlg:
-    mlg_inputs = render_gear_form("MLG", "ac_mlg", inp.mlg)
+    render_gear_form("MLG", "ac_mlg", inp.mlg)
+
+nlg_inputs = st.session_state.get("ac_nlg_built") or inp.nlg
+mlg_inputs = st.session_state.get("ac_mlg_built") or inp.mlg
 
 
 def _build_aircraft_inputs():
