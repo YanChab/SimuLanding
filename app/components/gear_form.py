@@ -1032,11 +1032,10 @@ def render_full_gear_result(result, label: str) -> None:
         if _is_leaf:
             st.info("Modèle Train à lame : pas d'hydraulique ni de gaz, donc pas de pressions.", icon="ℹ️")
         else:
-            pcols = [f"{p}.Pc (bar)", f"{p}.Pg (bar)", f"{p}.Pd (bar)", f"{p}.DeltaPc (bar)", f"{p}.DeltaPd (bar)"]
+            pcols = [f"{p}.Pc (bar)", f"{p}.Pg (bar)", f"{p}.Pd (bar)"]
             if _req(df, pcols, f"{label} - Pressions"):
                 st.plotly_chart(_gline(t, [
                     ("Pc", df[f"{p}.Pc (bar)"]), ("Pg", df[f"{p}.Pg (bar)"]), ("Pd", df[f"{p}.Pd (bar)"]),
-                    ("DeltaPc", df[f"{p}.DeltaPc (bar)"]), ("DeltaPd", df[f"{p}.DeltaPd (bar)"]),
                 ], f"{label} - Pressions en fonction du temps", "Temps (s)", "Pression (bar)"), use_container_width=True)
 
     with tabs[4]:

@@ -1002,14 +1002,12 @@ with tab_mlg:
 
     with mlg_l_tabs[2]:
         if _require_columns([
-            "MLG left.Pc (bar)", "MLG left.Pg (bar)", "MLG left.Pd (bar)", "MLG left.DeltaPc (bar)", "MLG left.DeltaPd (bar)"
+            "MLG left.Pc (bar)", "MLG left.Pg (bar)", "MLG left.Pd (bar)"
         ], "MLG gauche - Pressions"):
             st.plotly_chart(_line(t, [
                 ("Pc", df["MLG left.Pc (bar)"]),
                 ("Pg", df["MLG left.Pg (bar)"]),
                 ("Pd", df["MLG left.Pd (bar)"]),
-                ("DeltaPc", df["MLG left.DeltaPc (bar)"]),
-                ("DeltaPd", df["MLG left.DeltaPd (bar)"]),
             ], "MLG gauche - Pressions en fonction du temps", "Temps (s)", "Pression (bar)"), use_container_width=True)
 
     with mlg_l_tabs[3]:
@@ -1084,14 +1082,12 @@ with tab_mlg:
 
     with mlg_r_tabs[2]:
         if _require_columns([
-            "MLG right.Pc (bar)", "MLG right.Pg (bar)", "MLG right.Pd (bar)", "MLG right.DeltaPc (bar)", "MLG right.DeltaPd (bar)"
+            "MLG right.Pc (bar)", "MLG right.Pg (bar)", "MLG right.Pd (bar)"
         ], "MLG droite - Pressions"):
             st.plotly_chart(_line(t, [
                 ("Pc", df["MLG right.Pc (bar)"]),
                 ("Pg", df["MLG right.Pg (bar)"]),
                 ("Pd", df["MLG right.Pd (bar)"]),
-                ("DeltaPc", df["MLG right.DeltaPc (bar)"]),
-                ("DeltaPd", df["MLG right.DeltaPd (bar)"]),
             ], "MLG droite - Pressions en fonction du temps", "Temps (s)", "Pression (bar)"), use_container_width=True)
 
     with mlg_r_tabs[3]:
@@ -1174,14 +1170,12 @@ with tab_nlg:
 
     with nlg_tabs[2]:
         if _require_columns([
-            "NLG.Pc (bar)", "NLG.Pg (bar)", "NLG.Pd (bar)", "NLG.DeltaPc (bar)", "NLG.DeltaPd (bar)"
+            "NLG.Pc (bar)", "NLG.Pg (bar)", "NLG.Pd (bar)"
         ], "NLG - Pressions"):
             st.plotly_chart(_line(t, [
                 ("Pc", df["NLG.Pc (bar)"]),
                 ("Pg", df["NLG.Pg (bar)"]),
                 ("Pd", df["NLG.Pd (bar)"]),
-                ("DeltaPc", df["NLG.DeltaPc (bar)"]),
-                ("DeltaPd", df["NLG.DeltaPd (bar)"]),
             ], "NLG - Pressions en fonction du temps", "Temps (s)", "Pression (bar)"), use_container_width=True)
 
     with nlg_tabs[3]:
