@@ -732,7 +732,14 @@ class StraitStrutSlot:
             "xgt": xgt,
             "xgb": xgb,
             "accms": asup,
-            "accmns": (-ftot + tyre_ftyre - p.unsprung_mass * G) / p.unsprung_mass,
+            # Accélération de tige le long de l'AXE de coulisse (cohérente avec la
+            # dynamique intégrée et avec le moteur isolé engine_strait_strut.py) :
+            # réaction sol projetée sur l'axe (tr_lg[2]) et poids projeté. L'ancienne
+            # formule utilisait le Fz vertical brut → sortie incohérente avec vitmns
+            # (qui est axiale) pour une jambe inclinée.
+            "accmns": (-ftot + float(tr_lg[2])
+                       - float((R_sol_to_lg_step @ np.array([0.0, 0.0, p.unsprung_mass * G]))[2]))
+                      / p.unsprung_mass,
             "vitmns": adv.vz_mns_lg,
             "depmns": adv.z_mns_lg,
             "tors_res_x": fx_cell,
