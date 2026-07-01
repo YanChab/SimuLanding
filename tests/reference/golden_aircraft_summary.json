@@ -1,23 +1,23 @@
 {
   "nominal": {
     "summary": {
-      "Course max NLG (mm)": 74.32401544640919,
-      "Course max MLG gauche (mm)": 168.87371930244234,
-      "Course max MLG droite (mm)": 168.87371930244234,
-      "Effort vertical total max Fz (N)": 100613.81332021067,
+      "Course max NLG (mm)": 74.1967363662367,
+      "Course max MLG gauche (mm)": 168.8856597912276,
+      "Course max MLG droite (mm)": 168.8856597912276,
+      "Effort vertical total max Fz (N)": 100581.83048732814,
       "Moment de tangage max (N.m)": 97940.96471224088,
-      "Accélération CG max (g)": 3.7725000334438596,
+      "Accélération CG max (g)": 3.7711959423987014,
       "Nombre de pas": 10000
     },
     "final": {
-      "Aircraft.CG.z (m)": 0.14252395279593708,
-      "Aircraft.CG.vz (m/s)": 0.548076956652777,
-      "Aircraft.Pitch (rad)": 0.00036107291672508635,
-      "Aircraft.PitchRate (rad/s)": 0.011474391056183577,
+      "Aircraft.CG.z (m)": 0.14259980521998306,
+      "Aircraft.CG.vz (m/s)": 0.5484205954982959,
+      "Aircraft.Pitch (rad)": 0.00036531660089950374,
+      "Aircraft.PitchRate (rad/s)": 0.01148471819873665,
       "Aircraft.Fz total (N)": -0.01999999999999602,
       "NLG.d (m)": 0.0,
-      "MLG left.d (m)": 0.018019207150012262,
-      "MLG right.d (m)": 0.018019207150012262
+      "MLG left.d (m)": 0.018026235333103657,
+      "MLG right.d (m)": 0.018026235333103657
     },
     "columns": [
       "Temps (s)",

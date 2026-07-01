@@ -314,9 +314,23 @@ def _init_strait_strut_local_state(
     ptGb_lg = np.array([0.0, 0.0, unload_r + h_guide_bot_z_m])
     ptB_lg = np.array([b_offset_m[0], b_offset_m[1], unload_r + h_pivot_z_m])
 
-    k_endstop = 1.0e8
-    pg_init = gas.pressure(0.0, p.Pinitbp)
-    d0 = -pg_init * p.St / k_endstop
+    # Stabilisation statique : à pleine extension, la précharge gaz (St·Pg) est
+    # reprise par la BUTÉE DE DÉTENTE (top-out). On cherche itérativement la course
+    # d'équilibre d0 (< 0, tige contre la butée) telle que St·pg(d0) + endstop(d0)
+    # ≈ 0 — exactement comme le TrailingArm (engine.py) et le moteur avion.
+    # L'ancienne formule linéaire d0 = -St·pg/k échouait à cause du LISSAGE de la
+    # butée (effort quadratique près de 0) : la précharge (~St·Pinitbp ≈ 500 N)
+    # n'était pas reprise → la tige partait en extension au 1er pas.
+    pgtamp = p.Pinitbp
+    d0 = 0.0
+    pg_init = gas.pressure(0.0, pgtamp)
+    ftot0 = p.St * pg_init
+    for _ in range(100000):
+        d0 -= 1.0e-8
+        pg_init = gas.pressure(d0, pgtamp)
+        ftot0 = p.St * pg_init + _endstop(d0, p.course, smooth_len=p.endstop_smooth)
+        if abs(ftot0) < 1.0:
+            break
     ptB_lg[2] -= d0
     ptGb_lg[2] -= d0
 
@@ -346,7 +360,7 @@ def _init_strait_strut_local_state(
         delta_pc=0.0,
         delta_pd=0.0,
         pg_prev=pg_init,
-        ftot=p.St * pg_init + _endstop(float(d0), p.course, smooth_len=p.endstop_smooth),
+        ftot=ftot0,
         tyre_omega=0.0,
         tyre_vx=0.0,
         tyre_depx=0.0,
